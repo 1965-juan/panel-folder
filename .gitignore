@@ -1,0 +1,4 @@
+__pycache__/
+datos/
+.odoo_key
+*.pyc

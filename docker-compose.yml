@@ -1,0 +1,20 @@
+services:
+  panel-folder:
+    build: .
+    image: panel-folder:latest
+    container_name: panel-folder
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      ODOO_URL: "https://nextdoo-sh-foldercastellon.odoo.com"
+      ODOO_DB: "nextdoo-sh-foldercastellon-main-31286005"
+      ODOO_KEY_FILE: "/data/clave_panel.txt"
+      PANEL_USERS: "juan,almacen"
+      PANEL_USER_COMPANIES: "almacen=DISTRIPLUS;juan=*"
+      PANEL_REPO: "1965-juan/panel-folder"
+      PANEL_BRANCH: "main"
+      PANEL_GITHUB_TOKEN_FILE: "/data/token_github.txt"
+      TZ: "Europe/Madrid"
+    volumes:
+      - ./datos:/data

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Folder</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside class="side">
+  <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
+  <nav>
+    <a class="on" href="#ventas">Ventas</a>
+    <a class="off" title="Próximamente">Panel AC</a>
+    <a class="off" title="Próximamente">Compras y Mayte</a>
+    <a class="off" title="Próximamente">Avisos</a>
+    <a class="off" title="Próximamente">Artículos</a>
+    <a class="off" title="Próximamente">Inventarios</a>
+  </nav>
+  <div class="side-foot">
+    <button id="upd" class="upd" hidden>Actualizar panel</button>
+    <span id="who"></span> · <a href="/salir">Salir</a><br><small id="ver"></small>
+  </div>
+</aside>
+
+<main>
+  <header class="top">
+    <h1>Ventas</h1>
+    <input id="q" type="search" placeholder="Buscar cliente…" autocomplete="off">
+    <select id="company"><option value="all">Todas las empresas</option></select>
+    <button id="reload" title="Actualizar">↻</button>
+  </header>
+  <div id="demo" class="demo" hidden>Modo demostración: datos inventados, no es tu Odoo.</div>
+  <div id="err" class="err" hidden></div>
+
+  <section class="kpis">
+    <div class="kpi k-pre"><span>Presupuestos vivos</span><b id="k-pre">–</b><small id="k-pre-e"></small></div>
+    <div class="kpi k-ped"><span>Pedidos por servir</span><b id="k-ped">–</b><small id="k-ped-e"></small></div>
+    <div class="kpi k-alb"><span>Servido sin facturar</span><b id="k-alb">–</b><small id="k-alb-e"></small></div>
+    <div class="kpi k-fac"><span>Pendiente de cobro</span><b id="k-fac">–</b><small id="k-fac-e"></small></div>
+  </section>
+
+  <section class="board">
+    <div class="col" data-k="presupuestos"><h2>Presupuestos <span class="n"></span></h2>
+      <button class="toggle" id="tgcad">Ver caducados (<span id="ncad">0</span>)</button>
+      <div class="cards"></div><div class="cards cad" hidden></div></div>
+    <div class="col" data-k="pedidos"><h2>Pedidos <span class="n"></span></h2><p class="hint">Confirmados, sin servir del todo</p><div class="cards"></div></div>
+    <div class="col" data-k="albaranes"><h2>Albaranes <span class="n"></span></h2><p class="hint">Servidos, pendientes de facturar</p><div class="cards"></div></div>
+    <div class="col" data-k="facturas"><h2>Facturas <span class="n"></span></h2><p class="hint">Pendientes de cobro</p><div class="cards"></div></div>
+  </section>
+</main>
+
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-in">
+    <button class="x" id="close">×</button>
+    <h3 id="d-title"></h3>
+    <p id="d-sub" class="muted"></p>
+    <a id="d-odoo" target="_blank" rel="noopener" class="btn">Abrir en Odoo</a>
+    <h4>Líneas</h4>
+    <table id="d-lines"><thead><tr><th>Artículo</th><th>Cant.</th><th>Servido</th><th>Precio</th><th>Subtotal</th></tr></thead><tbody></tbody></table>
+    <h4>Historial</h4>
+    <ul id="d-hist"></ul>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

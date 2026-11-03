@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Folder · Entrar</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+<form class="login-card" method="post" action="/entrar">
+  <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
+  <label>Usuario
+    <select name="usuario">{{opts}}</select>
+  </label>
+  <label>Contraseña
+    <input type="password" name="clave" autocomplete="current-password" required>
+  </label>
+  <p class="login-note">{{aviso}}</p>
+  <p class="login-error">{{error}}</p>
+  <button type="submit">Entrar</button>
+</form>
+</body>
+</html>
