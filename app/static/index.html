@@ -10,7 +10,8 @@
 <aside class="side">
   <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
   <nav>
-    <a class="on" href="#ventas">Ventas</a>
+    <a class="on" href="#ventas" data-v="ventas">Ventas</a>
+    <a href="#web" data-v="web">Web <span class="nb" id="nb-web" hidden></span></a>
     <a href="/presupuestos">Presupuestos</a>
     <a class="off" title="Próximamente">Panel AC</a>
     <a class="off" title="Próximamente">Compras y Mayte</a>
@@ -26,7 +27,7 @@
 
 <main>
   <header class="top">
-    <h1>Ventas</h1>
+    <h1 id="h1">Ventas</h1>
     <input id="q" type="search" placeholder="Buscar cliente…" autocomplete="off">
     <select id="company"><option value="all">Todas las empresas</option></select>
     <button id="reload" title="Actualizar">↻</button>
@@ -34,6 +35,20 @@
   <div id="demo" class="demo" hidden>Modo demostración: datos inventados, no es tu Odoo.</div>
   <div id="err" class="err" hidden></div>
 
+  <section id="v-web" hidden>
+    <section class="kpis kpis3">
+      <div class="kpi k-web"><span>Pedidos web · 60 días</span><b id="kw-ped">–</b><small id="kw-ped-e"></small></div>
+      <div class="kpi k-pre"><span>Carritos abandonados · 30 días</span><b id="kw-car">–</b><small id="kw-car-e"></small></div>
+      <div class="kpi k-ped"><span>Solicitudes por formulario</span><b id="kw-sol">–</b><small id="kw-sol-e"></small></div>
+    </section>
+    <section class="board board3">
+      <div class="col" data-k="w-sol"><h2>Solicitudes web <span class="n"></span></h2><p class="hint">Formulario de contacto, sin spam</p><div class="cards"></div></div>
+      <div class="col" data-k="w-ped"><h2>Pedidos web <span class="n"></span></h2><p class="hint">Confirmados o enviados</p><div class="cards"></div></div>
+      <div class="col" data-k="w-car"><h2>Carritos abandonados <span class="n"></span></h2><p class="hint">Se quedaron sin terminar</p><div class="cards"></div></div>
+    </section>
+  </section>
+
+  <section id="v-ventas">
   <section class="kpis">
     <div class="kpi k-pre"><span>Presupuestos vivos</span><b id="k-pre">–</b><small id="k-pre-e"></small></div>
     <div class="kpi k-ped"><span>Pedidos por servir</span><b id="k-ped">–</b><small id="k-ped-e"></small></div>
@@ -48,6 +63,7 @@
     <div class="col" data-k="pedidos"><h2>Pedidos <span class="n"></span></h2><p class="hint">Confirmados, sin servir del todo</p><div class="cards"></div></div>
     <div class="col" data-k="albaranes"><h2>Albaranes <span class="n"></span></h2><p class="hint">Servidos, pendientes de facturar</p><div class="cards"></div></div>
     <div class="col" data-k="facturas"><h2>Facturas <span class="n"></span></h2><p class="hint">Pendientes de cobro</p><div class="cards"></div></div>
+  </section>
   </section>
 </main>
 

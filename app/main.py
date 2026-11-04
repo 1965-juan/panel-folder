@@ -181,7 +181,7 @@ def short_company(name):
 
 
 SO_FIELDS = ["name", "partner_id", "date_order", "validity_date", "amount_total", "state",
-             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref"]
+             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref", "website_id"]
 
 
 def so_card(r, kind):
@@ -195,6 +195,7 @@ def so_card(r, kind):
         "cid": r["company_id"][0] if r.get("company_id") else None,
         "estado": kind, "entrega": r.get("delivery_status") or "",
         "su_ref": r.get("client_order_ref") or "",
+        "web": bool(r.get("website_id")),
     }
 
 
@@ -282,6 +283,67 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
 @app.get("/api/salud")
 def salud():
     return {"ok": True, "demo": DEMO}
+
+
+# ---------- módulo Web ----------
+SPAM_RE = re.compile(r"\$|https?://|telegra|xss|<script|crypto|bitcoin|casino|earn|[\u0400-\u04FF]", re.I)
+
+
+def _lead_fields(desc):
+    d = re.sub(r"<[^>]+>", " ", desc or "")
+    d = re.sub(r"\s+", " ", d).strip()
+    svc = re.search(r"lf_service : (.*?)(?: lf_|$)", d)
+    msg = re.search(r"lf_message : (.*)$", d)
+    return (svc.group(1).strip() if svc else ""), (msg.group(1).strip() if msg else d[:400])
+
+
+@app.get("/api/web")
+def api_web(request: Request):
+    u = current_user(request)
+
+    def run():
+        cids, cd = scope(u, "all")
+        since = (dt.date.today() - dt.timedelta(days=60)).isoformat()
+        pedidos = odoo.search_read("sale.order", cd + [("website_id", "!=", False), ("state", "in", ["sent", "sale"]),
+                                                         ("date_order", ">=", since)],
+                                   ["name", "partner_id", "date_order", "amount_total", "state", "company_id"],
+                                   cids, limit=100, order="date_order desc")
+        carritos = odoo.search_read("sale.order", cd + [("website_id", "!=", False), ("state", "=", "draft"),
+                                                          ("amount_total", ">", 0),
+                                                          ("date_order", ">=", (dt.date.today() - dt.timedelta(days=30)).isoformat())],
+                                    ["name", "partner_id", "date_order", "amount_total", "order_line", "company_id"],
+                                    cids, limit=100, order="date_order desc")
+        line_ids = [i for c in carritos for i in c.get("order_line", [])][:500]
+        lines = odoo.search_read("sale.order.line", [("id", "in", line_ids)], ["order_id", "name", "product_uom_qty"], cids) if line_ids else []
+        by_order = {}
+        for l in lines:
+            by_order.setdefault(l["order_id"][0], []).append(f'{l["product_uom_qty"]:g} × {l["name"].splitlines()[0][:60]}')
+        leads = odoo.search_read("crm.lead", [("medium_id.name", "=", "Website"),
+                                              ("create_date", ">=", (dt.date.today() - dt.timedelta(days=120)).isoformat())],
+                                 ["contact_name", "partner_name", "email_from", "phone", "description", "create_date",
+                                  "stage_id", "user_id"], cids, limit=200, order="create_date desc")
+        sol, spam = [], 0
+        for l in leads:
+            svc, msg = _lead_fields(l.get("description"))
+            if SPAM_RE.search(" ".join([msg, l.get("contact_name") or "", l.get("email_from") or ""])):
+                spam += 1
+                continue
+            sol.append({"id": l["id"], "fecha": (l.get("create_date") or "")[:16], "nombre": l.get("contact_name") or l.get("partner_name") or "",
+                        "email": l.get("email_from") or "", "telefono": l.get("phone") or "", "servicio": svc, "mensaje": msg,
+                        "etapa": l["stage_id"][1] if l.get("stage_id") else "",
+                        "asignado": l["user_id"][1] if l.get("user_id") else ""})
+        anon = lambda p: (not p) or "public user" in p[1].lower()
+        return {
+            "pedidos": [{"id": o["id"], "ref": o["name"], "cliente": o["partner_id"][1] if o.get("partner_id") else "",
+                         "fecha": (o.get("date_order") or "")[:10], "total": o.get("amount_total") or 0, "estado": o["state"]}
+                        for o in pedidos],
+            "carritos": [{"id": o["id"], "ref": o["name"], "cliente": "Visitante sin identificar" if anon(o.get("partner_id")) else o["partner_id"][1],
+                          "conocido": not anon(o.get("partner_id")), "fecha": (o.get("date_order") or "")[:16],
+                          "total": o.get("amount_total") or 0, "lineas": by_order.get(o["id"], [])} for o in carritos],
+            "solicitudes": sol, "spam": spam,
+        }
+
+    return guard(run)
 
 
 # ---------- módulo Presupuestos ----------

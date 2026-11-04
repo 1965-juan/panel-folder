@@ -82,7 +82,8 @@ class DemoOdoo:
                     "delivery_status": ["pending", "partial", "full", "full", "pending"][i % 5] if st == "sale" else False,
                     "invoice_status": ["no", "to invoice", "to invoice", "invoiced", "no"][i % 5] if st == "sale" else "no",
                     "company_id": [1 + i % 3, self.companies[i % 3]["name"]],
-                    "user_id": [2, "Dep. Ventas"], "client_order_ref": "",
+                    "user_id": [2, "Dep. Ventas"], "client_order_ref": "", "website_id": [1, "Web"] if i % 4 == 1 else False,
+                    "order_line": [1],
                 })
             return rows
         if model == "account.move":
@@ -96,8 +97,14 @@ class DemoOdoo:
                 "invoice_origin": f"S0{2782 + i}",
             } for i in range(6)]
         if model == "sale.order.line":
-            return [{"id": 1, "product_id": [1, "[115460101] Bolígrafo BIC Cristal azul"], "name": "Bolígrafo BIC Cristal azul",
+            return [{"id": 1, "order_id": [101, "S02781"], "product_id": [1, "[115460101] Bolígrafo BIC Cristal azul"], "name": "Bolígrafo BIC Cristal azul",
                      "product_uom_qty": 50, "qty_delivered": 0, "qty_invoiced": 0, "price_unit": 0.32, "price_subtotal": 16.0}]
+        if model == "crm.lead":
+            return [{"id": 1, "contact_name": "Pilar Forés", "email_from": "pilar@example.com", "phone": "600000000",
+                     "description": "lf_service : Regalos de empresa lf_message : Necesito 50 agendas con logo", "create_date": d(-3) + " 10:00:00",
+                     "stage_id": [1, "New"], "user_id": False},
+                    {"id": 2, "contact_name": "RichardDiers", "email_from": "x@spam.com", "description": "lf_message : earn $50,000 https://telegra.ph",
+                     "create_date": d(-1) + " 10:00:00", "stage_id": [1, "New"], "user_id": False}]
         if model == "product.product":
             return [{"id": 11, "default_code": "115460101", "name": "Bolígrafo BIC Cristal azul", "lst_price": 0.45, "product_tmpl_id": [21, "x"]},
                     {"id": 12, "default_code": "20829", "name": "Gorra Karola", "lst_price": 2.9, "product_tmpl_id": [22, "x"]}]

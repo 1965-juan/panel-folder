@@ -16,7 +16,7 @@ function showErr(msg) { const e = $('#err'); e.textContent = msg; e.hidden = !ms
 
 function card(c) {
   const d = document.createElement('div');
-  d.className = 'card ' + (c.estado || '') + (c.vencida ? ' vencida' : '');
+  d.className = 'card ' + (c.estado || '') + (c.vencida ? ' vencida' : '') + (c.web ? ' web' : '');
   const right = c.model === 'account.move'
     ? `<b>${eur(c.pendiente)}</b>${c.pendiente !== c.total ? `<small> de ${eur(c.total)}</small>` : ''}`
     : `<b>${eur(c.total)}</b>`;
@@ -28,6 +28,7 @@ function card(c) {
   d.innerHTML = `<div class="c1"><span class="ref"></span>${right}</div>
     <div class="cli"></div><div class="c3"><span class="emp"></span><span>${foot}</span></div>`;
   d.querySelector('.ref').textContent = c.ref;
+  if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
   d.onclick = () => openDetail(c);
@@ -99,9 +100,50 @@ $('#upd').onclick = async () => {
   const wait = async () => { try { const r = await fetch('/api/salud'); if (r.ok) return location.reload(); } catch (e) {} setTimeout(wait, 2000); };
   setTimeout(wait, 5000);
 };
+/* ---------- vista Web ---------- */
+function simple(html, href) {
+  const d = document.createElement('a'); d.className = 'card wcard'; d.href = href; d.target = '_blank'; d.rel = 'noopener';
+  d.innerHTML = html; return d;
+}
+const escH = t => String(t ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+function fillW(k, list, mk) {
+  const box = document.querySelector(`.col[data-k="${k}"] .cards`); box.innerHTML = '';
+  if (!list.length) box.innerHTML = '<p class="empty">Nada por aquí</p>';
+  list.forEach(x => box.appendChild(mk(x)));
+  document.querySelector(`.col[data-k="${k}"] .n`).textContent = list.length;
+}
+async function loadWeb(badgeOnly) {
+  try {
+    const d = await api('/api/web');
+    const nuevos = d.solicitudes.filter(s => !s.asignado).length;
+    const nb = $('#nb-web'); nb.textContent = nuevos; nb.hidden = !nuevos;
+    if (badgeOnly) return;
+    $('#kw-ped').textContent = d.pedidos.length; $('#kw-ped-e').textContent = eur(d.pedidos.reduce((a, c) => a + c.total, 0));
+    $('#kw-car').textContent = d.carritos.length; $('#kw-car-e').textContent = eur(d.carritos.reduce((a, c) => a + c.total, 0)) + ' · ' + d.carritos.filter(c => c.conocido).length + ' de clientes conocidos';
+    $('#kw-sol').textContent = d.solicitudes.length; $('#kw-sol-e').textContent = nuevos + ' sin atender · ' + d.spam + ' de spam descartadas';
+    fillW('w-sol', d.solicitudes, s => simple(`<div class="c1"><span class="ref">${escH(s.nombre || 'Sin nombre')}</span>${!s.asignado ? '<span class="tag-new">SIN ATENDER</span>' : ''}</div>
+      <div class="cli">${escH(s.servicio)}</div><div class="msg">${escH(s.mensaje)}</div>
+      <div class="c3"><span>${escH([s.email, s.telefono].filter(Boolean).join(' · '))}</span><span>${fdate(s.fecha)}</span></div>`, `${ODOO}/odoo/crm.lead/${s.id}`));
+    fillW('w-ped', d.pedidos, o => simple(`<div class="c1"><span class="ref">${escH(o.ref)}</span><span class="tag-web">WEB</span><b>${eur(o.total)}</b></div>
+      <div class="cli">${escH(o.cliente)}</div><div class="c3"><span>${o.estado === 'sale' ? 'Confirmado' : 'Pendiente de confirmar'}</span><span>${fdate(o.fecha)}</span></div>`, `${ODOO}/odoo/sale.order/${o.id}`));
+    fillW('w-car', d.carritos, o => simple(`<div class="c1"><span class="ref">${escH(o.cliente)}</span><b>${eur(o.total)}</b></div>
+      <div class="msg">${o.lineas.map(escH).join('<br>')}</div><div class="c3"><span>${escH(o.ref)}</span><span>${fdate(o.fecha)}</span></div>`, `${ODOO}/odoo/sale.order/${o.id}`));
+  } catch (e) { showErr(e.message); }
+}
+function route() {
+  const v = location.hash === '#web' ? 'web' : 'ventas';
+  document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas';
+  $('#h1').textContent = v === 'web' ? 'Web' : 'Ventas';
+  $('#q').hidden = $('#company').hidden = v === 'web';
+  if (v === 'web') loadWeb(); else load();
+}
+window.addEventListener('hashchange', route);
+setInterval(() => loadWeb(true), 5 * 60 * 1000);
+
 $('#close').onclick = () => $('#drawer').hidden = true;
 $('#drawer').onclick = e => { if (e.target.id === 'drawer') $('#drawer').hidden = true; };
-$('#reload').onclick = load;
+$('#reload').onclick = () => route();
 $('#tgcad').onclick = () => { const b = document.querySelector('.cards.cad'); b.hidden = !b.hidden; };
 let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 400); };
 $('#company').onchange = e => { company = e.target.value; try { localStorage.setItem('pf_company', company); } catch (x) {} load(); };
@@ -122,5 +164,5 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     $('#company').value = company;
     if ($('#company').value !== company) { company = 'all'; $('#company').value = 'all'; }
   } catch (e) { showErr(e.message); }
-  load();
+  route(); loadWeb(true);
 })();
