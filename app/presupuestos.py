@@ -28,6 +28,37 @@ def setup(app, *, data_dir: Path, static_dir: Path, odoo, current_user, all_comp
         c.execute("CREATE TABLE IF NOT EXISTS docs (coll TEXT, id TEXT, data TEXT, PRIMARY KEY (coll, id))")
         return c
 
+    # ---------- importación única: datos/importar_presupuestador.zip ----------
+    def importar():
+        import zipfile
+        z = data_dir / "importar_presupuestador.zip"
+        if not z.exists():
+            return
+        try:
+            with zipfile.ZipFile(z) as zf:
+                docs = json.loads(zf.read("docs.json"))
+                n = 0
+                with lock, con() as c:
+                    for coll, items in docs.items():
+                        if coll not in COLLS:
+                            continue
+                        for did, data in items.items():
+                            if not c.execute("SELECT 1 FROM docs WHERE coll=? AND id=?", (coll, did)).fetchone():
+                                c.execute("INSERT INTO docs VALUES (?,?,?)", (coll, did, json.dumps(data, ensure_ascii=False)))
+                                n += 1
+                for name in zf.namelist():
+                    m = re.fullmatch(r"blobs/([0-9a-f]{32})\.(png|jpg|jpeg|webp|gif)", name)
+                    if m and not (blobs / m.group(1)).exists():
+                        (blobs / m.group(1)).write_bytes(zf.read(name))
+                        ext = m.group(2).replace("jpg", "jpeg")
+                        (blobs / (m.group(1) + ".type")).write_text("image/" + ext)
+            z.rename(data_dir / "importar_presupuestador.hecho.zip")
+            print(f"[presupuestos] importados {n} documentos", flush=True)
+        except Exception as e:
+            print("[presupuestos] error importando:", e, flush=True)
+
+    importar()
+
     def check(coll):
         if coll not in COLLS:
             raise HTTPException(404, "Colección desconocida")
