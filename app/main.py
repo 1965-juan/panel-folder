@@ -152,7 +152,7 @@ def es_admin(u):
 def yo(request: Request):
     u = current_user(request)
     return {"usuario": u, "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
-            "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO"))}
+            "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u)}
 
 
 @app.post("/api/actualizar")
@@ -351,3 +351,8 @@ from . import presupuestos as _presupuestos  # noqa: E402
 
 _presupuestos.setup(app, data_dir=DATA, static_dir=BASE / "static", odoo=odoo, current_user=current_user,
                     all_company_ids=lambda: [c["id"] for c in companies()])
+
+# ---------- módulo WhatsApp ----------
+from . import whatsapp as _whatsapp  # noqa: E402
+
+_whatsapp.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, es_admin=es_admin, demo=DEMO)

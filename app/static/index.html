@@ -12,6 +12,7 @@
   <nav>
     <a class="on" href="#ventas" data-v="ventas">Ventas</a>
     <a href="#web" data-v="web">Web <span class="nb" id="nb-web" hidden></span></a>
+    <a href="#whatsapp" data-v="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
     <a href="/presupuestos">Presupuestos</a>
     <a class="off" title="Próximamente">Panel AC</a>
     <a class="off" title="Próximamente">Compras y Mayte</a>
@@ -46,6 +47,43 @@
       <div class="col" data-k="w-ped"><h2>Pedidos web <span class="n"></span></h2><p class="hint">Confirmados o enviados</p><div class="cards"></div></div>
       <div class="col" data-k="w-car"><h2>Carritos abandonados <span class="n"></span></h2><p class="hint">Se quedaron sin terminar</p><div class="cards"></div></div>
     </section>
+  </section>
+
+  <section id="v-wa" hidden>
+    <div class="wa-tabs"><button data-t="chats" class="on">Conversaciones</button><button data-t="camp" class="adm">Campañas</button><button data-t="bot" class="adm">Ajustes del bot</button>
+      <span id="wa-st" class="wa-st"></span></div>
+    <div id="wa-chats" class="wa-wrap">
+      <div class="wa-list"><input id="wa-q" type="search" placeholder="Buscar nombre o teléfono…"><div id="wa-convs"></div>
+        <div id="wa-sim" class="wa-sim" hidden><b>Probar el bot</b><input id="sim-tel" placeholder="Teléfono (34…)" value="34600000000"><textarea id="sim-txt" rows="2" placeholder="Escribe como si fueras un cliente…"></textarea><button id="sim-go">Enviar como cliente</button></div></div>
+      <div class="wa-chat"><div id="wa-head" class="wa-head"><span class="muted">Elige una conversación</span></div>
+        <div id="wa-msgs" class="wa-msgs"></div>
+        <form id="wa-form" class="wa-form" hidden><textarea id="wa-txt" rows="2" placeholder="Escribe una respuesta… (el bot se aparta 12 h de esta conversación)"></textarea><button>Enviar</button></form></div>
+    </div>
+    <div id="wa-camp" class="wa-pane" hidden>
+      <div class="wa-box"><h3>Nueva campaña</h3>
+        <label>Nombre<input id="c-nom" placeholder="Ofertas Navidad empresas"></label>
+        <label>Plantilla aprobada por WhatsApp<select id="c-pl"></select></label>
+        <p id="c-txt" class="wa-prev"></p>
+        <div id="c-vars"></div>
+        <p class="muted">Se envía solo a contactos que han dado permiso (<b id="c-n">0</b>). Usa <code>{nombre}</code> en una variable para personalizar. Cada mensaje de marketing cuesta unos 6 céntimos en España.</p>
+        <button id="c-go" class="btn">Enviar campaña</button></div>
+      <div class="wa-box"><h3>Añadir contactos con permiso</h3>
+        <textarea id="c-lista" rows="6" placeholder="673109693;Nombre&#10;34600111222;Otro cliente"></textarea>
+        <label class="chk"><input type="checkbox" id="c-ok"> Estos contactos han aceptado recibir ofertas por WhatsApp</label>
+        <button id="c-imp" class="btn">Añadir</button>
+        <p class="muted">Los clientes también se apuntan solos escribiendo ALTA, y se borran escribiendo BAJA.</p></div>
+      <div class="wa-box wide"><h3>Campañas enviadas</h3><table id="c-hist"><thead><tr><th>Campaña</th><th>Fecha</th><th>Total</th><th>Enviados</th><th>Fallidos</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div id="wa-bot" class="wa-pane" hidden>
+      <div class="wa-box wide"><h3>Cómo se comporta el bot</h3>
+        <label class="chk"><input type="checkbox" id="b-act"> Bot activo (contesta solo a los mensajes que entran)</label>
+        <label class="chk"><input type="checkbox" id="b-pre"> Puede dar precios orientativos del catálogo</label>
+        <label>Información de la empresa que el bot puede contar (horario, dirección, tiendas, plazos habituales, envíos…)<textarea id="b-info" rows="10"></textarea></label>
+        <button id="b-save" class="btn">Guardar</button>
+        <h3>Conexión</h3><p id="b-con" class="muted"></p>
+        <label>Dirección pública del panel (https://…)<input id="b-url" placeholder="https://nas-folder.tu-red.ts.net"></label>
+        <button id="b-hook" class="btn">Conectar con WhatsApp</button></div>
+    </div>
   </section>
 
   <section id="v-ventas">

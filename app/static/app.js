@@ -131,15 +131,16 @@ async function loadWeb(badgeOnly) {
   } catch (e) { showErr(e.message); }
 }
 function route() {
-  const v = location.hash === '#web' ? 'web' : 'ventas';
+  const v = ({ '#web': 'web', '#whatsapp': 'whatsapp' })[location.hash] || 'ventas';
   document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
-  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas';
-  $('#h1').textContent = v === 'web' ? 'Web' : 'Ventas';
-  $('#q').hidden = $('#company').hidden = v === 'web';
-  if (v === 'web') loadWeb(); else load();
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp';
+  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp' })[v] || 'Ventas';
+  $('#q').hidden = $('#company').hidden = v !== 'ventas';
+  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else load();
 }
 window.addEventListener('hashchange', route);
 setInterval(() => loadWeb(true), 5 * 60 * 1000);
+setInterval(() => waBadge(), 60 * 1000);
 
 $('#close').onclick = () => $('#drawer').hidden = true;
 $('#drawer').onclick = e => { if (e.target.id === 'drawer') $('#drawer').hidden = true; };
@@ -155,6 +156,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     ODOO = yo.odoo_url; $('#demo').hidden = !yo.demo;
     $('#ver').textContent = 'versión ' + yo.version;
     $('#upd').hidden = !yo.puede_actualizar;
+    ADMIN = !!yo.admin;
     const emps = await api('/api/empresas');
     emps.forEach(e => { const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; $('#company').appendChild(o); });
     if (emps.length === 1) {
@@ -164,5 +166,119 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     $('#company').value = company;
     if ($('#company').value !== company) { company = 'all'; $('#company').value = 'all'; }
   } catch (e) { showErr(e.message); }
-  route(); loadWeb(true);
+  route(); loadWeb(true); waBadge();
 })();
+
+/* ---------- WhatsApp ---------- */
+let ADMIN = false, WA = null, WAST = {}, waTimer = null, PLANT = [];
+async function jpost(path, body, method = 'POST') {
+  const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+const hora = ts => { const d = new Date(ts * 1000), hoy = new Date(); return d.toDateString() === hoy.toDateString() ? d.toTimeString().slice(0, 5) : d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) + ' ' + d.toTimeString().slice(0, 5); };
+async function waBadge() {
+  try { WAST = await api('/api/wa/estado'); const b = $('#nb-wa'); b.textContent = WAST.pendientes; b.hidden = !WAST.pendientes; } catch (e) {}
+}
+function waTab(t) {
+  document.querySelectorAll('.wa-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  $('#wa-chats').hidden = t !== 'chats'; $('#wa-camp').hidden = t !== 'camp'; $('#wa-bot').hidden = t !== 'bot';
+  if (t === 'camp') waCampLoad(); if (t === 'bot') waBotLoad();
+}
+document.querySelectorAll('.wa-tabs button').forEach(b => b.onclick = () => waTab(b.dataset.t));
+async function waOpen() {
+  document.querySelectorAll('.wa-tabs .adm').forEach(b => b.hidden = !ADMIN);
+  await waBadge();
+  $('#wa-st').textContent = WAST.conectado ? `Conectado a WhatsApp (${WAST.proveedor}) · bot ${WAST.bot_activo ? 'activo' : 'parado'}${WAST.claude ? '' : ' · falta la clave de Claude'}`
+    : 'Sin conectar todavía: puedes probar el bot con "Probar el bot"';
+  $('#wa-sim').hidden = WAST.conectado || !ADMIN;
+  waList(); clearInterval(waTimer); waTimer = setInterval(() => { if (location.hash === '#whatsapp') { waList(); if (WA) waChat(WA, true); } }, 8000);
+}
+async function waList() {
+  const l = await api('/api/wa/conversaciones?q=' + encodeURIComponent($('#wa-q').value.trim()));
+  const box = $('#wa-convs'); box.innerHTML = l.length ? '' : '<p class="empty">Aún no hay conversaciones</p>';
+  l.forEach(c => {
+    const d = document.createElement('div'); d.className = 'wa-c' + (c.necesita_persona ? ' pers' : '') + (c.wa_id === WA ? ' on' : '');
+    const est = c.necesita_persona ? '<span class="pill per">PERSONA</span>' : c.humano ? '<span class="pill hum">EQUIPO</span>' : c.bot ? '<span class="pill bot">BOT</span>' : '';
+    d.innerHTML = `<div class="t"><b>${escH(c.nombre || '+' + c.wa_id)}</b>${c.no_leidos ? `<span class="u">${c.no_leidos}</span>` : ''}</div>
+      <div class="t"><span class="l">${escH(c.ultimo_texto || '')}</span>${est}</div>`;
+    d.onclick = () => { WA = c.wa_id; waChat(c.wa_id); waList(); };
+    box.appendChild(d);
+  });
+}
+async function waChat(id, quiet) {
+  const d = await api('/api/wa/conversaciones/' + id), c = d.contacto;
+  const head = $('#wa-head');
+  head.innerHTML = `<b>${escH(c.nombre || '')}</b><span class="muted">+${escH(c.wa_id)}</span>
+    <span class="sp"><label><input type="checkbox" id="wa-bot1" ${c.bot ? 'checked' : ''}> Bot</label>
+    <label><input type="checkbox" id="wa-opt" ${c.optin ? 'checked' : ''}> Acepta ofertas</label>
+    ${c.necesita_persona ? '<button id="wa-ok">Marcar atendido</button>' : ''}</span>
+    ${c.necesita_persona && c.resumen ? `<div class="res">⚠️ ${escH(c.resumen)}</div>` : ''}
+    ${c.humano ? '<div class="muted" style="flex-basis:100%;font-size:12px">La lleva una persona: el bot no contesta durante 12 h (o vuelve a activarlo con la casilla).</div>' : ''}`;
+  $('#wa-bot1').onchange = e => jpost(`/api/wa/conversaciones/${id}/ajustes`, { bot: e.target.checked }).then(() => waChat(id));
+  $('#wa-opt').onchange = e => jpost(`/api/wa/conversaciones/${id}/ajustes`, { optin: e.target.checked });
+  if ($('#wa-ok')) $('#wa-ok').onclick = () => jpost(`/api/wa/conversaciones/${id}/ajustes`, { atendido: 1 }).then(() => { waChat(id); waList(); waBadge(); });
+  const box = $('#wa-msgs'), abajo = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = '';
+  d.mensajes.forEach(m => {
+    const b = document.createElement('div');
+    b.className = 'bub ' + m.dir + (m.autor === 'bot' ? ' bot' : m.autor === 'campaña' ? ' camp' : '');
+    const quien = m.dir === 'in' ? '' : m.autor === 'bot' ? '🤖 bot · ' : m.autor === 'móvil' ? '📱 móvil · ' : m.autor === 'campaña' ? '📣 campaña · ' : escH(m.autor) + ' · ';
+    b.textContent = m.texto || '';
+    b.insertAdjacentHTML('beforeend', `<small>${quien}${hora(m.ts)}${m.estado === 'read' ? ' ✓✓' : m.estado === 'delivered' ? ' ✓' : m.estado === 'failed' ? ' ⚠️ no entregado' : ''}</small>`);
+    box.appendChild(b);
+  });
+  if (!quiet || abajo) box.scrollTop = box.scrollHeight;
+  $('#wa-form').hidden = false;
+  if (!quiet) waBadge();
+}
+$('#wa-form').onsubmit = async e => {
+  e.preventDefault(); const t = $('#wa-txt').value.trim(); if (!t || !WA) return;
+  try { await jpost(`/api/wa/conversaciones/${WA}/enviar`, { texto: t }); $('#wa-txt').value = ''; waChat(WA); } catch (x) { alertBox(x.message); }
+};
+$('#wa-txt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#wa-form').requestSubmit(); } };
+let wq; $('#wa-q').oninput = () => { clearTimeout(wq); wq = setTimeout(waList, 300); };
+$('#sim-go').onclick = async () => {
+  const t = $('#sim-txt').value.trim(); if (!t) return;
+  const tel = $('#sim-tel').value.replace(/\D/g, '') || '34600000000';
+  await jpost('/api/wa/simular', { wa_id: tel, texto: t }); $('#sim-txt').value = ''; WA = tel;
+  waList(); waChat(tel); setTimeout(() => waChat(tel, true), 4000); setTimeout(() => { waChat(tel, true); waList(); }, 10000);
+};
+function alertBox(m) { showErr(m); setTimeout(() => showErr(''), 8000); }
+async function waCampLoad() {
+  try {
+    PLANT = await api('/api/wa/plantillas');
+    const sel = $('#c-pl'); sel.innerHTML = '';
+    PLANT.filter(p => p.status === 'APPROVED').forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${p.name} (${p.language}, ${p.category})`; sel.appendChild(o); });
+    if (!sel.options.length) sel.innerHTML = '<option value="">No hay plantillas aprobadas todavía</option>';
+    sel.onchange = waVars; waVars();
+    $('#c-n').textContent = (await api('/api/wa/destinatarios')).length;
+    const tb = $('#c-hist tbody'); tb.innerHTML = '';
+    (await api('/api/wa/campanas')).forEach(c => { const tr = document.createElement('tr'); tr.innerHTML = `<td></td><td>${hora(c.creada)}</td><td>${c.total}</td><td>${c.enviados}</td><td>${c.fallidos}</td>`; tr.firstChild.textContent = c.nombre + (c.estado === 'enviando' ? ' (enviando…)' : ''); tb.appendChild(tr); });
+  } catch (e) { alertBox(e.message); }
+}
+function waVars() {
+  const p = PLANT.filter(p => p.status === 'APPROVED')[$('#c-pl').value]; $('#c-txt').textContent = p ? p.texto : '';
+  const n = p ? new Set((p.texto.match(/\{\{\d+\}\}/g) || [])).size : 0, box = $('#c-vars'); box.innerHTML = '';
+  for (let i = 1; i <= n; i++) box.insertAdjacentHTML('beforeend', `<label>Variable {{${i}}}<input class="c-var" ${i === 1 ? 'value="{nombre}"' : ''}></label>`);
+}
+$('#c-go').onclick = async () => {
+  const p = PLANT.filter(p => p.status === 'APPROVED')[$('#c-pl').value]; if (!p) return;
+  const n = $('#c-n').textContent;
+  if (!confirmar(`Se va a enviar "${p.name}" a ${n} contactos (≈ ${(n * 0.06).toFixed(2)} €).`)) return;
+  try { const r = await jpost('/api/wa/campanas', { nombre: $('#c-nom').value, plantilla: p.name, idioma: p.language, variables: [...document.querySelectorAll('.c-var')].map(i => i.value) }); alertBox(`Campaña en marcha: ${r.total} mensajes`); waCampLoad(); } catch (e) { alertBox(e.message); }
+};
+function confirmar(msg) { const b = $('#c-go'); if (b.dataset.ok === '1') { b.dataset.ok = ''; b.textContent = 'Enviar campaña'; return true; } b.dataset.ok = '1'; b.textContent = 'Confirmar envío'; alertBox(msg + ' Pulsa "Confirmar envío" para mandarla.'); return false; }
+$('#c-imp').onclick = async () => {
+  try { const r = await jpost('/api/wa/contactos/importar', { lista: $('#c-lista').value, consentimiento: $('#c-ok').checked }); alertBox(`${r.importados} contactos añadidos`); $('#c-lista').value = ''; waCampLoad(); } catch (e) { alertBox(e.message); }
+};
+async function waBotLoad() {
+  try {
+    const a = await api('/api/wa/ajustes');
+    $('#b-act').checked = a.bot_activo === 'si'; $('#b-pre').checked = a.bot_precios === 'si'; $('#b-info').value = a.bot_info;
+    $('#b-con').textContent = `WhatsApp: ${WAST.conectado ? 'conectado' : 'sin conectar'} · Claude: ${WAST.claude ? 'clave puesta' : 'falta la clave'} · modelo ${a.modelo}`;
+  } catch (e) { alertBox(e.message); }
+}
+$('#b-save').onclick = async () => { await jpost('/api/wa/ajustes', { bot_activo: $('#b-act').checked ? 'si' : 'no', bot_precios: $('#b-pre').checked ? 'si' : 'no', bot_info: $('#b-info').value }, 'PUT'); alertBox('Guardado'); waBadge(); };
+$('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhook', { url_publica: $('#b-url').value.trim() }); alertBox('Conectado: WhatsApp ya enviará los mensajes al panel'); } catch (e) { alertBox(e.message); } };
