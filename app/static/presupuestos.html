@@ -1,0 +1,680 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Presupuestos Folder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: app chrome (lista / editor con vista A4 / artículos / ajustes); el documento A4 tiene su propia paleta fija de papel */
+:root{
+  --bg:#f5f3f9; --panel:#ffffff; --ink:#221a35; --muted:#625b74; --line:#e2dcec;
+  --navy:#4a2991; --gold:#f57925; --gold-ink:#c2550c; --gold-soft:#feeadb; --purple-soft:#ece6f7; --focus:#4a2991;
+  --ok:#2f7d4f; --ok-soft:#e2f2e8; --warn:#9a6a10; --warn-soft:#fbefd6; --bad:#b03a3a; --bad-soft:#f8e3e3; --info:#2f5f9a; --info-soft:#e3ecf7;
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif; --f-body:"Figtree","Segoe UI",Roboto,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#16121f; --panel:#1f1a2c; --ink:#ece8f4; --muted:#a49cb6; --line:#332b45;
+  --navy:#b7a3f0; --gold:#ff9a52; --gold-ink:#ffae74; --gold-soft:#3d2614; --purple-soft:#2b2240; --focus:#b7a3f0;
+  --ok:#7fcf9c; --ok-soft:#1d3327; --warn:#e7bd62; --warn-soft:#3a2f17; --bad:#ec8c8c; --bad-soft:#3d2121; --info:#93b9ea; --info-soft:#1d2b3e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#16121f; --panel:#1f1a2c; --ink:#ece8f4; --muted:#a49cb6; --line:#332b45;
+  --navy:#b7a3f0; --gold:#ff9a52; --gold-ink:#ffae74; --gold-soft:#3d2614; --purple-soft:#2b2240; --focus:#b7a3f0;
+  --ok:#7fcf9c; --ok-soft:#1d3327; --warn:#e7bd62; --warn-soft:#3a2f17; --bad:#ec8c8c; --bad-soft:#3d2121; --info:#93b9ea; --info-soft:#1d2b3e; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--panel);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--panel)}
+.topin{display:flex;align-items:center;gap:20px;padding-block:10px;flex-wrap:wrap}
+.brand{font-family:var(--f-display);font-weight:800;font-size:18px;display:flex;align-items:center;gap:10px}
+.brand small{font-family:var(--f-body);font-weight:500;font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav.tabs button{border:0;background:transparent;padding:7px 12px;border-radius:6px;cursor:pointer;color:var(--muted);font-weight:600}
+nav.tabs button[aria-current="page"]{background:var(--purple-soft);color:var(--navy)}
+main{padding-block:20px 60px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+h1{font-size:22px;font-weight:700}
+h2{font-size:16px;font-weight:700}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.btn{border:1px solid var(--line);background:var(--panel);padding:8px 14px;border-radius:7px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:var(--panel)}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:#fff;text-shadow:0 1px 0 rgba(0,0,0,.15)}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+.icon{border:1px solid var(--line);background:var(--panel);width:28px;height:28px;border-radius:6px;cursor:pointer;display:inline-grid;place-items:center;font-size:13px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600;min-width:0}
+label.f input,label.f select,label.f textarea{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:7px 9px;font-size:14px;font-weight:400;color:var(--ink);width:100%}
+label.f textarea{resize:vertical;min-height:62px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+.chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.st-borrador{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.st-enviado{background:var(--info-soft);color:var(--info)}
+.st-aprobado{background:var(--ok-soft);color:var(--ok)}
+.st-rechazado{background:var(--bad-soft);color:var(--bad)}
+.st-odoo{background:var(--purple-soft);color:var(--navy)}
+.muted{color:var(--muted)}
+.num{font-variant-numeric:tabular-nums}
+.notice{padding:10px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-weight:600;z-index:50}
+/* lista */
+.tablewrap{overflow-x:auto}
+table.list{width:100%;border-collapse:collapse;min-width:620px}
+table.list th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line)}
+table.list td{padding:12px 14px;border-bottom:1px solid var(--line)}
+table.list tr.click{cursor:pointer}
+table.list tr.click:hover td{background:var(--bg)}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters button{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--muted)}
+.filters button[aria-pressed="true"]{background:var(--navy);color:var(--panel);border-color:var(--navy)}
+/* editor */
+.editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1100px){.editor{grid-template-columns:1fr}}
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sec{padding:16px;display:flex;flex-direction:column;gap:12px}
+.lines{display:flex;flex-direction:column;gap:8px}
+.ln{border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:start;background:var(--bg)}
+.ln .thumb{width:44px;height:44px;border-radius:5px;background:var(--panel);object-fit:contain;border:1px solid var(--line)}
+.ln .thumb.txt{display:grid;place-items:center;font-size:10px;color:var(--muted);font-weight:700}
+.ln .ttl{font-weight:700;font-family:var(--f-display)}
+.ln .ctl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.ln .ctl label.f input{padding:5px 7px}
+.ln .acts{display:flex;flex-direction:column;gap:4px}
+.ln .imp{font-weight:700;margin-top:6px}
+.preview-col{position:sticky;top:calc(env(safe-area-inset-top,0px) + 70px)}
+.pv-scroller{overflow:auto;max-height:calc(100vh - 140px);background:var(--line);border-radius:10px;padding:14px}
+.pv-scale{transform-origin:top left}
+.totbar{display:flex;gap:18px;flex-wrap:wrap;font-size:13px}
+.totbar b{font-family:var(--f-display);font-size:16px}
+.picker{position:relative}
+.pick-list{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px;background:var(--panel)}
+.pick-it{display:flex;gap:10px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line)}
+.pick-it:hover{background:var(--bg)}
+.pick-it img{width:36px;height:36px;object-fit:contain}
+/* artículos */
+.artgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.art{padding:14px;display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;cursor:pointer}
+.art:hover{border-color:var(--navy)}
+.art img,.art .noimg{width:96px;height:110px;object-fit:contain;background:#fff;border-radius:6px}
+.art .noimg{display:grid;place-items:center;color:#8a93a1;font-size:11px;border:1px dashed var(--line)}
+.art .ref{font-size:11px;letter-spacing:.12em;color:var(--muted)}
+.art .nm{font-family:var(--f-display);font-weight:700;font-size:16px}
+.art .sb{color:var(--gold-ink);font-weight:600;font-size:12px}
+.modal-bg{position:fixed;inset:0;background:rgba(10,14,20,.5);z-index:40;display:flex;justify-content:center;align-items:flex-start;overflow:auto;padding:max(20px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 40px max(12px,env(safe-area-inset-left,0px))}
+.modal{width:min(760px,100%);padding:20px;display:flex;flex-direction:column;gap:14px}
+.imgs{display:flex;gap:8px;flex-wrap:wrap}
+.imgs .im{position:relative;width:86px;height:96px;border:1px solid var(--line);border-radius:6px;background:#fff;display:grid;place-items:center}
+.imgs .im img{max-width:80px;max-height:90px;object-fit:contain}
+.imgs .im button{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:11px}
+.imgs .im .main{position:absolute;bottom:2px;left:2px;font-size:9px;background:var(--navy);color:var(--panel);padding:1px 4px;border-radius:3px}
+.drop{width:86px;height:96px;border:1px dashed var(--muted);border-radius:6px;display:grid;place-items:center;text-align:center;font-size:11px;color:var(--muted);cursor:pointer;padding:4px}
+.mini-rows{display:flex;flex-direction:column;gap:6px}
+.mini-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 28px;gap:6px;align-items:end}
+.mini-row.c3{grid-template-columns:minmax(0,1.4fr) 70px minmax(0,1fr) 28px}
+.inline-confirm{display:flex;gap:8px;align-items:center;background:var(--bad-soft);color:var(--bad);padding:8px 12px;border-radius:8px;font-size:13px;flex-wrap:wrap}
+.copybox{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:10px;white-space:pre-wrap;font-size:13px;user-select:text}
+.logoprev{width:220px;height:90px;border:1px dashed var(--line);border-radius:8px;display:grid;place-items:center;background:#fff}
+.logoprev img{max-width:200px;max-height:76px}
+
+/* ========= DOCUMENTO A4 (papel: colores fijos, no dependen del tema) ========= */
+.page{width:794px;height:1123px;background:#fff;color:#2a3140;position:relative;overflow:hidden;font-family:var(--f-body);box-shadow:0 2px 10px rgba(0,0,0,.18);margin:0 auto 18px;padding:46px 52px 0}
+.page *{box-sizing:border-box}
+.d-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding-bottom:16px;border-bottom:3px solid #4a2991;box-shadow:0 3px 0 #f57925}
+.d-logo{height:70px;display:flex;align-items:center}
+.d-logo img{max-height:70px;max-width:240px}
+.d-slogan{margin-top:6px;font-family:var(--f-display);font-weight:700;font-style:italic;font-size:13px;letter-spacing:.02em;color:#f57925}
+.d-wordmark{font-family:var(--f-display);font-weight:800;font-size:34px;letter-spacing:-.02em;color:#4a2991}
+.d-wordmark span{color:#f57925}
+.d-contact{text-align:right;font-size:11.5px;line-height:1.6;color:#4a5465}
+.d-contact b{color:#4a2991;font-weight:700}
+.d-meta{display:grid;grid-template-columns:1.1fr 1fr;gap:24px;margin-top:22px}
+.d-title .k{font-size:11px;letter-spacing:.16em;color:#7c8696;text-transform:uppercase}
+.d-title .n{font-family:var(--f-display);font-weight:800;font-size:30px;color:#4a2991;letter-spacing:-.01em;line-height:1.1}
+.d-dates{display:flex;gap:26px;margin-top:12px;font-size:12px}
+.d-dates div span{display:block;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#7c8696}
+.d-dates div b{font-weight:600;color:#4a2991}
+.d-client{border-left:3px solid #f57925;padding:4px 0 4px 14px;font-size:12px;line-height:1.55}
+.d-client .k{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#7c8696}
+.d-client .nm{font-family:var(--f-display);font-weight:700;font-size:15px;color:#4a2991}
+.d-small-head{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid #d9dde3;font-size:11px;color:#7c8696}
+.d-small-head .d-logo{height:34px}
+.d-small-head .d-logo img{max-height:34px}
+.d-small-head .d-wordmark{font-size:20px}
+.d-body{margin-top:20px}
+.blk{padding:0 0 14px}
+/* ficha artículo: formato catálogo */
+.fx{display:grid;grid-template-columns:230px minmax(0,1fr);gap:24px;border:1px solid #e3e6eb;border-radius:12px;padding:18px 20px 16px}
+.fx-img{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.fx-img .mainimg{max-width:210px;max-height:230px;object-fit:contain}
+.fx-img .thumbs{display:flex;gap:6px}
+.fx-img .thumbs img{width:44px;height:44px;object-fit:contain;border:1px solid #e3e6eb;border-radius:4px;background:#fff}
+.fx-noimg{width:200px;height:200px;border:1px dashed #c9ced6;border-radius:8px;display:grid;place-items:center;color:#9aa2ae;font-size:12px}
+.fx-ref{font-size:12px;letter-spacing:.16em;color:#7c8696}
+.fx-nm{font-family:var(--f-display);font-weight:800;font-size:28px;color:#4a2991;line-height:1.1;letter-spacing:-.01em;margin-top:2px}
+.fx-sb{color:#e0661a;font-weight:700;font-size:14.5px;margin-top:4px}
+.fx-ds{font-size:12.5px;line-height:1.5;color:#3d4554;margin-top:8px}
+.fx.fx-full{grid-template-columns:minmax(0,1fr)}
+.fx-dg{columns:2;column-gap:26px;margin-top:12px}
+.fx-dg .g{break-inside:avoid;margin-bottom:10px}
+.fx-dg .gk{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#e0661a;font-weight:700;border-bottom:1px solid #e3e6eb;padding-bottom:3px;margin-bottom:4px}
+.fx-dg ul{list-style:none;margin:0;padding:0;font-size:11.5px;line-height:1.45;color:#3d4554}
+.fx-dg li b{color:#4a2991;margin-right:4px}
+.fx-tr{width:100%;border-collapse:collapse;margin-top:12px;font-variant-numeric:tabular-nums}
+.fx-tr th{background:#4a2991;color:#fff;font-weight:600;font-size:12.5px;padding:7px 6px;text-align:center}
+.fx-tr th:first-child,.fx-tr td:first-child{text-align:left;padding-left:12px}
+.fx-tr td{text-align:center;font-weight:700;font-size:13px;padding:7px 6px;border-bottom:1px solid #e3e6eb;color:#4a2991}
+.fx-tr td:first-child{font-weight:400;color:#5d6676}
+.fx-tr td.sel{background:#feeadb;color:#b04c08}
+.fx-col{display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;gap:10px}
+.fx-col .k{font-size:10.5px;letter-spacing:.14em;color:#7c8696;text-transform:uppercase}
+.fx-col .cs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font-size:12px}
+.fx-col .cs i{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid #9aa2ae;vertical-align:-2px;margin-right:5px}
+.fx-line{display:flex;justify-content:flex-end;gap:22px;align-items:baseline;margin-top:12px;padding-top:10px;border-top:1px dashed #d4d8de;font-size:12px;color:#5d6676;font-variant-numeric:tabular-nums}
+.fx-line b{color:#4a2991;font-size:13px}
+.fx-line .tot{font-family:var(--f-display);font-weight:800;font-size:16px;color:#4a2991}
+/* líneas simples (marcajes, servicios) */
+.sl-head,.sl-row{display:grid;grid-template-columns:minmax(0,1fr) 80px 92px 100px;gap:10px;padding:7px 12px;font-variant-numeric:tabular-nums}
+.sl-head{background:#4a2991;color:#fff;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;border-radius:6px 6px 0 0}
+.sl-row{border-bottom:1px solid #e3e6eb;font-size:12.5px}
+.sl-row span:not(:first-child),.sl-head span:not(:first-child){text-align:right}
+.sl-row span:last-child{font-weight:700;color:#4a2991}
+.sl-row .sub{display:block;font-size:11px;color:#7c8696}
+.d-tot{display:grid;grid-template-columns:1fr 290px;gap:24px;align-items:start}
+.d-notes{font-size:11.5px;line-height:1.55;color:#4a5465;white-space:pre-wrap}
+.d-notes .k{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#7c8696;display:block;margin-bottom:4px}
+.d-totbox{font-variant-numeric:tabular-nums;font-size:13px}
+.d-totbox div{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid #e3e6eb}
+.d-totbox .g{background:#4a2991;color:#fff;font-family:var(--f-display);font-weight:800;font-size:17px;border-radius:0 0 6px 6px;border:0}
+.d-foot{position:absolute;left:52px;right:52px;bottom:26px;display:flex;justify-content:space-between;font-size:10.5px;color:#8a93a1;border-top:1px solid #e3e6eb;padding-top:8px}
+#measure{position:absolute;left:-9999px;top:0;width:690px;visibility:hidden}
+#pdfstage{position:absolute;left:-9999px;top:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="top"><div class="wrap topin">
+  <div class="brand"><a href="/" style="text-decoration:none;color:var(--navy);font-size:13px;font-weight:600;margin-right:6px">← Panel</a><img src="/_blob/e29ac520030e4bb838749e5e6ecb9946" alt="Folder" style="height:30px;width:auto" onerror="this.outerHTML='<span style=&quot;color:#4a2991&quot;>folder<span style=&quot;color:#f57925&quot;>.</span></span>'"> <small>Presupuestos</small></div>
+  <nav class="tabs" aria-label="Secciones">
+    <button id="tab-lista" data-view="lista" aria-current="page">Presupuestos</button>
+    <button id="tab-articulos" data-view="articulos">Artículos</button>
+    <button id="tab-ajustes" data-view="ajustes">Ajustes</button>
+  </nav>
+</div></header>
+
+<main class="wrap" id="app">
+  <div class="empty">Cargando presupuestos…</div>
+</main>
+<div id="measure"></div>
+<div id="pdfstage"></div>
+<div id="modal-root"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/static/claude-shim.js"></script>
+<script>
+(function(){
+"use strict";
+/* ---------- estado ---------- */
+const S={view:"lista",db:null,assets:null,downloads:null,ready:false,offline:false,
+  quotes:[],arts:[],cfg:{},current:null,filter:"todos",dirty:false,saving:false,ui:{}};
+const ESTADOS=[["borrador","Borrador"],["enviado","Enviado"],["aprobado","Aprobado"],["rechazado","Rechazado"],["odoo","Pasado a Odoo"]];
+const DEF_CFG={slogan:"Mucho más que papelería",web:"www.regalosfolder.com",telefono:"",whatsapp:"",email:"",direccion:"",iva:21,validez:30,
+  condiciones:"Precios sin IVA. Presupuesto válido durante el plazo indicado.\nPlazo de entrega a confirmar en el momento del pedido.\nMarcaje según arte final aprobado por el cliente.",pie:""};
+
+/* ---------- utilidades ---------- */
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=v=>{if(typeof v==="number")return v;const n=parseFloat(String(v??"").replace(/\./g,"").replace(",","."));return isNaN(n)?0:n};
+const pnum=v=>{if(typeof v==="number")return v;const s=String(v??"").trim();if(!s)return 0;const n=parseFloat(s.includes(",")?s.replace(/\./g,"").replace(",","."):s);return isNaN(n)?0:n};
+const eur=n=>(Math.round(n*100)/100).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+const uds=n=>Number(n||0).toLocaleString("es-ES");
+const fdate=iso=>{if(!iso)return"";const [y,m,d]=iso.slice(0,10).split("-");return `${d}/${m}/${y}`};
+const today=()=>new Date().toISOString().slice(0,10);
+const addDays=(iso,n)=>{const d=new Date(iso+"T12:00:00");d.setDate(d.getDate()+Number(n||0));return d.toISOString().slice(0,10)};
+const blob=id=>id?"/_blob/"+id:"";
+const uid=()=>Math.random().toString(36).slice(2,10);
+function toast(t){const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>el.hidden=true,2600)}
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+
+/* tramos: [{desde, precio}] -> etiquetas -500 / +500 */
+function tierLabels(tr){const t=[...(tr||[])].sort((a,b)=>num(a.desde)-num(b.desde));
+  return t.map((x,i)=>({...x,label:num(x.desde)<=1&&t[i+1]?"-"+uds(t[i+1].desde):(num(x.desde)<=1?"Ud.":"+"+uds(x.desde))}))}
+function tierFor(tr,q){const t=[...(tr||[])].sort((a,b)=>num(a.desde)-num(b.desde));let p=null;for(const x of t){if(q>=num(x.desde)||p===null)p=x}
+  for(const x of t){if(q>=num(x.desde))p=x}return p}
+function linePrice(l){if(l.tipo==="ficha"&&l.precioAuto!==false){const t=tierFor(l.art?.tramos,num(l.cantidad));return t?num(t.precio):num(l.precio)}return num(l.precio)}
+function lineTotal(l){return Math.round(linePrice(l)*num(l.cantidad)*100)/100}
+function totals(q){const r2=x=>Math.round(x*100)/100;const def=num(q.iva??S.cfg.iva);const by={};const add=(p,b)=>{by[p]=(by[p]||0)+b};
+  (q.lineas||[]).forEach(l=>{const lt=lineTotal(l);const d=l.tipo==="ficha"&&Array.isArray(l.art?.ivaDesglose)&&l.art.ivaDesglose.length?l.art.ivaDesglose:null;
+    if(!d){add(def,lt);return}const sum=d.reduce((s,x)=>s+num(x.base),0)||1;d.forEach(x=>add(num(x.pct),lt*num(x.base)/sum))});
+  const porTipo=Object.keys(by).map(Number).sort((a,b)=>a-b).map(p=>({pct:p,base:r2(by[p]),iva:r2(by[p]*p/100)})).filter(x=>x.base);
+  const base=r2((q.lineas||[]).reduce((s,l)=>s+lineTotal(l),0));const iva=r2(porTipo.reduce((s,x)=>s+x.iva,0));return{base,iva,porTipo,total:r2(base+iva)}}
+
+/* ---------- capacidades ---------- */
+async function boot(){
+  render();
+  const c=window.claude;
+  if(!c||!c.use){S.offline=true;render();return}
+  const [db,assets,downloads]=await Promise.all([c.use("db"),c.use("assets"),c.use("downloads")]);
+  S.db=db;S.assets=assets;S.downloads=downloads;
+  if(!db){S.offline=true;render();return}
+  db.doc("config/empresa").onSnapshot(s=>{S.cfg={...DEF_CFG,...(s.exists?s.data():{})};S.ready=true;render(true)},err);
+  db.collection("clientes_odoo").onSnapshot(s=>{const all=[];let fecha="";s.docs.forEach(d=>{const x=d.data();(x.clientes||[]).forEach(c=>all.push(c));if(x.fecha>fecha)fecha=x.fecha});
+    S.clients=all.map(c=>({...c,_k:[c.n,c.c,c.v,c.m,c.p].join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")}));S.clientsFecha=fecha;render(true)},err);
+  db.collection("productos_odoo").onSnapshot(s=>{const all=[];s.docs.forEach(d=>(d.data().p||[]).forEach(p=>all.push(p)));
+    S.prods=all.map(p=>({i:p[0],r:p[1]||"",n:p[2]||"",pv:p[3]||0,tr:p[4]||null,t:p[5]||null,_k:((p[1]||"")+" "+(p[2]||"")).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")}));if(S.view==="editor"&&S.ui.picker&&!S.modalOpen)paintPicker()},err);
+  db.collection("articulos").onSnapshot(s=>{S.arts=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));render(true)},err);
+  db.collection("presupuestos").onSnapshot(s=>{S.quotes=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.seq||0)-(a.seq||0));
+    if(S.current&&!S.dirty){const fresh=S.quotes.find(q=>q.id===S.current.id);if(fresh)S.current=structuredClone(fresh)}
+    S.ready=true;render(true)},err);
+}
+function err(e){console.error(e);toast("No se pudo leer la base de datos: "+(e.message||e.code))}
+
+/* ---------- navegación ---------- */
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>go(b.dataset.view));
+function go(v,opts){if(S.view==="editor"&&S.dirty)saveNow();S.view=v;if(v!=="editor")S.current=null;Object.assign(S.ui,{confirmDel:false,send:false},opts||{});
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.view===(v==="editor"?"lista":v)?"page":"false"));render();window.scrollTo(0,0)}
+
+/* render(true) = refresco por datos: en el editor no se repinta el formulario para no perder el foco */
+function render(fromData){
+  const app=$("#app");
+  if(S.offline){app.innerHTML=`<div class="card sec"><h2>Abre el presupuestador desde Claude</h2><p class="muted">Esta página guarda los presupuestos y artículos en su propia base de datos, que solo está disponible al abrirla dentro de claude.ai con tu cuenta.</p></div>`;return}
+  if(!S.ready){app.innerHTML=`<div class="empty">Cargando presupuestos…</div>`;return}
+  if(S.view==="editor"){if(fromData&&$("#ed-root")){paintPreview();paintLineList(true);return}return renderEditor()}
+  if(fromData&&S.modalOpen)return;
+  if(S.view==="lista")return renderLista();
+  if(S.view==="articulos")return renderArticulos();
+  if(S.view==="ajustes")return renderAjustes();
+}
+
+/* ---------- lista ---------- */
+function renderLista(){
+  const qs=S.quotes.filter(q=>S.filter==="todos"||q.estado===S.filter);
+  const count=k=>S.quotes.filter(q=>q.estado===k).length;
+  $("#app").innerHTML=`
+  <div class="row" style="margin-bottom:16px"><h1>Presupuestos</h1><span class="spacer"></span>
+    <button class="btn primary" id="new-q">+ Nuevo presupuesto</button></div>
+  <div class="filters" style="margin-bottom:12px">
+    <button aria-pressed="${S.filter==="todos"}" data-f="todos">Todos · ${S.quotes.length}</button>
+    ${ESTADOS.map(([k,l])=>`<button aria-pressed="${S.filter===k}" data-f="${k}">${l} · ${count(k)}</button>`).join("")}
+  </div>
+  <div class="card tablewrap">${qs.length?`<table class="list"><thead><tr><th>Nº</th><th>Cliente</th><th>Fecha</th><th>Artículos</th><th style="text-align:right">Total</th><th>Estado</th></tr></thead><tbody>
+    ${qs.map(q=>{const t=totals(q);return `<tr class="click" data-id="${q.id}"><td class="num"><b>${esc(q.numero)}</b></td><td>${esc(q.cliente?.nombre||"Sin cliente")}${q.ejemplo?' <span class="chip st-borrador">ejemplo</span>':""}</td><td class="num">${fdate(q.fecha)}</td><td class="muted">${(q.lineas||[]).filter(l=>l.tipo==="ficha").map(l=>esc(l.art?.nombre)).join(", ")||"—"}</td><td class="num" style="text-align:right">${q.sinTotal?'<span class="muted">Opciones</span>':`<b>${eur(t.total)}</b>`}</td><td><span class="chip st-${q.estado||"borrador"}">${esc((ESTADOS.find(e=>e[0]===q.estado)||ESTADOS[0])[1])}</span></td></tr>`}).join("")}
+  </tbody></table>`:`<div class="empty">${S.quotes.length?"No hay presupuestos con este estado.":"Todavía no hay presupuestos. Pulsa <b>Nuevo presupuesto</b> para hacer el primero."}</div>`}</div>`;
+  $("#new-q").onclick=newQuote;
+  document.querySelectorAll(".filters button").forEach(b=>b.onclick=()=>{S.filter=b.dataset.f;renderLista()});
+  document.querySelectorAll("tr[data-id]").forEach(r=>r.onclick=()=>openQuote(r.dataset.id));
+}
+async function newQuote(){
+  const y=new Date().getFullYear()%100;const seqs=S.quotes.filter(q=>q.anio===y).map(q=>q.seq||0);const seq=(seqs.length?Math.max(...seqs):0)+1;
+  const q={numero:`P${y}-${String(seq).padStart(4,"0")}`,anio:y,seq:y*10000+seq,fecha:today(),validezDias:num(S.cfg.validez)||30,estado:"borrador",
+    cliente:{nombre:"",nif:"",direccion:"",poblacion:"",email:"",telefono:"",contacto:""},lineas:[],iva:num(S.cfg.iva)||21,notas:"",atendido:"",creado:new Date().toISOString()};
+  try{const ref=await S.db.collection("presupuestos").add(q);S.current={id:ref.id,...q};S.dirty=false;go("editor")}catch(e){toast("No se pudo crear: "+e.message)}
+}
+function openQuote(id){const q=S.quotes.find(x=>x.id===id);if(!q)return;S.current=structuredClone(q);S.dirty=false;go("editor")}
+
+/* ---------- editor ---------- */
+let saveT=null;
+function touch(){S.dirty=true;setSaveState("Sin guardar…");clearTimeout(saveT);saveT=setTimeout(saveNow,900);paintPreview();paintTotbar()}
+async function saveNow(){clearTimeout(saveT);if(!S.current||!S.dirty)return;const {id,...data}=S.current;S.dirty=false;setSaveState("Guardando…");
+  try{data.actualizado=new Date().toISOString();delete data.ejemplo;S.current.ejemplo=undefined;await S.db.doc("presupuestos/"+id).set(JSON.parse(JSON.stringify(data)));setSaveState("Guardado")}catch(e){S.dirty=true;setSaveState("Error al guardar");toast("No se guardó: "+e.message)}}
+function setSaveState(t){const el=$("#savest");if(el)el.textContent=t}
+
+function renderEditor(){
+  const q=S.current;if(!q){go("lista");return}
+  const c=q.cliente||(q.cliente={});
+  $("#app").innerHTML=`<div id="ed-root">
+  <div class="row" style="margin-bottom:14px">
+    <button class="btn sm" id="back">← Presupuestos</button>
+    <h1 class="num">${esc(q.numero)}</h1>
+    <select id="estado" aria-label="Estado" class="btn sm">${ESTADOS.map(([k,l])=>`<option value="${k}" ${q.estado===k?"selected":""}>${l}</option>`).join("")}</select>
+    <span class="muted" id="savest" style="font-size:12px">Guardado</span><span class="spacer"></span>
+    <button class="btn" id="dup">Duplicar</button>
+    <button class="btn" id="send">Enviar por email</button>
+    <button class="btn gold" id="pdf">Descargar PDF</button>
+  </div>
+  ${(()=>{const nv=q.lineas.filter(l=>l.tipo==="ficha"&&l.art?.origen!=="odoo");return nv.length?`<div class="notice" style="margin-bottom:14px">${q.estado==="aprobado"?"Aprobado. Antes de pasarlo a Odoo hay que dar de alta":"Si se aprueba, habrá que dar de alta en Odoo"}: <b>${nv.map(l=>esc(l.art?.nombre)).join(", ")}</b>. Las fotos y descripciones están en la pestaña Artículos.</div>`:""})()}
+  <div id="send-panel"></div>
+  <div class="editor">
+    <div class="side">
+      <section class="card sec"><div class="row"><h2>Cliente</h2>${c.odooId?`<span class="chip st-odoo">De Odoo</span>`:""}</div>
+        <div class="picker"><label class="f">Buscar cliente de Odoo<input id="c-buscar" autocomplete="off" placeholder="${(S.clients||[]).length?`Nombre, NIF o email · ${uds(S.clients.length)} clientes`:"Aún no se han traído los clientes de Odoo"}"></label><div id="c-res"></div></div>
+        <div class="grid2">
+          <label class="f">Nombre / razón social<input id="c-nombre" value="${esc(c.nombre)}"></label>
+          <label class="f">NIF<input id="c-nif" value="${esc(c.nif)}"></label>
+          <label class="f">Dirección<input id="c-direccion" value="${esc(c.direccion)}"></label>
+          <label class="f">CP y población<input id="c-poblacion" value="${esc(c.poblacion)}"></label>
+          <label class="f">Persona de contacto<input id="c-contacto" value="${esc(c.contacto)}"></label>
+          <label class="f">Email<input id="c-email" type="email" value="${esc(c.email)}"></label>
+        </div>
+      </section>
+      <section class="card sec"><h2>Datos del presupuesto</h2>
+        <div class="grid3">
+          <label class="f">Fecha<input id="q-fecha" type="date" value="${esc(q.fecha)}"></label>
+          <label class="f">Validez (días)<input id="q-validez" inputmode="numeric" value="${esc(q.validezDias)}"></label>
+          <label class="f">IVA %<input id="q-iva" inputmode="decimal" value="${esc(q.iva)}"></label>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600"><input type="checkbox" id="q-sintotal" ${q.sinTotal?"checked":""}> Sin total (presupuesto de opciones para que el cliente elija modelo)</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600"><input type="checkbox" id="q-sinnotas" ${q.sinNotas?"checked":""}> Sin observaciones (no imprime notas ni condiciones generales)</label>
+        <label class="f">Atendido por<input id="q-atendido" value="${esc(q.atendido)}" placeholder="Nombre de quien hace el presupuesto"></label>
+      </section>
+      <section class="card sec"><div class="row"><h2>Líneas</h2><span class="spacer"></span>
+          <button class="btn sm" id="add-art">+ Artículo con ficha</button><button class="btn sm" id="add-simple">+ Línea simple</button></div>
+        <div id="picker"></div>
+        <div class="lines" id="lines"></div>
+        <div class="totbar" id="totbar"></div>
+      </section>
+      <section class="card sec"><h2>Observaciones</h2>
+        <label class="f">Texto al pie del presupuesto<textarea id="q-notas" rows="4" placeholder="Si lo dejas vacío salen las condiciones generales de Ajustes">${esc(q.notas)}</textarea></label>
+      </section>
+      <section class="card sec"><div id="del-zone"><button class="btn danger sm" id="del">Eliminar presupuesto</button></div></section>
+    </div>
+    <div class="preview-col"><div class="pv-scroller" id="pv-scroller"><div class="pv-scale" id="pv"></div></div></div>
+  </div></div>`;
+  $("#back").onclick=()=>go("lista");
+  $("#estado").onchange=e=>{q.estado=e.target.value;touch()};
+  [["c-nombre","nombre"],["c-nif","nif"],["c-direccion","direccion"],["c-poblacion","poblacion"],["c-contacto","contacto"],["c-email","email"]].forEach(([id,k])=>$("#"+id).oninput=e=>{c[k]=e.target.value;touch()});
+  const cb=$("#c-buscar"),cr=$("#c-res");
+  cb.oninput=()=>{const t=cb.value.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");if(t.length<2){cr.innerHTML="";return}
+    const words=t.split(/\s+/);const hits=(S.clients||[]).filter(x=>words.every(w=>x._k.includes(w))).slice(0,12);
+    cr.innerHTML=`<div class="pick-list">${hits.length?hits.map(h=>`<div class="pick-it" data-oid="${h.i}"><div><b>${esc(h.n)}</b>${h.t==="e"?' <span class="chip st-enviado">Entrega</span>':""}${h.c?` <span class="muted">· ${esc(h.c)}</span>`:""}<br><span class="muted" style="font-size:12px">${[h.v,h.p,h.m].filter(Boolean).map(esc).join(" · ")}</span></div></div>`).join(""):`<div class="empty" style="padding:14px">Ningún cliente de Odoo coincide. Puedes escribir los datos a mano abajo.</div>`}</div>`;
+    cr.querySelectorAll("[data-oid]").forEach(it=>it.onclick=()=>{const h=S.clients.find(x=>String(x.i)===it.dataset.oid);if(!h)return;
+      Object.assign(c,{odooId:h.i,nombre:h.n||"",nif:h.v||"",direccion:h.d||"",poblacion:h.p||"",email:h.m||"",telefono:h.f||"",contacto:h.c||""});touch();renderEditor()})};
+  $("#q-fecha").oninput=e=>{q.fecha=e.target.value;touch()};
+  $("#q-validez").oninput=e=>{q.validezDias=num(e.target.value);touch()};
+  $("#q-iva").oninput=e=>{q.iva=pnum(e.target.value);touch()};
+  $("#q-atendido").oninput=e=>{q.atendido=e.target.value;touch()};
+  $("#q-sinnotas").onchange=e=>{q.sinNotas=e.target.checked;touch()};
+  $("#q-sintotal").onchange=e=>{q.sinTotal=e.target.checked;touch();if(typeof paintTotbar==="function")paintTotbar()};
+  $("#q-notas").oninput=e=>{q.notas=e.target.value;touch()};
+  $("#add-art").onclick=()=>{S.ui.picker=!S.ui.picker;paintPicker()};
+  $("#add-simple").onclick=()=>{q.lineas.push({id:uid(),tipo:"simple",descripcion:"",detalle:"",cantidad:1,precio:0});touch();paintLineList()};
+  $("#pdf").onclick=makePdf;
+  $("#send").onclick=()=>{S.ui.send=!S.ui.send;paintSend()};
+  $("#dup").onclick=dupQuote;
+  $("#del").onclick=()=>{$("#del-zone").innerHTML=`<div class="inline-confirm">¿Eliminar ${esc(q.numero)} para siempre? <button class="btn sm danger" id="del-yes">Sí, eliminar</button><button class="btn sm" id="del-no">Cancelar</button></div>`;
+    $("#del-no").onclick=renderEditor;$("#del-yes").onclick=async()=>{try{clearTimeout(saveT);S.dirty=false;await S.db.doc("presupuestos/"+q.id).delete();toast("Presupuesto eliminado");go("lista")}catch(e){toast("No se pudo eliminar: "+e.message)}}};
+  paintPicker();paintLineList();paintSend();paintPreview();paintTotbar();
+  window.addEventListener("resize",fitPreview);
+}
+function paintTotbar(){const el=$("#totbar");if(!el)return;const t=totals(S.current);if(S.current.sinTotal){el.innerHTML=`<span class="muted">Presupuesto de opciones: sin total</span>`;return}el.innerHTML=`<span>Base <b class="num">${eur(t.base)}</b></span><span>IVA <b class="num">${eur(t.iva)}</b></span><span>Total <b class="num">${eur(t.total)}</b></span>`}
+
+function paintPicker(){
+  const el=$("#picker");if(!el)return;if(!S.ui.picker){el.innerHTML="";return}
+  const f=(S.ui.pickq||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");const words=f.split(/\s+/).filter(Boolean);
+  const list=S.arts.filter(a=>{const k=[a.nombre,a.ref,a.proveedor,a.refProveedor,a.subtitulo,a.odooRef].join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");return words.every(w=>k.includes(w))});
+  const linked=new Set(S.arts.map(a=>String(a.odooId||"")));
+  const odoo=words.length&&f.length>=2?(S.prods||[]).filter(p=>!linked.has(String(p.i))&&words.every(w=>p._k.includes(w))).slice(0,15):[];
+  el.innerHTML=`<div class="picker"><div class="row"><label class="f" style="flex:1">Buscar en tus fichas${(S.prods||[]).length?" y en Odoo":""}<input id="pick-q" value="${esc(S.ui.pickq||"")}" placeholder="Nombre o referencia"></label>
+    <button class="btn sm" id="pick-new" style="align-self:end">Artículo nuevo (no está en Odoo)</button></div>
+    <div class="pick-list">
+    ${list.map(a=>`<div class="pick-it" data-id="${a.id}">${a.imagenes?.[0]?`<img src="${blob(a.imagenes[0])}" alt="">`:`<span class="thumb txt" style="width:36px">—</span>`}<div><b>${esc(a.nombre)}</b> ${origenChip(a)}<br><span class="muted" style="font-size:12px">REF. ${esc(a.ref)} · ${esc(a.subtitulo||"")}</span></div></div>`).join("")}
+    ${odoo.length?`<div class="muted" style="padding:6px 10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--bg)">En Odoo, sin ficha todavía</div>`+odoo.map(p=>`<div class="pick-it" data-oid="${p.i}"><span class="thumb txt" style="width:36px;font-size:9px">ODOO</span><div><b>${esc(p.n)}</b><br><span class="muted num" style="font-size:12px">REF. ${esc(p.r)} · PVP ${eur(num(p.pv))}</span></div></div>`).join(""):""}
+    ${!list.length&&!odoo.length?`<div class="empty" style="padding:16px">${f?"No hay nada con ese nombre o referencia. Si no está en Odoo, créalo como artículo nuevo.":(S.arts.length?"Escribe para buscar.":"Escribe el nombre o la referencia.")}</div>`:""}
+    </div></div>`;
+  const inp=$("#pick-q");inp.oninput=e=>{S.ui.pickq=e.target.value;paintPicker();const i=$("#pick-q");i.focus();i.setSelectionRange(i.value.length,i.value.length)};
+  $("#pick-new").onclick=()=>openArtModal(null,a=>addArtLine(a));
+  el.querySelectorAll("[data-id]").forEach(it=>it.onclick=()=>addArtLine(S.arts.find(a=>a.id===it.dataset.id)));
+  el.querySelectorAll("[data-oid]").forEach(it=>it.onclick=()=>{const p=S.prods.find(x=>String(x.i)===it.dataset.oid);if(!p)return;
+    openArtModal(null,a=>addArtLine(a),{origen:"odoo",odooId:p.i,odooRef:p.r,ref:p.r,nombre:p.n,tramos:(p.tr&&p.tr.length)?p.tr.map(x=>({desde:x[0],precio:x[1]})):[{desde:1,precio:num(p.pv)}],imagenes:p.t?["odoo-"+p.t]:[]})});
+}
+function origenChip(a){return a.origen==="odoo"?`<span class="chip st-odoo">Odoo</span>`:`<span class="chip st-enviado">Nuevo</span>`}
+function snap(a){const {id,creado,actualizado,...rest}=a;return JSON.parse(JSON.stringify({...rest,artId:id}))}
+function addArtLine(a){if(!a)return;const tr=tierLabels(a.tramos);const q0=tr.length?Math.max(1,num(tr[0].desde)):1;
+  S.current.lineas.push({id:uid(),tipo:"ficha",art:snap(a),cantidad:q0,precioAuto:true,precio:tr[0]?num(tr[0].precio):0,mostrarTramos:true});
+  S.ui.picker=false;paintPicker();touch();paintLineList()}
+
+function paintLineList(soft){
+  const el=$("#lines");if(!el)return;if(soft&&el.contains(document.activeElement))return;
+  const L=S.current.lineas;
+  el.innerHTML=L.length?L.map((l,i)=>{
+    const isF=l.tipo==="ficha";const p=linePrice(l);
+    return `<div class="ln" data-i="${i}">
+      ${isF?(l.art?.imagenes?.[0]?`<img class="thumb" src="${blob(l.art.imagenes[0])}" alt="">`:`<div class="thumb txt">FICHA</div>`):`<div class="thumb txt">LÍNEA</div>`}
+      <div style="min-width:0">
+        ${isF?`<div class="ttl">${esc(l.art?.nombre)} ${origenChip(l.art||{})}</div><div class="muted" style="font-size:12px">REF. ${esc(l.art?.ref)} · ${esc(l.art?.subtitulo||"")}</div>`
+          :`<label class="f">Descripción<input data-k="descripcion" value="${esc(l.descripcion)}" placeholder="p. ej. Marcaje DTF 1 color"></label>
+            <label class="f" style="margin-top:6px">Detalle (opcional)<input data-k="detalle" value="${esc(l.detalle)}" placeholder="p. ej. Logo en pecho, 8×8 cm"></label>`}
+        <div class="ctl">
+          <label class="f">Cantidad<input data-k="cantidad" inputmode="numeric" value="${esc(l.cantidad)}"></label>
+          <label class="f">Precio/ud${isF?` <span style="font-weight:400">(${l.precioAuto!==false?"según tramo":"manual"})</span>`:""}<input data-k="precio" inputmode="decimal" value="${esc(String(isF&&l.precioAuto!==false?p:l.precio).replace(".",","))}"></label>
+          ${isF?`<label class="f">Tramos en ficha<select data-k="mostrarTramos"><option value="1" ${l.mostrarTramos!==false?"selected":""}>Mostrar</option><option value="0" ${l.mostrarTramos===false?"selected":""}>Ocultar</option></select></label>`:`<span></span>`}
+        </div>
+        <div class="imp num" data-imp>Importe ${eur(lineTotal(l))}</div>
+        ${isF&&l.precioAuto===false?`<button class="btn sm" data-auto style="margin-top:6px">Volver al precio por tramos</button>`:""}
+      </div>
+      <div class="acts"><button class="icon" data-mv="-1" title="Subir" aria-label="Subir línea">↑</button><button class="icon" data-mv="1" title="Bajar" aria-label="Bajar línea">↓</button><button class="icon" data-rm title="Quitar" aria-label="Quitar línea">✕</button></div>
+    </div>`}).join(""):`<div class="empty" style="padding:18px">Añade un <b>artículo con ficha</b> (foto, descripción y tramos de precio) o una <b>línea simple</b> para marcajes, montajes o servicios.</div>`;
+  el.querySelectorAll(".ln").forEach(row=>{const i=+row.dataset.i;const l=L[i];
+    row.querySelectorAll("[data-k]").forEach(inp=>{const k=inp.dataset.k;
+      const h=e=>{const v=e.target.value;
+        if(k==="cantidad")l.cantidad=num(v);
+        else if(k==="precio"){l.precio=pnum(v);if(l.tipo==="ficha")l.precioAuto=false}
+        else if(k==="mostrarTramos")l.mostrarTramos=v==="1";
+        else l[k]=v;
+        touch();row.querySelector("[data-imp]").textContent="Importe "+eur(lineTotal(l));
+        if(k==="cantidad"&&l.tipo==="ficha"&&l.precioAuto!==false){const pi=row.querySelector('[data-k="precio"]');pi.value=String(linePrice(l)).replace(".",",")}
+        if(k==="precio"&&l.tipo==="ficha"&&!row.querySelector("[data-auto]"))setTimeout(()=>{if(!row.contains(document.activeElement))paintLineList()},0)};
+      inp.addEventListener(inp.tagName==="SELECT"?"change":"input",h);
+      if(k==="precio")inp.addEventListener("blur",()=>paintLineList());});
+    row.querySelector("[data-auto]")?.addEventListener("click",()=>{l.precioAuto=true;touch();paintLineList()});
+    row.querySelectorAll("[data-mv]").forEach(b=>b.onclick=()=>{const j=i+ +b.dataset.mv;if(j<0||j>=L.length)return;[L[i],L[j]]=[L[j],L[i]];touch();paintLineList()});
+    row.querySelector("[data-rm]").onclick=()=>{L.splice(i,1);touch();paintLineList()};
+  });
+}
+async function dupQuote(){await saveNow();const src=S.current;const y=new Date().getFullYear()%100;const seqs=S.quotes.filter(q=>q.anio===y).map(q=>q.seq||0);const seq=(seqs.length?Math.max(...seqs):y*10000)+1;
+  const {id,...d}=JSON.parse(JSON.stringify(src));Object.assign(d,{numero:`P${y}-${String(seq%10000).padStart(4,"0")}`,anio:y,seq,fecha:today(),estado:"borrador",creado:new Date().toISOString()});delete d.ejemplo;
+  try{const ref=await S.db.collection("presupuestos").add(d);S.current={id:ref.id,...d};S.dirty=false;toast("Copia creada: "+d.numero);renderEditor()}catch(e){toast("No se pudo duplicar: "+e.message)}}
+
+/* ---------- envío ---------- */
+function mailText(q){const t=totals(q);const c=q.cliente||{};
+  return {asunto:`Presupuesto ${q.numero}${c.nombre?" · "+c.nombre:""}`,
+  cuerpo:`Buenos días${c.contacto?" "+c.contacto:""}:\n\nTe adjuntamos el presupuesto ${q.numero} que nos solicitaste, ${q.sinTotal?"con varios modelos para que elijas el que más te guste; los precios van por tramos según la cantidad":`por un importe total de ${eur(t.total)} (IVA incluido)`}. Es válido hasta el ${fdate(addDays(q.fecha,q.validezDias))}.\n\nSi te parece bien, contéstanos a este correo y lo ponemos en marcha. Para cualquier cambio de cantidades, colores o marcaje lo ajustamos sin problema.\n\nUn saludo,\n${q.atendido||""}${q.atendido?"\n":""}Folder${S.cfg.slogan?" · "+S.cfg.slogan:""}${S.cfg.telefono?"\nTel. "+S.cfg.telefono:""}${S.cfg.whatsapp?" · WhatsApp "+S.cfg.whatsapp:""}${S.cfg.web?"\n"+S.cfg.web:""}`}}
+function paintSend(){const el=$("#send-panel");if(!el)return;if(!S.ui.send){el.innerHTML="";return}
+  const q=S.current;const m=mailText(q);
+  el.innerHTML=`<section class="card sec" style="margin-bottom:16px"><div class="row"><h2>Enviar por email</h2><span class="spacer"></span><button class="btn sm" id="send-x">Cerrar</button></div>
+  <p class="muted" style="margin:0">1. Descarga el PDF. 2. Copia el texto y pégalo en un correo nuevo con el PDF adjunto. 3. Marca el presupuesto como enviado.</p>
+  <div class="grid2"><label class="f">Para<input id="m-to" value="${esc(q.cliente?.email||"")}" readonly></label><label class="f">Asunto<input id="m-subj" value="${esc(m.asunto)}" readonly></label></div>
+  <div class="copybox" id="m-body">${esc(m.cuerpo)}</div>
+  <div class="row"><button class="btn gold" id="m-pdf">1 · Descargar PDF</button><button class="btn" id="m-copy">2 · Copiar texto</button><button class="btn" id="m-copys">Copiar asunto</button>
+  ${q.cliente?.email?`<a class="btn" href="mailto:${esc(q.cliente.email)}?subject=${encodeURIComponent(m.asunto)}&body=${encodeURIComponent(m.cuerpo)}">Abrir en el correo</a>`:""}
+  <button class="btn primary" id="m-sent">3 · Marcar como enviado</button></div></section>`;
+  $("#send-x").onclick=()=>{S.ui.send=false;paintSend()};
+  $("#m-pdf").onclick=makePdf;
+  const cp=(t,lab)=>{navigator.clipboard?.writeText(t).then(()=>toast(lab+" copiado"),()=>toast("Selecciona el texto y cópialo a mano"))};
+  $("#m-copy").onclick=()=>cp(m.cuerpo,"Texto");$("#m-copys").onclick=()=>cp(m.asunto,"Asunto");
+  $("#m-sent").onclick=()=>{q.estado="enviado";q.enviado=new Date().toISOString();touch();$("#estado").value="enviado";toast("Marcado como enviado")};
+}
+
+/* ---------- documento A4 ---------- */
+function sloganHtml(){return S.cfg.slogan?`<div class="d-slogan">${esc(S.cfg.slogan)}</div>`:""}
+function logoHtml(){return S.cfg.logo?`<div class="d-logo"><img src="${blob(S.cfg.logo)}" alt="Folder" crossorigin="anonymous"></div>`:`<div class="d-logo"><span class="d-wordmark">folder<span>.</span></span></div>`}
+function contactHtml(){const c=S.cfg;const p=[];
+  if(c.web)p.push(`<b>${esc(c.web)}</b>`);if(c.email)p.push(esc(c.email));
+  const tl=[c.telefono?"Tel. "+esc(c.telefono):"",c.whatsapp?"WhatsApp "+esc(c.whatsapp):""].filter(Boolean).join(" · ");if(tl)p.push(tl);
+  if(c.direccion)p.push(esc(c.direccion));return `<div class="d-contact">${p.join("<br>")}</div>`}
+function fichaHtml(l){const a=l.art||{};const tr=tierLabels(a.tramos);const t=tierFor(a.tramos,num(l.cantidad));const imgs=a.imagenes||[];
+  const cols=(a.colores||[]).filter(c=>c.nombre);const stock=cols.reduce((s,c)=>s+num(c.stock),0);
+  const un=a.unidad?(num(l.cantidad)===1?a.unidad:(a.unidadPl||a.unidad+"s")):"uds";const sinImg=a.sinImagen||(!imgs[0]&&a.desglose);
+  return `<div class="fx${sinImg?" fx-full":""}">
+   ${sinImg?"":`<div class="fx-img">${imgs[0]?`<img class="mainimg" src="${blob(imgs[0])}" alt="">`:`<div class="fx-noimg">Sin foto</div>`}
+     ${imgs.length>1?`<div class="thumbs">${imgs.slice(1,5).map(i=>`<img src="${blob(i)}" alt="">`).join("")}</div>`:""}</div>`}
+   <div>
+     ${a.ref?`<div class="fx-ref">REF. ${esc(a.ref)}</div>`:""}
+     <div class="fx-nm">${esc(a.nombre)}</div>
+     ${a.subtitulo?`<div class="fx-sb">${esc(a.subtitulo)}</div>`:""}
+     ${a.descripcion?`<div class="fx-ds">${esc(a.descripcion)}</div>`:""}
+     ${Array.isArray(a.desglose)&&a.desglose.length?`<div class="fx-dg">${a.desglose.map(g=>`<div class="g"><div class="gk">${esc(g.grupo||"")}</div><ul>${(g.items||[]).map(it=>`<li><b>${uds(it.cant||1)}</b> ${esc(it.nombre||it)}</li>`).join("")}</ul></div>`).join("")}</div>`:""}
+     ${l.mostrarTramos!==false&&tr.length?`<table class="fx-tr"><thead><tr><th>Uds.</th>${tr.map(x=>`<th>${esc(x.label)}</th>`).join("")}</tr></thead>
+       <tbody><tr><td>€/ud</td>${tr.map(x=>`<td class="${!S.noTot&&l.precioAuto!==false&&t&&x.desde===t.desde?"sel":""}">${eur(num(x.precio))}</td>`).join("")}</tr></tbody></table>`:""}
+     ${cols.length?`<div class="fx-col"><div><div class="k">Colores${stock?" y stock":""}</div><div class="cs">${cols.map(c=>`<span><i style="background:${esc(c.hex||"#ccc")}"></i>${esc(c.nombre)}${num(c.stock)?` · <b>${uds(c.stock)} uds</b>`:""}</span>`).join("")}</div></div></div>`:""}
+     ${S.noTot?"":`<div class="fx-line"><span>Cantidad <b>${uds(l.cantidad)} ${un}</b></span><span>Precio <b>${eur(linePrice(l))}/${a.unidad||"ud"}</b>${a.ivaDesglose?.length?" + IVA":""}</span><span class="tot">${eur(lineTotal(l))}</span></div>`}
+   </div></div>`}
+function slHead(){return `<div class="sl-head"><span>Descripción</span><span>Cantidad</span><span>Precio/ud</span><span>Importe</span></div>`}
+function slRow(l){return `<div class="sl-row"><span>${esc(l.descripcion||"—")}${l.detalle?`<span class="sub">${esc(l.detalle)}</span>`:""}</span><span>${uds(l.cantidad)}</span><span>${eur(num(l.precio))}</span><span>${eur(lineTotal(l))}</span></div>`}
+function totHtml(q){const t=totals(q);const notas=q.sinNotas?"":((q.notas||"").trim()||S.cfg.condiciones||"");
+  return `<div class="d-tot"><div class="d-notes">${notas?`<span class="k">Observaciones</span>${esc(notas)}`:""}</div>
+  ${q.sinTotal?"":`<div class="d-totbox"><div><span>Base imponible</span><span>${eur(t.base)}</span></div>${t.porTipo.length>1?t.porTipo.map(x=>`<div><span>IVA ${String(x.pct).replace(".",",")}% <small style="color:#7c8696">s/ ${eur(x.base)}</small></span><span>${eur(x.iva)}</span></div>`).join(""):`<div><span>IVA ${String(t.porTipo[0]?.pct??num(q.iva)).replace(".",",")}%</span><span>${eur(t.iva)}</span></div>`}<div class="g"><span>Total</span><span>${eur(t.total)}</span></div></div>`}</div>`}
+
+function buildBlocks(q){S.noTot=!!q.sinTotal;const blocks=[];const L=q.lineas||[];let inSimple=false;
+  L.forEach(l=>{if(l.tipo==="ficha"){inSimple=false;blocks.push({html:`<div class="blk">${fichaHtml(l)}</div>`})}
+    else{blocks.push({html:slRow(l),simple:true,first:!inSimple});inSimple=true}});
+  blocks.push({html:`<div class="blk" style="padding-top:12px">${totHtml(q)}</div>`});return blocks}
+function firstHead(q){const c=q.cliente||{};
+  return `<div class="d-head"><div>${logoHtml()}${sloganHtml()}</div>${contactHtml()}</div>
+  <div class="d-meta"><div class="d-title"><div class="k">Presupuesto</div><div class="n">${esc(q.numero)}</div>
+    <div class="d-dates"><div><span>Fecha</span><b>${fdate(q.fecha)}</b></div><div><span>Válido hasta</span><b>${fdate(addDays(q.fecha,q.validezDias))}</b></div>${q.atendido?`<div><span>Atendido por</span><b>${esc(q.atendido)}</b></div>`:""}</div></div>
+    <div class="d-client"><div class="k">Cliente</div><div class="nm">${esc(c.nombre||"—")}</div>${[c.nif?"NIF "+esc(c.nif):"",esc(c.direccion),esc(c.poblacion),c.contacto?"Att. "+esc(c.contacto):"",esc(c.email)].filter(Boolean).join("<br>")}</div></div>`}
+function smallHead(q){return `<div class="d-small-head">${logoHtml()}<span>Presupuesto <b style="color:#4a2991">${esc(q.numero)}</b> · ${fdate(q.fecha)}</span></div>`}
+function foot(i,n){return `<div class="d-foot"><span>${esc(S.cfg.pie||S.cfg.web||"")}</span><span>Página ${i} / ${n}</span></div>`}
+
+function paginate(q){
+  const M=$("#measure");const blocks=buildBlocks(q);
+  const PAGE_H=1123-46-70; // padding top + zona de pie
+  M.innerHTML=`<div id="m-first">${firstHead(q)}</div><div id="m-small">${smallHead(q)}</div><div id="m-sh">${slHead()}</div>`+blocks.map((b,i)=>`<div data-b="${i}">${b.html}</div>`).join("");
+  const h1=$("#m-first").offsetHeight+20, h2=$("#m-small").offsetHeight+20, hsh=$("#m-sh").offsetHeight;
+  const hs=blocks.map((b,i)=>M.querySelector(`[data-b="${i}"]`).offsetHeight+(b.simple&&b.first?hsh:0));
+  const pages=[];let cur=[],used=h1;
+  blocks.forEach((b,i)=>{let h=hs[i];
+    if(used+h>PAGE_H&&cur.length){pages.push(cur);cur=[];used=h2;if(b.simple&&!b.first){b={...b,first:true};h+=hsh}}
+    cur.push(b);used+=h});
+  pages.push(cur);M.innerHTML="";
+  return pages.map((p,i)=>`<div class="page">${i===0?firstHead(q):smallHead(q)}<div class="d-body">${
+    p.map((b,j)=>b.simple?((b.first?slHead():"")+b.html+((p[j+1]&&p[j+1].simple)?"":`<div style="height:14px"></div>`)):b.html).join("")}</div>${foot(i+1,pages.length)}</div>`).join("");
+}
+let pvT=null;
+function paintPreview(){clearTimeout(pvT);pvT=setTimeout(()=>{const pv=$("#pv");if(!pv||!S.current)return;pv.innerHTML=paginate(S.current);fitPreview()},120)}
+function fitPreview(){const sc=$("#pv-scroller"),pv=$("#pv");if(!sc||!pv)return;const w=sc.clientWidth-28;const k=Math.min(1,w/794);pv.style.transform=`scale(${k})`;pv.style.width="794px";pv.style.height=(pv.scrollHeight*k)+"px";pv.style.marginBottom=`-${pv.scrollHeight*(1-k)}px`}
+
+async function makePdf(){
+  const q=S.current;await saveNow();
+  if(!window.html2canvas||!window.jspdf){toast("No se pudo cargar el generador de PDF. Recarga la página.");return}
+  if(!S.downloads){toast("Esta vista no permite descargar archivos");return}
+  const btns=[$("#pdf"),$("#m-pdf")].filter(Boolean);btns.forEach(b=>{b.disabled=true;b.dataset.t=b.textContent;b.textContent="Generando PDF…"});
+  try{
+    const st=$("#pdfstage");st.innerHTML=paginate(q);
+    await Promise.all([...st.querySelectorAll("img")].map(im=>im.complete?0:new Promise(r=>{im.onload=im.onerror=r})));
+    await document.fonts?.ready;
+    const pdf=new window.jspdf.jsPDF({unit:"mm",format:"a4",compress:true});
+    const pages=[...st.querySelectorAll(".page")];
+    for(let i=0;i<pages.length;i++){pages[i].style.boxShadow="none";pages[i].style.margin="0";
+      const cv=await html2canvas(pages[i],{scale:2,backgroundColor:"#ffffff",useCORS:true,logging:false});
+      if(i)pdf.addPage();pdf.addImage(cv.toDataURL("image/jpeg",0.92),"JPEG",0,0,210,297)}
+    st.innerHTML="";
+    const name=`Presupuesto ${q.numero}${q.cliente?.nombre?" - "+q.cliente.nombre.replace(/[\\/:*?"<>|]/g,""):""}.pdf`;
+    await S.downloads.save({filename:name,data:pdf.output("blob")});toast("PDF listo: "+name);
+  }catch(e){if(e&&e.code==="declined")toast("Descarga cancelada");else{console.error(e);toast("No se pudo generar el PDF: "+(e.message||e.code))}}
+  finally{btns.forEach(b=>{b.disabled=false;b.textContent=b.dataset.t})}
+}
+
+/* ---------- artículos ---------- */
+function renderArticulos(){
+  const f=(S.ui.artq||"").toLowerCase();const list=S.arts.filter(a=>!f||[a.nombre,a.ref,a.proveedor,a.refProveedor,a.subtitulo].join(" ").toLowerCase().includes(f));
+  $("#app").innerHTML=`<div class="row" style="margin-bottom:16px"><h1>Artículos</h1><span class="muted">${S.arts.length} guardados</span><span class="spacer"></span>
+    <label class="f" style="min-width:220px"><input id="art-q" placeholder="Buscar nombre, ref. o proveedor" value="${esc(S.ui.artq||"")}" aria-label="Buscar artículos"></label>
+    <button class="btn primary" id="art-new">+ Nuevo artículo</button></div>
+  ${S.assets?"":`<p class="notice">Solo quien puede editar esta página puede subir fotos.</p>`}
+  <div class="artgrid">${list.length?list.map(a=>{const tr=tierLabels(a.tramos);const min=tr.length?Math.min(...tr.map(x=>num(x.precio))):null;
+    return `<div class="card art" data-id="${a.id}">${a.imagenes?.[0]?`<img src="${blob(a.imagenes[0])}" alt="">`:`<div class="noimg">Sin foto</div>`}
+    <div style="min-width:0"><div class="ref">REF. ${esc(a.ref)}</div><div class="nm">${esc(a.nombre)}</div><div class="sb">${esc(a.subtitulo||"")}</div>
+    <div style="margin-top:4px">${origenChip(a)}</div>
+    <div class="muted" style="font-size:12px;margin-top:6px">${esc(a.proveedor||"Proveedor sin indicar")}${a.refProveedor?" · "+esc(a.refProveedor):""}</div>
+    ${min!==null?`<div style="margin-top:6px;font-weight:700" class="num">desde ${eur(min)}/ud</div>`:""}</div></div>`}).join(""):`<div class="card empty" style="grid-column:1/-1">${S.arts.length?"Ningún artículo coincide con la búsqueda.":"Aún no hay artículos. Crea uno con su foto, descripción y tramos de precio, o búscalo en Odoo desde un presupuesto."}</div>`}</div>`;
+  $("#art-new").onclick=()=>openArtModal(null);
+  const i=$("#art-q");i.oninput=e=>{S.ui.artq=e.target.value;renderArticulos();const j=$("#art-q");j.focus();j.setSelectionRange(j.value.length,j.value.length)};
+  document.querySelectorAll(".art[data-id]").forEach(c=>c.onclick=()=>openArtModal(S.arts.find(a=>a.id===c.dataset.id)));
+}
+function openArtModal(a,onSaved,pre){
+  const d=a?structuredClone(a):{origen:"nuevo",odooRef:"",ref:"",nombre:"",subtitulo:"",descripcion:"",proveedor:"",refProveedor:"",costeNotas:"",imagenes:[],tramos:[{desde:1,precio:0}],colores:[],...(pre||{})};d.origen=d.origen||"nuevo";
+  d.tramos=d.tramos||[];d.colores=d.colores||[];d.imagenes=d.imagenes||[];S.modalOpen=true;
+  const root=$("#modal-root");
+  const paint=()=>{root.innerHTML=`<div class="modal-bg" id="mbg"><div class="card modal" role="dialog" aria-modal="true" aria-label="Artículo">
+    <div class="row"><h2>${a?"Editar artículo":"Nuevo artículo"}</h2><span class="spacer"></span><button class="btn sm" id="m-x">Cerrar</button></div>
+    <div><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:6px">Fotos (la primera es la principal)</div>
+      <div class="imgs">${d.imagenes.map((id,i)=>`<div class="im"><img src="${blob(id)}" alt="">${i===0?'<span class="main">Principal</span>':`<button data-main="${i}" title="Hacer principal" aria-label="Hacer principal" style="left:-8px;right:auto">★</button>`}<button data-rmimg="${i}" aria-label="Quitar foto">✕</button></div>`).join("")}
+      ${S.assets?`<label class="drop" id="drop">+ Añadir foto<br>o pega una imagen<input type="file" id="m-file" accept="image/*" multiple hidden></label>`:`<span class="muted" style="font-size:12px">No puedes subir fotos desde esta vista.</span>`}</div></div>
+    <div class="grid2"><label class="f">¿Está dado de alta en Odoo?<select id="a-orig"><option value="nuevo" ${d.origen!=="odoo"?"selected":""}>No, es nuevo (habrá que darlo de alta)</option><option value="odoo" ${d.origen==="odoo"?"selected":""}>Sí, ya está en Odoo</option></select></label>
+      <label class="f">Referencia en Odoo<input id="a-oref" value="${esc(d.odooRef||"")}" placeholder="${d.origen==="odoo"?"":"Se pondrá al darlo de alta"}"></label></div>
+    <div class="grid3"><label class="f">Referencia (sale en la ficha)<input id="a-ref" value="${esc(d.ref)}"></label><label class="f">Proveedor<input id="a-prov" value="${esc(d.proveedor)}"></label><label class="f">Ref. proveedor<input id="a-refp" value="${esc(d.refProveedor)}"></label></div>
+    <label class="f">Nombre<input id="a-nom" value="${esc(d.nombre)}" placeholder="Agenda Velmont"></label>
+    <label class="f">Línea destacada (formato · material · tipo)<input id="a-sub" value="${esc(d.subtitulo)}" placeholder="A5 · PU · Página día"></label>
+    <label class="f">Descripción<textarea id="a-desc" rows="3">${esc(d.descripcion)}</textarea></label>
+    <div><div class="row"><b>Tramos de precio (venta)</b><span class="spacer"></span><button class="btn sm" id="tr-add">+ Tramo</button></div>
+      <div class="mini-rows" style="margin-top:6px">${d.tramos.map((t,i)=>`<div class="mini-row"><label class="f">Desde (uds)<input data-tr="${i}" data-k="desde" inputmode="numeric" value="${esc(t.desde)}"></label><label class="f">Precio €/ud<input data-tr="${i}" data-k="precio" inputmode="decimal" value="${esc(String(t.precio).replace(".",","))}"></label><button class="icon" data-trrm="${i}" aria-label="Quitar tramo">✕</button></div>`).join("")}</div>
+      <p class="muted" style="font-size:12px;margin:6px 0 0">El primer tramo desde 1 sale como «-500» si el siguiente empieza en 500.</p></div>
+    <div><div class="row"><b>Colores y stock</b><span class="spacer"></span><button class="btn sm" id="co-add">+ Color</button></div>
+      <div class="mini-rows" style="margin-top:6px">${d.colores.map((c,i)=>`<div class="mini-row c3"><label class="f">Color<input data-co="${i}" data-k="nombre" value="${esc(c.nombre)}"></label><label class="f">Muestra<input type="color" data-co="${i}" data-k="hex" value="${esc(c.hex||"#222222")}" style="padding:2px;height:34px"></label><label class="f">Stock (uds)<input data-co="${i}" data-k="stock" inputmode="numeric" value="${esc(c.stock||"")}"></label><button class="icon" data-corm="${i}" aria-label="Quitar color">✕</button></div>`).join("")}</div></div>
+    <label class="f">Notas internas (coste, plazos… no salen en el presupuesto)<textarea id="a-notas" rows="2">${esc(d.costeNotas)}</textarea></label>
+    <div id="m-err"></div>
+    <div class="row">${a?`<span id="m-delz"><button class="btn danger" id="m-del">Eliminar artículo</button></span>`:""}<span class="spacer"></span><button class="btn" id="m-cancel">Cancelar</button><button class="btn primary" id="m-save">${onSaved?"Guardar y añadir al presupuesto":"Guardar artículo"}</button></div>
+  </div></div>`;bind()};
+  const close=()=>{S.modalOpen=false;root.innerHTML="";document.removeEventListener("paste",onPaste);if(S.view==="articulos")renderArticulos();else if(S.view==="editor")paintPicker()};
+  const upload=async files=>{for(const f of files){if(!f.type.startsWith("image/"))continue;try{toast("Subiendo foto…");const r=await S.assets.upload(f);d.imagenes.push(r.id);read();paint()}catch(e){toast("No se pudo subir la foto: "+(e.message||e.code))}}};
+  const onPaste=e=>{const fs=[...(e.clipboardData?.files||[])];if(fs.length&&S.assets){e.preventDefault();upload(fs)}};
+  document.addEventListener("paste",onPaste);
+  const read=()=>{const v=id=>$("#"+id)?.value??"";Object.assign(d,{origen:v("a-orig")||"nuevo",odooRef:v("a-oref").trim(),ref:v("a-ref").trim(),proveedor:v("a-prov").trim(),refProveedor:v("a-refp").trim(),nombre:v("a-nom").trim(),subtitulo:v("a-sub").trim(),descripcion:v("a-desc").trim(),costeNotas:v("a-notas").trim()})};
+  function bind(){
+    $("#m-x").onclick=close;$("#m-cancel").onclick=close;
+    $("#mbg").onclick=e=>{if(e.target.id==="mbg")close()};
+    $("#m-file")?.addEventListener("change",e=>upload([...e.target.files]));
+    const dr=$("#drop");if(dr){dr.ondragover=e=>e.preventDefault();dr.ondrop=e=>{e.preventDefault();upload([...e.dataTransfer.files])}}
+    root.querySelectorAll("[data-rmimg]").forEach(b=>b.onclick=()=>{read();d.imagenes.splice(+b.dataset.rmimg,1);paint()});
+    root.querySelectorAll("[data-main]").forEach(b=>b.onclick=()=>{read();const i=+b.dataset.main;const [x]=d.imagenes.splice(i,1);d.imagenes.unshift(x);paint()});
+    root.querySelectorAll("[data-tr]").forEach(inp=>inp.oninput=e=>{const t=d.tramos[+inp.dataset.tr];t[inp.dataset.k]=inp.dataset.k==="precio"?pnum(e.target.value):num(e.target.value)});
+    root.querySelectorAll("[data-co]").forEach(inp=>inp.oninput=e=>{const c=d.colores[+inp.dataset.co];c[inp.dataset.k]=inp.dataset.k==="stock"?num(e.target.value):e.target.value});
+    $("#tr-add").onclick=()=>{read();const last=d.tramos[d.tramos.length-1];d.tramos.push({desde:last?Math.max(num(last.desde)*2,100):1,precio:last?last.precio:0});paint()};
+    $("#co-add").onclick=()=>{read();d.colores.push({nombre:"",hex:"#222222",stock:0});paint()};
+    root.querySelectorAll("[data-trrm]").forEach(b=>b.onclick=()=>{read();d.tramos.splice(+b.dataset.trrm,1);paint()});
+    root.querySelectorAll("[data-corm]").forEach(b=>b.onclick=()=>{read();d.colores.splice(+b.dataset.corm,1);paint()});
+    $("#m-del")?.addEventListener("click",()=>{$("#m-delz").innerHTML=`<span class="inline-confirm">¿Eliminar? Los presupuestos ya hechos no cambian. <button class="btn sm danger" id="m-dy">Eliminar</button></span>`;
+      $("#m-dy").onclick=async()=>{try{await S.db.doc("articulos/"+a.id).delete();toast("Artículo eliminado");close()}catch(e){toast("No se pudo eliminar: "+e.message)}}});
+    $("#m-save").onclick=async()=>{read();if(!d.nombre){$("#m-err").innerHTML=`<p class="notice">Ponle al menos un nombre al artículo.</p>`;return}
+      d.tramos=d.tramos.filter(t=>num(t.precio)>0||num(t.desde)>0).sort((x,y)=>num(x.desde)-num(y.desde));d.colores=d.colores.filter(c=>c.nombre);
+      const {id,...data}=d;data.actualizado=new Date().toISOString();
+      try{let ref;if(a){await S.db.doc("articulos/"+a.id).set(JSON.parse(JSON.stringify(data)));ref={id:a.id}}else{data.creado=data.actualizado;ref=await S.db.collection("articulos").add(JSON.parse(JSON.stringify(data)))}
+        toast("Artículo guardado");const saved={id:ref.id,...data};close();if(onSaved)onSaved(saved)}catch(e){toast("No se pudo guardar: "+e.message)}};
+  }
+  paint();
+}
+
+/* ---------- ajustes ---------- */
+function renderAjustes(){const c=S.cfg;
+  $("#app").innerHTML=`<div class="row" style="margin-bottom:16px"><h1>Ajustes de la cabecera</h1></div>
+  <div class="card sec" style="max-width:820px">
+    <p class="muted" style="margin:0">Estos datos salen en todos los presupuestos. Son genéricos de Folder, sin datos fiscales de ninguna empresa, para que valgan para todas.</p>
+    <div class="row" style="align-items:flex-start;gap:16px"><div class="logoprev">${c.logo?`<img src="${blob(c.logo)}" alt="Logo">`:`<span class="d-wordmark" style="font-size:28px">folder<span>.</span></span>`}</div>
+      <div style="display:flex;flex-direction:column;gap:8px">${S.assets?`<label class="btn">Subir logo de Folder<input type="file" id="s-logo" accept="image/*" hidden></label>`:`<span class="muted">No puedes subir el logo desde esta vista.</span>`}
+      ${c.logo?`<button class="btn sm" id="s-logo-rm">Quitar logo</button>`:`<span class="muted" style="font-size:12px">Mientras no subas el logo sale el nombre en texto.</span>`}</div></div>
+    <div class="grid2">
+      <label class="f">Web<input id="s-web" value="${esc(c.web)}"></label>
+      <label class="f">Email<input id="s-email" value="${esc(c.email)}" placeholder="info@regalosfolder.es"></label>
+      <label class="f">Teléfono<input id="s-telefono" value="${esc(c.telefono)}"></label>
+      <label class="f">WhatsApp<input id="s-whatsapp" value="${esc(c.whatsapp)}"></label>
+    </div>
+    <label class="f">Slogan (sale bajo el logo)<input id="s-slogan" value="${esc(c.slogan||"")}"></label>
+    <label class="f">Dirección (opcional)<input id="s-direccion" value="${esc(c.direccion)}"></label>
+    <div class="grid2"><label class="f">IVA por defecto %<input id="s-iva" inputmode="decimal" value="${esc(c.iva)}"></label><label class="f">Validez por defecto (días)<input id="s-validez" inputmode="numeric" value="${esc(c.validez)}"></label></div>
+    <label class="f">Condiciones generales (salen si el presupuesto no tiene observaciones propias)<textarea id="s-condiciones" rows="4">${esc(c.condiciones)}</textarea></label>
+    <label class="f">Texto del pie de página<input id="s-pie" value="${esc(c.pie)}" placeholder="Por defecto, la web"></label>
+    <p class="muted" style="margin:0;font-size:13px">Clientes de Odoo en el buscador: <b>${uds((S.clients||[]).length)}</b>${S.clientsFecha?` · actualizados el ${fdate(S.clientsFecha)}`:""}. Se leen en directo de Odoo y se refrescan solos cada 30 minutos.</p>
+    <div class="row"><span class="spacer"></span><button class="btn primary" id="s-save">Guardar ajustes</button></div>
+  </div>`;
+  const keys=["slogan","web","email","telefono","whatsapp","direccion","iva","validez","condiciones","pie"];
+  const save=async extra=>{const data={...S.cfg};keys.forEach(k=>{const v=$("#s-"+k).value;data[k]=k==="iva"?pnum(v):k==="validez"?num(v):v.trim()});Object.assign(data,extra||{});
+    try{await S.db.doc("config/empresa").set(data);toast("Ajustes guardados")}catch(e){toast("No se guardaron: "+e.message)}};
+  $("#s-save").onclick=()=>save();
+  $("#s-logo")?.addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{toast("Subiendo logo…");const r=await S.assets.upload(f);await save({logo:r.id})}catch(er){toast("No se pudo subir: "+(er.message||er.code))}});
+  $("#s-logo-rm")?.addEventListener("click",()=>save({logo:""}));
+}
+
+boot();
+})();
+</script>
+
+</body></html>

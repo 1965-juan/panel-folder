@@ -98,6 +98,12 @@ class DemoOdoo:
         if model == "sale.order.line":
             return [{"id": 1, "product_id": [1, "[115460101] Bolígrafo BIC Cristal azul"], "name": "Bolígrafo BIC Cristal azul",
                      "product_uom_qty": 50, "qty_delivered": 0, "qty_invoiced": 0, "price_unit": 0.32, "price_subtotal": 16.0}]
+        if model == "product.product":
+            return [{"id": 11, "default_code": "115460101", "name": "Bolígrafo BIC Cristal azul", "lst_price": 0.45, "product_tmpl_id": [21, "x"]},
+                    {"id": 12, "default_code": "20829", "name": "Gorra Karola", "lst_price": 2.9, "product_tmpl_id": [22, "x"]}]
+        if model == "product.pricelist.item":
+            return [{"product_tmpl_id": [21, "x"], "product_id": False, "min_quantity": 50, "fixed_price": 0.32},
+                    {"product_tmpl_id": [21, "x"], "product_id": False, "min_quantity": 500, "fixed_price": 0.27}]
         if model == "mail.message":
             return [{"id": 1, "date": d(-2) + " 09:12:00", "author_id": [2, "Dep. Ventas"], "body": "<p>Presupuesto creado</p>",
                      "subtype_id": [1, "Nota"], "tracking_value_ids": []}]

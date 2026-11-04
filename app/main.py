@@ -282,3 +282,10 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
 @app.get("/api/salud")
 def salud():
     return {"ok": True, "demo": DEMO}
+
+
+# ---------- módulo Presupuestos ----------
+from . import presupuestos as _presupuestos  # noqa: E402
+
+_presupuestos.setup(app, data_dir=DATA, static_dir=BASE / "static", odoo=odoo, current_user=current_user,
+                    all_company_ids=lambda: [c["id"] for c in companies()])
