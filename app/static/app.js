@@ -213,6 +213,7 @@ async function waChat(id, quiet) {
   head.innerHTML = `<b>${escH(c.nombre || '')}</b><span class="muted">+${escH(c.wa_id)}</span>
     <span class="sp"><label><input type="checkbox" id="wa-bot1" ${c.bot ? 'checked' : ''}> Bot</label>
     <label><input type="checkbox" id="wa-opt" ${c.optin ? 'checked' : ''}> Acepta ofertas</label>
+    ${!WAST.conectado ? `<a class="wa-open" target="_blank" rel="noopener" href="https://wa.me/${c.wa_id}?text=${encodeURIComponent(WAST.aviso_texto || '')}">Abrir en WhatsApp</a>` : ''}
     ${c.necesita_persona ? '<button id="wa-ok">Marcar atendido</button>' : ''}</span>
     ${c.necesita_persona && c.resumen ? `<div class="res">⚠️ ${escH(c.resumen)}</div>` : ''}
     ${c.humano ? '<div class="muted" style="flex-basis:100%;font-size:12px">La lleva una persona: el bot no contesta durante 12 h (o vuelve a activarlo con la casilla).</div>' : ''}`;
@@ -223,6 +224,7 @@ async function waChat(id, quiet) {
   box.innerHTML = '';
   d.mensajes.forEach(m => {
     const b = document.createElement('div');
+    if (m.dir === 'sys') { b.className = 'bub sys'; b.textContent = '📞 Llamada recibida · secretaria IA\n' + (m.texto || ''); b.insertAdjacentHTML('beforeend', `<small>${hora(m.ts)}</small>`); box.appendChild(b); return; }
     b.className = 'bub ' + m.dir + (m.autor === 'bot' ? ' bot' : m.autor === 'campaña' ? ' camp' : '');
     const quien = m.dir === 'in' ? '' : m.autor === 'bot' ? '🤖 bot · ' : m.autor === 'móvil' ? '📱 móvil · ' : m.autor === 'campaña' ? '📣 campaña · ' : escH(m.autor) + ' · ';
     b.textContent = m.texto || '';
@@ -277,8 +279,9 @@ async function waBotLoad() {
   try {
     const a = await api('/api/wa/ajustes');
     $('#b-act').checked = a.bot_activo === 'si'; $('#b-pre').checked = a.bot_precios === 'si'; $('#b-info').value = a.bot_info;
+    $('#l-auto').checked = a.llamadas_auto === 'si'; $('#l-pl').value = a.llamadas_plantilla; $('#l-txt').value = a.aviso_texto; $('#l-tok').value = a.llamadas_token;
     $('#b-con').textContent = `WhatsApp: ${WAST.conectado ? 'conectado' : 'sin conectar'} · Claude: ${WAST.claude ? 'clave puesta' : 'falta la clave'} · modelo ${a.modelo}`;
   } catch (e) { alertBox(e.message); }
 }
-$('#b-save').onclick = async () => { await jpost('/api/wa/ajustes', { bot_activo: $('#b-act').checked ? 'si' : 'no', bot_precios: $('#b-pre').checked ? 'si' : 'no', bot_info: $('#b-info').value }, 'PUT'); alertBox('Guardado'); waBadge(); };
+$('#b-save').onclick = async () => { await jpost('/api/wa/ajustes', { bot_activo: $('#b-act').checked ? 'si' : 'no', bot_precios: $('#b-pre').checked ? 'si' : 'no', bot_info: $('#b-info').value, llamadas_auto: $('#l-auto').checked ? 'si' : 'no', llamadas_plantilla: $('#l-pl').value.trim(), aviso_texto: $('#l-txt').value }, 'PUT'); alertBox('Guardado'); waBadge(); };
 $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhook', { url_publica: $('#b-url').value.trim() }); alertBox('Conectado: WhatsApp ya enviará los mensajes al panel'); } catch (e) { alertBox(e.message); } };

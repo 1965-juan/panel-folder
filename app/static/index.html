@@ -79,6 +79,11 @@
         <label class="chk"><input type="checkbox" id="b-act"> Bot activo (contesta solo a los mensajes que entran)</label>
         <label class="chk"><input type="checkbox" id="b-pre"> Puede dar precios orientativos del catálogo</label>
         <label>Información de la empresa que el bot puede contar (horario, dirección, tiendas, plazos habituales, envíos…)<textarea id="b-info" rows="10"></textarea></label>
+        <h3>Llamadas de la secretaria IA</h3>
+        <label class="chk"><input type="checkbox" id="l-auto"> Cuando llegue una llamada, escribir solo al cliente por WhatsApp</label>
+        <label>Mensaje al cliente (con WhatsApp conectado se envía la plantilla aprobada con este texto)<textarea id="l-txt" rows="3"></textarea></label>
+        <label>Nombre de la plantilla aprobada<input id="l-pl"></label>
+        <label>Código para n8n (cabecera X-Panel-Token)<input id="l-tok" readonly onclick="this.select()"></label>
         <button id="b-save" class="btn">Guardar</button>
         <h3>Conexión</h3><p id="b-con" class="muted"></p>
         <label>Dirección pública del panel (https://…)<input id="b-url" placeholder="https://nas-folder.tu-red.ts.net"></label>

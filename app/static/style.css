@@ -124,3 +124,5 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .wa-prev{background:#f6f3fc;border-radius:8px;padding:8px 10px;margin:0;white-space:pre-wrap;font-size:13px}
 .wa-prev:empty{display:none}
 @media (max-width:900px){.wa-wrap,.wa-pane{grid-template-columns:1fr;height:auto}.wa-chat{min-height:60vh}}
+.bub.sys{align-self:center;max-width:86%;background:#fff6e5;border:1px dashed #F39A2B;font-size:13px}
+.wa-open{background:#25D366;color:#fff;text-decoration:none;border-radius:8px;padding:4px 10px;font-weight:700}

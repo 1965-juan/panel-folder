@@ -52,6 +52,8 @@ y dile que en breve le contesta una persona del equipo.
 Información de la empresa (la completa Juan desde el panel):
 {info}
 """
+AVISO_DEFECTO = ("Hola 👋, somos Folder Castellón. Hemos visto que nos has llamado y no hemos podido atenderte en ese momento. "
+                 "¿Te ayudamos por aquí? Cuéntanos qué necesitas.")
 INFO_DEFECTO = "Web: www.foldercastellon.com\n(Horario, dirección y tiendas: pendiente de completar en Ajustes del bot.)"
 
 
@@ -95,6 +97,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
     # secreto de la URL del webhook (la URL pública lleva este código para que nadie más pueda escribir)
     if not ajuste("webhook_secreto"):
         set_ajuste("webhook_secreto", secrets.token_urlsafe(18))
+    if not ajuste("llamadas_token"):
+        set_ajuste("llamadas_token", secrets.token_urlsafe(18))
 
     def leer_clave(f, patron):
         if not f.exists():
@@ -185,16 +189,23 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
          "input_schema": {"type": "object", "properties": {"resumen": {"type": "string"}}, "required": ["resumen"]}},
     ]
 
+    def contexto_llamada(wa_id):
+        with con() as c:
+            r = c.execute("SELECT texto FROM mensajes WHERE wa_id=? AND autor='llamada' AND ts>? ORDER BY ts DESC LIMIT 1",
+                          (wa_id, time.time() - 7 * 86400)).fetchone()
+        return ("\n\nContexto: este cliente nos llamó por teléfono hace poco y la secretaria virtual tomó esta nota. "
+                "Tenlo en cuenta y no le hagas repetir lo que ya contó:\n" + r["texto"]) if r else ""
+
     def instrucciones():
         regla = ("Puedes dar el precio orientativo sin IVA que devuelve buscar_articulos, aclarando que el precio final "
                  "depende de cantidad y personalización.") if ajuste("bot_precios", "no") == "si" else \
                 "No des precios: di que le preparamos un presupuesto y recoge los datos."
         return INSTRUCCIONES_BASE.format(regla_precios=regla, info=ajuste("bot_info", INFO_DEFECTO))
 
-    def claude(messages):
+    def claude(messages, extra=""):
         r = http.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", headers={
             "x-api-key": clave_claude(), "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": model, "max_tokens": 600, "system": instrucciones(), "tools": HERRAMIENTAS, "messages": messages})
+            json={"model": model, "max_tokens": 600, "system": instrucciones() + extra, "tools": HERRAMIENTAS, "messages": messages})
         if r.status_code != 200:
             raise RuntimeError(f"Claude {r.status_code}: {r.text[:200]}")
         return r.json()
@@ -202,7 +213,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
     def responder_bot(wa_id):
         with con() as c:
             ct = c.execute("SELECT * FROM contactos WHERE wa_id=?", (wa_id,)).fetchone()
-            hist = c.execute("SELECT dir, texto FROM mensajes WHERE wa_id=? ORDER BY ts DESC LIMIT ?", (wa_id, MAX_HISTORIAL)).fetchall()
+            hist = c.execute("SELECT dir, texto FROM mensajes WHERE wa_id=? AND dir!='sys' ORDER BY ts DESC LIMIT ?", (wa_id, MAX_HISTORIAL)).fetchall()
         if ajuste("bot_activo", "si") != "si" or not ct["bot"] or ct["humano_hasta"] > time.time():
             return
         if not clave_claude():
@@ -222,7 +233,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
             return
         try:
             for _ in range(5):
-                res = claude(msgs)
+                res = claude(msgs, contexto_llamada(wa_id))
                 usos = [b for b in res["content"] if b["type"] == "tool_use"]
                 if not usos:
                     texto = "".join(b.get("text", "") for b in res["content"] if b["type"] == "text").strip()
@@ -327,7 +338,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
         with con() as c:
             pend = c.execute("SELECT COUNT(*) n FROM contactos WHERE necesita_persona=1 OR no_leidos>0").fetchone()["n"]
         return {"conectado": conectado(), "demo": demo, "claude": bool(clave_claude()), "proveedor": provider,
-                "pendientes": pend, "bot_activo": ajuste("bot_activo", "si") == "si"}
+                "pendientes": pend, "bot_activo": ajuste("bot_activo", "si") == "si",
+                "aviso_texto": ajuste("aviso_texto", AVISO_DEFECTO)}
 
     @app.get("/api/wa/conversaciones")
     def wa_convs(request: Request, q: str = ""):
@@ -399,13 +411,16 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
         host = request.headers.get("x-forwarded-host") or request.url.netloc
         return {"bot_activo": ajuste("bot_activo", "si"), "bot_precios": ajuste("bot_precios", "no"),
                 "bot_info": ajuste("bot_info", INFO_DEFECTO), "modelo": model,
-                "webhook_ruta": f"/wa/webhook/{ajuste('webhook_secreto')}", "host": host}
+                "webhook_ruta": f"/wa/webhook/{ajuste('webhook_secreto')}", "host": host,
+                "llamadas_token": ajuste("llamadas_token"), "llamadas_auto": ajuste("llamadas_auto", "si"),
+                "llamadas_plantilla": ajuste("llamadas_plantilla", "llamada_recibida"),
+                "aviso_texto": ajuste("aviso_texto", AVISO_DEFECTO)}
 
     @app.put("/api/wa/ajustes")
     async def wa_ajustes_put(request: Request):
         solo_admin(request)
         b = await request.json()
-        for k in ("bot_activo", "bot_precios", "bot_info"):
+        for k in ("bot_activo", "bot_precios", "bot_info", "llamadas_auto", "llamadas_plantilla", "aviso_texto"):
             if k in b:
                 set_ajuste(k, str(b[k]))
         return {"ok": True}
@@ -424,6 +439,37 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
         api_wa("POST", "/v1/configs/webhook", json={"url": url})
         set_ajuste("webhook_url", url)
         return {"ok": True}
+
+    # ---------- llamadas de la secretaria IA (las manda n8n) ----------
+    def parse_llamada(texto):
+        tel = re.search(r"Tel[eé]fono[^:+\d]*:?\s*(\+?[\d\s]{9,16})", texto or "")
+        res = re.search(r"Resumen:\s*(.+?)(?:\n\s*\n|Tel[eé]fono de origen|$)", texto or "", re.S)
+        return (tel.group(1) if tel else ""), (res.group(1).strip() if res else (texto or "").strip()[:1000])
+
+    @app.post("/api/wa/llamada")
+    async def wa_llamada(request: Request):
+        if request.headers.get("x-panel-token") != ajuste("llamadas_token"):
+            raise HTTPException(403, "Token incorrecto")
+        b = await request.json()
+        tel, resumen = parse_llamada(b.get("texto") or "")
+        tel = re.sub(r"\D", "", b.get("telefono") or tel)
+        resumen = b.get("resumen") or resumen
+        if len(tel) == 9:
+            tel = "34" + tel
+        if len(tel) < 11:
+            return {"ok": False, "motivo": "Sin teléfono (número oculto)"}
+        guardar(tel, "sys", "llamada", resumen)
+        with lock, con() as c:
+            c.execute("UPDATE contactos SET necesita_persona=1, resumen=? WHERE wa_id=?", ("📞 Ha llamado: " + resumen[:250], tel))
+            reciente = c.execute("SELECT 1 FROM mensajes WHERE wa_id=? AND dir='out' AND ts>?", (tel, time.time() - 12 * 3600)).fetchone()
+        enviado = False
+        if conectado() and ajuste("llamadas_auto", "si") == "si" and not reciente:
+            try:
+                enviar_plantilla(tel, ajuste("llamadas_plantilla", "llamada_recibida"), "es", [], None)
+                enviado = True
+            except Exception as e:
+                print("[whatsapp] aviso de llamada:", e, flush=True)
+        return {"ok": True, "telefono": tel, "whatsapp_enviado": enviado}
 
     # ---------- campañas ----------
     @app.get("/api/wa/plantillas")
