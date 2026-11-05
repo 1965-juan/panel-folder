@@ -196,3 +196,12 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .act td.loc input:disabled{background:#e9e8ec;border-color:#e9e8ec;color:#a5a1ad;font-weight:400}
 .act td.loc input:not(:disabled):focus{border-color:var(--orange);outline:2px solid #fde3c2}
 .act td.loc.hay{box-shadow:none}
+
+/* misma altura en todas las casillas: etiqueta de stock arriba y casilla abajo, siempre en la misma línea */
+.act td.loc{vertical-align:top;padding:6px 4px}
+.act td.loc .stk{box-sizing:border-box;display:flex;align-items:center;justify-content:center;height:26px;min-width:44px;width:fit-content;margin:0 auto 5px;padding:0 8px;border:2px solid transparent;line-height:1}
+.act td.loc .stk.no{border-color:#8a6f8f;padding:0 8px}
+.act td.loc input,.act td.loc .hueco{box-sizing:border-box;display:block;height:34px;margin:0 auto;width:100%;max-width:66px}
+.act td.loc input{padding:0 2px}
+.act tr.ln td{height:84px}
+.act td.ckc,.act td.art,.act td.n,.act td.est,.act td.acts{vertical-align:middle}

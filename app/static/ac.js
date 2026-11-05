@@ -90,7 +90,7 @@ function acLine(g, l, locs, i) {
     ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0, max = Math.max(0, Math.min(s, l.qty_pending));
       return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}">
       <span data-fill="${x.id}" class="stk ${s > 0 ? (x.read_only ? 'vp' : 'si can') : 'no'}" title="Stock en ${escH(x.name)}${s > 0 && !x.read_only ? ' · pulsa para coger' : ''}">${acNum(s)}</span>
-      ${x.read_only ? '' : `<input type="number" min="0" max="${max}" step="1" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
+      ${x.read_only ? '<span class="hueco"></span>' : `<input type="number" min="0" max="${max}" step="1" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
     <td class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
   r.querySelector('.art').textContent = l.product_name;
   r.querySelector('.art').title = l.product_name + (l.product_barcode ? ' · ' + l.product_barcode : '');
