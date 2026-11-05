@@ -338,6 +338,9 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
          "input_schema": {"type": "object", "properties": {"notas": {"type": "string"}, "validez_dias": {"type": "integer"}, "sin_total": {"type": "boolean"}}}},
         {"name": "guardar_imagen", "description": "Descarga una foto desde una URL y la guarda; devuelve el id para usarlo en fichas.",
          "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+        {"name": "pasar_a_odoo", "description": "Pasa este presupuesto a Odoo: busca o da de alta el cliente, da de alta los artículos nuevos (con foto y precio) y crea el presupuesto de venta; si confirmar=true lo confirma como pedido. SOLO cuando Juan lo pida expresamente y haya dicho la empresa.",
+         "input_schema": {"type": "object", "properties": {"empresa": {"type": "string", "description": "DISTRIPLUS, INGRAF, LOGIPAPER…"},
+                                                          "confirmar": {"type": "boolean"}}, "required": ["empresa"]}},
         {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
         {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 8},
     ]
@@ -430,14 +433,104 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
             return "Hecho"
         if nombre == "guardar_imagen":
             return {"id": guardar_imagen(a["url"])}
+        if nombre == "pasar_a_odoo":
+            return pasar_a_odoo(q, a.get("empresa", ""), bool(a.get("confirmar")))
         return "Herramienta desconocida"
+
+    def pasar_a_odoo(q, empresa, confirmar):
+        if (q.get("odoo") or {}).get("id"):
+            return f"Ya está en Odoo como {q['odoo']['nombre']}"
+        comps = odoo.search_read("res.company", [], ["name"])
+        comp = next((c for c in comps if norm(empresa) and norm(empresa) in norm(c["name"])), None)
+        if not comp:
+            return "No sé a qué empresa: dime DISTRIPLUS, INGRAF, LOGIPAPER…"
+        cid = comp["id"]
+        hechos = []
+        # cliente
+        c = q.get("cliente") or {}
+        if not c.get("nombre"):
+            return "Falta el cliente"
+        pid = None
+        if c.get("nif"):
+            r = odoo.search_read("res.partner", [("vat", "ilike", re.sub(r"\W", "", c["nif"]))], ["id"], company_ids=[cid], limit=1)
+            pid = r[0]["id"] if r else None
+        if not pid:
+            r = odoo.search_read("res.partner", [("name", "=ilike", c["nombre"])], ["id"], company_ids=[cid], limit=1)
+            pid = r[0]["id"] if r else None
+        if not pid:
+            m = re.match(r"\s*(\d{5})\s*(.*)", c.get("poblacion") or "")
+            vals = {"name": c["nombre"], "is_company": True, "street": c.get("direccion") or False, "email": c.get("email") or False,
+                    "phone": c.get("telefono") or False, "zip": m.group(1) if m else False,
+                    "city": (m.group(2) if m else c.get("poblacion")) or False, "customer_rank": 1}
+            if c.get("nif"):
+                vals["vat"] = ("ES" + c["nif"]) if re.fullmatch(r"[A-Z0-9]\d{7}[A-Z0-9]", c["nif"].upper()) else c["nif"]
+            try:
+                pid = odoo.call("res.partner", "create", [cid], vals_list=[vals])
+            except Exception:
+                vals.pop("vat", None)
+                pid = odoo.call("res.partner", "create", [cid], vals_list=[vals])
+            pid = pid[0] if isinstance(pid, list) else pid
+            hechos.append(f"cliente nuevo {c['nombre']}")
+        # artículos
+        lineas = []
+        generico = None
+        for l in q.get("lineas", []):
+            qty = l.get("cantidad") or 1
+            if l.get("tipo") == "ficha":
+                art = l.get("art") or {}
+                prod = None
+                if art.get("odooRef"):
+                    r = odoo.search_read("product.product", [("default_code", "=", art["odooRef"])], ["id"], company_ids=[cid], limit=1)
+                    prod = r[0]["id"] if r else None
+                if not prod:
+                    vals = {"name": art.get("nombre") or "Artículo", "default_code": art.get("ref") or art.get("refProveedor") or False,
+                            "list_price": (art.get("tramos") or [{}])[0].get("precio") or l.get("precio") or 0, "sale_ok": True,
+                            "purchase_ok": True, "type": "consu", "description_sale": art.get("descripcion") or False}
+                    img = next((i for i in art.get("imagenes") or [] if re.fullmatch(r"[0-9a-f]{16,64}", i) and (blobs / i).exists()), None)
+                    if img:
+                        vals["image_1920"] = base64.b64encode((blobs / img).read_bytes()).decode()
+                    tid = odoo.call("product.template", "create", [cid], vals_list=[vals])
+                    tid = tid[0] if isinstance(tid, list) else tid
+                    prod = odoo.search_read("product.product", [("product_tmpl_id", "=", tid)], ["id"], company_ids=[cid], limit=1)[0]["id"]
+                    l.setdefault("art", {})["odooRef"] = vals["default_code"] or ""
+                    hechos.append(f"artículo nuevo {vals['name']}")
+                desc = art.get("nombre") or ""
+                if art.get("subtitulo"):
+                    desc += "\n" + art["subtitulo"]
+                lineas.append({"product_id": prod, "product_uom_qty": qty, "price_unit": l.get("precio") or 0, "name": desc})
+            else:
+                if not generico:
+                    r = odoo.search_read("product.product", [("default_code", "=", "PRESU-VARIOS")], ["id"], company_ids=[cid], limit=1)
+                    if r:
+                        generico = r[0]["id"]
+                    else:
+                        t = odoo.call("product.template", "create", [cid], vals_list=[{"name": "Concepto de presupuesto", "default_code": "PRESU-VARIOS",
+                                                                                       "type": "service", "sale_ok": True, "purchase_ok": False, "list_price": 0}])
+                        t = t[0] if isinstance(t, list) else t
+                        generico = odoo.search_read("product.product", [("product_tmpl_id", "=", t)], ["id"], company_ids=[cid], limit=1)[0]["id"]
+                lineas.append({"product_id": generico, "product_uom_qty": qty, "price_unit": l.get("precio") or 0,
+                               "name": (l.get("descripcion") or "") + ("\n" + l["detalle"] if l.get("detalle") else "")})
+        if not lineas:
+            return "El presupuesto no tiene líneas"
+        so = odoo.call("sale.order", "create", [cid], vals_list=[{
+            "partner_id": pid, "company_id": cid, "client_order_ref": q.get("numero") or False,
+            "note": q.get("notas") or False, "order_line": [[0, 0, x] for x in lineas]}])
+        so = so[0] if isinstance(so, list) else so
+        if confirmar:
+            odoo.call("sale.order", "action_confirm", [cid], ids=[so])
+        nm = odoo.search_read("sale.order", [("id", "=", so)], ["name", "amount_total"], company_ids=[cid])
+        nombre = nm[0]["name"] if nm else str(so)
+        q["odoo"] = {"id": so, "nombre": nombre, "empresa": comp["name"], "confirmado": confirmar}
+        q["estado"] = "aceptado" if confirmar else q.get("estado", "borrador")
+        return {"ok": True, "pedido": nombre, "total": nm[0]["amount_total"] if nm else None, "confirmado": confirmar,
+                "empresa": comp["name"], "dado_de_alta": hechos, "enlace": f"{os.environ.get('ODOO_URL', '')}/odoo/sales/{so}"}
 
     def resumen(q):
         c = q.get("cliente") or {}
         ls = [{"id": l.get("id"), "tipo": l.get("tipo"), "nombre": (l.get("art") or {}).get("nombre") or l.get("descripcion"),
                "cantidad": l.get("cantidad"), "precio": l.get("precio"), "auto": l.get("precioAuto")} for l in q.get("lineas", [])]
         return json.dumps({"numero": q.get("numero"), "cliente": c, "lineas": ls, "notas": q.get("notas"), "sin_total": q.get("sinTotal"),
-                           "validez_dias": q.get("validezDias")}, ensure_ascii=False)
+                           "validez_dias": q.get("validezDias"), "odoo": q.get("odoo")}, ensure_ascii=False)
 
     @app.post("/api/presupuestos/asistente")
     async def asistente(request: Request):
@@ -456,6 +549,9 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
                    "URL de las fotos del producto (imágenes grandes, no logos ni miniaturas) y creas la ficha con anadir_ficha. "
                    "Los precios del presupuesto son de VENTA sin IVA: si de la web sacas un coste de proveedor y Juan no dice margen, "
                    "pregúntale o dilo claramente en tu respuesta; apunta el coste en coste_notas. No inventes precios ni datos. "
+                   "Cuando Juan diga que el cliente lo acepta o que lo pases a Odoo: comprueba que tiene cliente y líneas, pregunta la empresa "
+                   "(INGRAF para merchandising e imprenta, DISTRIPLUS para papelería) si no la ha dicho, y usa pasar_a_odoo; confirmar=true solo si dice "
+                   "que lo pase como pedido confirmado. Después dile el número de Odoo y qué has dado de alta. "
                    "Contesta breve, diciendo qué has hecho y qué falta. Estado actual del presupuesto: " + resumen(q))
         msgs = hist + [{"role": "user", "content": b.get("mensaje") or ""}]
         hecho, n0 = [], json.dumps(q, sort_keys=True)
