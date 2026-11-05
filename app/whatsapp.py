@@ -169,7 +169,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, es_admin, demo):
 
     def t_pedidos(wa_id):
         tel = wa_id[-9:]
-        partners = odoo.search_read("res.partner", ["|", ("phone", "ilike", tel), ("mobile", "ilike", tel)], ["id"], limit=5)
+        partners = odoo.search_read("res.partner", [("phone", "ilike", tel)], ["id"], limit=5)
         if not partners:
             return "No encuentro ningún cliente con este número de teléfono."
         ids = [p["id"] for p in partners]
