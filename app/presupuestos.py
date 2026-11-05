@@ -237,7 +237,7 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
                 out.append({
                     "i": r["id"],
                     "n": parent if person else r.get("name") or r.get("display_name") or "",
-                    "c": r.get("name") if person else "",
+                    "c": (r.get("name") or "") if person else "",
                     "v": r.get("vat") or "",
                     "m": r.get("email") or "",
                     "d": r.get("street") or "",
@@ -354,7 +354,7 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
         L = q.setdefault("lineas", [])
         if nombre == "buscar_clientes":
             t = norm(a["texto"])
-            r = [c for c in clientes_odoo()["clientes"] if t in norm(" ".join([c["n"], c["c"], c["v"], c["m"], c["f"]]))][:10]
+            r = [c for c in clientes_odoo()["clientes"] if t in norm(" ".join(str(c.get(k) or "") for k in ("n", "c", "v", "m", "f", "p")))][:10]
             return r or "Ninguno en Odoo con ese texto"
         if nombre == "poner_cliente":
             q["cliente"] = {k: a.get(k, "") or "" for k in ["nombre", "nif", "direccion", "poblacion", "email", "telefono", "contacto"]}
