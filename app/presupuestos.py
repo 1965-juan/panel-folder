@@ -227,7 +227,7 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
             rows = odoo.search_read(
                 "res.partner",
                 ["|", ("customer_rank", ">", 0), ("type", "=", "delivery")],
-                ["name", "display_name", "vat", "street", "zip", "city", "email", "phone", "mobile",
+                ["name", "display_name", "vat", "street", "zip", "city", "email", "phone",
                  "parent_id", "type", "is_company"],
                 all_company_ids(), limit=20000)
             out = []
@@ -242,7 +242,7 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
                     "m": r.get("email") or "",
                     "d": r.get("street") or "",
                     "p": " ".join(x for x in [r.get("zip") or "", r.get("city") or ""] if x),
-                    "f": r.get("phone") or r.get("mobile") or "",
+                    "f": r.get("phone") or "",
                     "t": "e" if r.get("type") == "delivery" else "",
                 })
             return {"clientes": out, "fecha": time.strftime("%Y-%m-%d")}
