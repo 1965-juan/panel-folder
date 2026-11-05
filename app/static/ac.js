@@ -43,34 +43,34 @@ function acSelCount() { return Object.values(ACSEL).filter(s => Object.values(s.
 function acRender() {
   acChips();
   const q = $('#ac-q').value.trim().toLowerCase(), box = $('#ac-list'), locs = acLocs();
-  box.innerHTML = '';
-  const head = document.createElement('div'); head.className = 'ac-row ac-h';
-  head.style.gridTemplateColumns = acCols(locs.length);
-  head.innerHTML = `<span></span><span>Artículo</span><span>Pedido</span><span>Entreg.</span><span>Pend.</span><span>Estado</span>${locs.map(x => `<span class="${x.read_only ? 'ro' : ''}" title="${escH(x.name)}">${escH(x.code)}</span>`).join('')}<span></span>`;
-  box.appendChild(head);
+  const ncol = 7 + locs.length;
+  box.innerHTML = `<table class="act"><colgroup><col class="c-ck"><col class="c-art"><col class="c-n"><col class="c-n"><col class="c-n"><col class="c-est">
+    ${locs.map(x => `<col class="c-loc">`).join('')}<col class="c-acc"></colgroup>
+    <thead><tr><th></th><th class="l">Artículo</th><th>Pedido</th><th>Entreg.</th><th>Pend.</th><th>Estado</th>
+    ${locs.map(x => `<th class="${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}" title="${escH(x.name)}">${escH(x.code)}</th>`).join('')}<th></th></tr></thead><tbody></tbody></table>`;
+  const tb = box.querySelector('tbody');
   let n = 0;
   acGroups().forEach(g => {
     if (ACV !== 'todos' && g.tipo !== ACV) return;
     const lines = g.lines.filter(l => acPass(g, l) && acMatch(g, l, q));
     if (!lines.length) return;
     n++;
-    const o = g.o, h = document.createElement('div'); h.className = 'ac-ord ' + g.tipo;
+    const o = g.o, h = document.createElement('tr'); h.className = 'ord ' + g.tipo;
     const tags = g.tipo === 'cliente'
       ? `${o.delivery_label ? `<span class="t-del">${escH(o.delivery_label)}</span>` : ''}${!o.has_payment_term ? '<span class="t-bad">Sin condiciones de pago</span>' : ''}${o.ref_cliente ? `<span class="t-cli">👤 ${escH(o.ref_cliente)}</span>` : ''}`
       : '<span class="t-tie">Reposición tienda</span>';
     const odooHref = g.tipo === 'cliente' ? `${ODOO}/odoo/sale.order/${g.id}` : `${ODOO}/odoo/action-stock.action_picking_tree_all/${g.id}`;
-    h.innerHTML = `<b>${escH(g.ref)}</b><span class="nm">${escH(g.nombre)}</span><span class="muted">${escH(g.fecha)}</span>${tags}
+    h.innerHTML = `<td colspan="${ncol}"><div class="ordin"><b>${escH(g.ref)}</b><span class="nm">${escH(g.nombre)}</span><span class="muted">${escH(g.fecha)}</span>${tags}
       <span class="muted">${g.lines.length} línea${g.lines.length > 1 ? 's' : ''}</span>
-      <span class="sp"><button class="lnk" data-add>+ Añadir artículo</button><button class="lnk" data-auto>Rellenar desde stock</button><a class="lnk" target="_blank" rel="noopener" href="${odooHref}">Abrir en Odoo</a></span>`;
+      <span class="sp"><button class="lnk" data-add>+ Añadir artículo</button><button class="lnk" data-auto>Rellenar desde stock</button><a class="lnk" target="_blank" rel="noopener" href="${odooHref}">Abrir en Odoo</a></span></div></td>`;
     h.querySelector('[data-add]').onclick = () => acAddOpen(g);
     h.querySelector('[data-auto]').onclick = () => { lines.forEach(l => acAuto(g, l)); acRender(); };
-    box.appendChild(h);
-    lines.forEach(l => box.appendChild(acLine(g, l, locs)));
+    tb.appendChild(h);
+    lines.forEach((l, i) => tb.appendChild(acLine(g, l, locs, i)));
   });
-  if (!n) box.insertAdjacentHTML('beforeend', '<p class="empty" style="padding:14px">No hay nada con este filtro</p>');
+  if (!n) tb.insertAdjacentHTML('beforeend', `<tr><td colspan="${ncol}" class="empty" style="padding:14px">No hay nada con este filtro</td></tr>`);
   const c = acSelCount(); $('#ac-ok').disabled = !c; $('#ac-ok').textContent = c ? `✓ Validar selección (${c})` : '✓ Validar selección';
 }
-function acCols(n) { return `28px minmax(260px,2.4fr) 70px 64px 64px 96px repeat(${n}, 72px) 110px`; }
 function acKey(g, l) { return g.tipo + ':' + l.line_id; }
 function acAuto(g, l) {
   let falta = l.qty_pending; const t = {};
@@ -78,18 +78,21 @@ function acAuto(g, l) {
   for (const x of locs) { if (falta <= 0) break; const s = Math.max(0, l.stock_by_loc[String(x.id)] || 0); const q = Math.min(s, falta); if (q > 0) { t[x.id] = q; falta -= q; } }
   if (Object.keys(t).length) ACSEL[acKey(g, l)] = { tipo: g.tipo, id: l.line_id, t };
 }
-function acLine(g, l, locs) {
-  const r = document.createElement('div'); r.className = 'ac-row'; r.style.gridTemplateColumns = acCols(locs.length);
+function acLine(g, l, locs, i) {
+  const r = document.createElement('tr');
   const k = acKey(g, l), sel = (ACSEL[k] || {}).t || {}, cat = acCat(l), [bt, bc] = AC_CAT[cat];
-  r.innerHTML = `<input type="checkbox" class="ck" ${Object.values(sel).some(v => v > 0) ? 'checked' : ''}>
-    <span class="art">${escH(l.product_name)}</span>
-    <span class="qty"><b>${acNum(l.qty_ordered)}</b> <button class="ed" title="Cambiar cantidad">✎</button></span>
-    <span>${acNum(l.qty_delivered)}</span><span><b>${acNum(l.qty_pending)}</b></span>
-    <span><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</span>
-    ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0; return `<span class="loc ${x.read_only ? 'ro' : ''}">
-      <input type="number" min="0" data-loc="${x.id}" value="${sel[x.id] || ''}" placeholder="0" ${x.read_only || s <= 0 ? 'disabled' : ''}>
-      <small data-fill="${x.id}" class="${s > 0 && !x.read_only ? 'can' : ''}" title="Stock en ${escH(x.name)}">${acNum(s)}</small></span>`; }).join('')}
-    <span class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></span>`;
+  r.className = 'ln ' + cat + (i % 2 ? ' odd' : '');
+  r.innerHTML = `<td class="ckc"><input type="checkbox" class="ck" ${Object.values(sel).some(v => v > 0) ? 'checked' : ''}></td>
+    <td class="art"></td>
+    <td class="n"><b>${acNum(l.qty_ordered)}</b> <button class="ed" title="Cambiar cantidad">✎</button></td>
+    <td class="n">${acNum(l.qty_delivered)}</td><td class="n pend">${acNum(l.qty_pending)}</td>
+    <td class="est"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
+    ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0; return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}${s > 0 ? ' hay' : ''}">
+      <input type="number" min="0" data-loc="${x.id}" value="${sel[x.id] || ''}" placeholder="–" ${x.read_only || s <= 0 ? 'disabled' : ''}>
+      <small data-fill="${x.id}" class="${s > 0 && !x.read_only ? 'can' : ''}" title="Stock en ${escH(x.name)}">${acNum(s)}</small></td>`; }).join('')}
+    <td class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
+  r.querySelector('.art').textContent = l.product_name;
+  r.querySelector('.art').title = l.product_name + (l.product_barcode ? ' · ' + l.product_barcode : '');
   const save = () => {
     const t = {}; r.querySelectorAll('input[data-loc]').forEach(i => { const v = parseFloat(i.value); if (v > 0) t[i.dataset.loc] = v; });
     if (Object.keys(t).length) ACSEL[k] = { tipo: g.tipo, id: l.line_id, t }; else delete ACSEL[k];
