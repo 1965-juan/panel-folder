@@ -306,6 +306,46 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
             (blobs / (bid + ".type")).write_text(ct)
         return bid
 
+    def abrir_web(url, filtro=""):
+        from html import unescape
+        from urllib.parse import urljoin
+        r = web.get(url)
+        html = r.text if "html" in (r.headers.get("content-type") or "") or r.text.lstrip().startswith("<") else ""
+        if r.status_code >= 400:
+            return f"La página respondió {r.status_code}"
+        if not html:
+            return {"aviso": "No es una página HTML", "tipo": r.headers.get("content-type")}
+        base = str(r.url)
+        titulo = unescape((re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I) or [None, ""])[1]).strip()
+        metas = {}
+        for m in re.finditer(r'<meta[^>]+(?:property|name)=["\'](og:[a-z:]+|description)["\'][^>]+content=["\']([^"\']*)', html, re.I):
+            metas[m.group(1)] = unescape(m.group(2))
+        imgs = []
+        if metas.get("og:image"):
+            metas["og:image"] = urljoin(base, metas["og:image"])
+            imgs.append(metas["og:image"])
+        for m in re.finditer(r'<img[^>]+?(?:data-src|data-zoom-image|data-large|src)=["\']([^"\']+)', html, re.I):
+            u = urljoin(base, unescape(m.group(1)))
+            if re.search(r"\.(jpe?g|png|webp)(\?|$)", u, re.I) and not re.search(r"logo|icon|sprite|banner|flag|pixel|placeholder", u, re.I) and u not in imgs:
+                imgs.append(u)
+        for m in re.finditer(r'href=["\']([^"\']+\.(?:jpe?g|png|webp))["\']', html, re.I):
+            u = urljoin(base, unescape(m.group(1)))
+            if u not in imgs:
+                imgs.append(u)
+        enlaces = []
+        for m in re.finditer(r'<a[^>]+href=["\']([^"\'#]+)["\'][^>]*>(.*?)</a>', html, re.S | re.I):
+            u = urljoin(base, unescape(m.group(1)))
+            t = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", unescape(m.group(2)))).strip()[:80]
+            if u.startswith("http") and (not filtro or filtro.lower() in (u + " " + t).lower()) and (u, t) not in enlaces:
+                enlaces.append((u, t))
+        texto = re.sub(r"<(script|style|noscript|svg)[\s\S]*?</\1>", " ", html, flags=re.I)
+        texto = re.sub(r"<br\s*/?>|</(p|div|li|tr|h\d)>", "\n", texto, flags=re.I)
+        texto = unescape(re.sub(r"<[^>]+>", " ", texto))
+        texto = re.sub(r"[ \t]+", " ", texto)
+        texto = re.sub(r"\n\s*\n+", "\n", texto).strip()
+        return {"url": base, "titulo": titulo, "meta": metas, "fotos": imgs[:30], "texto": texto[:12000],
+                "enlaces": [{"url": u, "texto": t} for u, t in enlaces[:80]]}
+
     HERR = [
         {"name": "buscar_clientes", "description": "Busca clientes en Odoo por nombre, NIF, email o teléfono. Devuelve sus datos de facturación.",
          "input_schema": {"type": "object", "properties": {"texto": {"type": "string"}}, "required": ["texto"]}},
@@ -341,6 +381,8 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
         {"name": "pasar_a_odoo", "description": "Pasa este presupuesto a Odoo: busca o da de alta el cliente, da de alta los artículos nuevos (con foto y precio) y crea el presupuesto de venta; si confirmar=true lo confirma como pedido. SOLO cuando Juan lo pida expresamente y haya dicho la empresa.",
          "input_schema": {"type": "object", "properties": {"empresa": {"type": "string", "description": "DISTRIPLUS, INGRAF, LOGIPAPER…"},
                                                           "confirmar": {"type": "boolean"}}, "required": ["empresa"]}},
+        {"name": "abrir_web", "description": "Abre cualquier página web (ficha de producto, buscador de un proveedor, categoría…) desde el servidor de Folder y devuelve su texto, las fotos que contiene y los enlaces. Úsala para navegar por las webs de proveedores: puedes construir tú la URL de búsqueda del sitio.",
+         "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "buscar_enlaces": {"type": "string", "description": "Opcional: solo devolver enlaces que contengan este texto"}}, "required": ["url"]}},
         {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
         {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 8},
     ]
@@ -433,6 +475,8 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
             return "Hecho"
         if nombre == "guardar_imagen":
             return {"id": guardar_imagen(a["url"])}
+        if nombre == "abrir_web":
+            return abrir_web(a["url"], a.get("buscar_enlaces") or "")
         if nombre == "pasar_a_odoo":
             return pasar_a_odoo(q, a.get("empresa", ""), bool(a.get("confirmar")))
         return "Herramienta desconocida"
@@ -545,8 +589,10 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
         sistema = ("Eres el asistente del presupuestador de Folder Castellón (papelería, regalo de empresa y merchandising personalizado). "
                    "Juan te escribe en español lo que quiere y tú montas el presupuesto con las herramientas: buscas el cliente en Odoo "
                    "(o lo pones a mano si no existe), buscas artículos en Odoo y en los guardados, y si te pide artículos de una web "
-                   "la buscas o la abres con web_search/web_fetch, sacas nombre, descripción corta, referencia del proveedor, colores y las "
+                   "la abres con abrir_web (puedes abrir el buscador del propio proveedor construyendo la URL, por ejemplo la página de búsqueda de la tienda, y luego entrar en la ficha del producto; usa web_search solo si no sabes la web), sacas nombre, descripción corta, referencia del proveedor, colores y las "
                    "URL de las fotos del producto (imágenes grandes, no logos ni miniaturas) y creas la ficha con anadir_ficha. "
+                   "Muchas webs de proveedores (Makito, etc.) no muestran precios sin iniciar sesión: si no ves el precio, crea la ficha igualmente "
+                   "con precio 0 y pide a Juan el coste o el precio de venta. "
                    "Los precios del presupuesto son de VENTA sin IVA: si de la web sacas un coste de proveedor y Juan no dice margen, "
                    "pregúntale o dilo claramente en tu respuesta; apunta el coste en coste_notas. No inventes precios ni datos. "
                    "Cuando Juan diga que el cliente lo acepta o que lo pases a Odoo: comprueba que tiene cliente y líneas, pregunta la empresa "
