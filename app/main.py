@@ -435,3 +435,17 @@ _panelac.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=gua
 from . import compras as _compras  # noqa: E402
 
 _compras.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, es_admin=es_admin, demo=DEMO)
+
+
+@app.get("/api/diag")
+def diag(request: Request):
+    """Solo Juan: qué archivos hay en datos (nombres y tamaños, nunca el contenido)."""
+    if not es_admin(current_user(request)):
+        raise HTTPException(403, "Solo Juan")
+    out = []
+    for p in sorted(DATA.iterdir()):
+        if p.is_file():
+            txt = p.read_bytes()[:4000] if p.suffix in (".txt", ".rtf", "") and p.stat().st_size < 200000 else b""
+            out.append({"nombre": p.name, "bytes": p.stat().st_size,
+                        "parece_clave_claude": b"sk-ant-" in txt, "parece_rtf": txt.startswith(b"{\\rtf")})
+    return out
