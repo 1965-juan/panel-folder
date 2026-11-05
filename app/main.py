@@ -449,3 +449,9 @@ def diag(request: Request):
             out.append({"nombre": p.name, "bytes": p.stat().st_size,
                         "parece_clave_claude": b"sk-ant-" in txt, "parece_rtf": txt.startswith(b"{\\rtf")})
     return out
+
+
+# ---------- asistente general (almacén) ----------
+from . import asistente as _asistente  # noqa: E402
+
+_asistente.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)

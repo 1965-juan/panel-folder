@@ -289,3 +289,23 @@ async function waBotLoad() {
 }
 $('#b-save').onclick = async () => { await jpost('/api/wa/ajustes', { bot_activo: $('#b-act').checked ? 'si' : 'no', bot_precios: $('#b-pre').checked ? 'si' : 'no', bot_info: $('#b-info').value, llamadas_auto: $('#l-auto').checked ? 'si' : 'no', llamadas_plantilla: $('#l-pl').value.trim(), aviso_texto: $('#l-txt').value }, 'PUT'); alertBox('Guardado'); waBadge(); };
 $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhook', { url_publica: $('#b-url').value.trim() }); alertBox('Conectado: WhatsApp ya enviará los mensajes al panel'); } catch (e) { alertBox(e.message); } };
+
+/* ---------- asistente general ---------- */
+(function () {
+  const H = [], log = $('#as-log');
+  const msg = (t, c) => { const d = document.createElement('div'); d.className = 'as-m ' + c; d.textContent = t; log.appendChild(d); log.scrollTop = 1e9; return d; };
+  $('#as-fab').onclick = () => { $('#as').hidden = false; $('#as-fab').hidden = true; setTimeout(() => $('#as-t').focus(), 50); };
+  $('#as-x').onclick = () => { $('#as').hidden = true; $('#as-fab').hidden = false; };
+  $('#as-t').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#as-f').requestSubmit(); } };
+  $('#as-f').onsubmit = async e => {
+    e.preventDefault(); const t = $('#as-t').value.trim(); if (!t) return;
+    $('#as-t').value = ''; msg(t, 'u'); const w = msg('Mirando en Odoo…', 'w'); const b = $('#as-f button'); b.disabled = true;
+    try {
+      const r = await fetch('/api/asistente', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mensaje: t, historial: H }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText);
+      w.remove(); msg(j.texto || 'Hecho.', 'a'); H.push({ role: 'user', content: t }, { role: 'assistant', content: j.texto || 'Hecho.' });
+      if (j.cambios) { if (location.hash === '#ac') acLoad(); else route(); }
+    } catch (er) { w.remove(); msg(er.message, 'e'); }
+    b.disabled = false; $('#as-t').focus();
+  };
+})();
