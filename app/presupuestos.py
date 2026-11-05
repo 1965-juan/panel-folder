@@ -2,6 +2,7 @@
 y clientes/artículos de Odoo en directo para el buscador."""
 import base64
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -275,3 +276,219 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
                             round(p.get("lst_price") or 0, 4), tiers, tmpl])
             return out
         return cached("productos", load)
+
+    # ---------- asistente: hablar con Claude para montar el presupuesto ----------
+    import hashlib
+    import httpx as _httpx
+
+    clave_f = data_dir / "claude_clave.txt"
+    modelo = os.environ.get("PRES_MODEL") or os.environ.get("WA_MODEL") or "claude-sonnet-5-5"
+    web = _httpx.Client(timeout=40, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (PanelFolder presupuestos)"})
+
+    def clave():
+        if not clave_f.exists():
+            return ""
+        m = re.findall(r"sk-ant-[A-Za-z0-9_\-]+", clave_f.read_text(errors="ignore"))
+        return m[0] if m else ""
+
+    def norm(t):
+        import unicodedata
+        return unicodedata.normalize("NFD", str(t or "").lower()).encode("ascii", "ignore").decode()
+
+    def guardar_imagen(url):
+        r = web.get(url)
+        ct = (r.headers.get("content-type") or "").split(";")[0].strip()
+        if r.status_code != 200 or not ct.startswith("image/") or len(r.content) > 10_000_000:
+            raise ValueError(f"no es una imagen válida ({r.status_code} {ct})")
+        bid = hashlib.md5(r.content).hexdigest()
+        if not (blobs / bid).exists():
+            (blobs / bid).write_bytes(r.content)
+            (blobs / (bid + ".type")).write_text(ct)
+        return bid
+
+    HERR = [
+        {"name": "buscar_clientes", "description": "Busca clientes en Odoo por nombre, NIF, email o teléfono. Devuelve sus datos de facturación.",
+         "input_schema": {"type": "object", "properties": {"texto": {"type": "string"}}, "required": ["texto"]}},
+        {"name": "poner_cliente", "description": "Pone los datos del cliente en el presupuesto (de Odoo o uno nuevo que no esté dado de alta).",
+         "input_schema": {"type": "object", "properties": {k: {"type": "string"} for k in
+                          ["nombre", "nif", "direccion", "poblacion", "email", "telefono", "contacto"]}, "required": ["nombre"]}},
+        {"name": "buscar_articulos", "description": "Busca artículos en el catálogo de Odoo (con sus precios por tramos) y en los artículos guardados del presupuestador.",
+         "input_schema": {"type": "object", "properties": {"texto": {"type": "string"}}, "required": ["texto"]}},
+        {"name": "anadir_articulo_odoo", "description": "Añade al presupuesto un artículo de Odoo por su id (de buscar_articulos), con su foto y tramos.",
+         "input_schema": {"type": "object", "properties": {"odoo_id": {"type": "integer"}, "cantidad": {"type": "number"}}, "required": ["odoo_id"]}},
+        {"name": "anadir_articulo_guardado", "description": "Añade un artículo guardado del presupuestador por su id.",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "cantidad": {"type": "number"}}, "required": ["id"]}},
+        {"name": "anadir_ficha", "description": "Añade una ficha de artículo nuevo (por ejemplo sacado de la web de un proveedor). Las fotos se descargan de las URL de imagen que pases.",
+         "input_schema": {"type": "object", "properties": {
+             "nombre": {"type": "string"}, "subtitulo": {"type": "string"}, "descripcion": {"type": "string"},
+             "ref": {"type": "string"}, "proveedor": {"type": "string"}, "ref_proveedor": {"type": "string"},
+             "tramos": {"type": "array", "description": "Precios de venta sin IVA por cantidad mínima", "items": {"type": "object", "properties": {"desde": {"type": "number"}, "precio": {"type": "number"}}}},
+             "colores": {"type": "array", "items": {"type": "object", "properties": {"nombre": {"type": "string"}, "hex": {"type": "string"}}}},
+             "imagenes": {"type": "array", "items": {"type": "string"}, "description": "URL de las fotos del producto"},
+             "cantidad": {"type": "number"}, "coste_notas": {"type": "string"},
+             "guardar_en_catalogo": {"type": "boolean", "description": "Guardar también en Artículos para reutilizarlo"}}, "required": ["nombre"]}},
+        {"name": "anadir_linea_simple", "description": "Añade una línea de texto con precio (servicio, marcaje, portes…).",
+         "input_schema": {"type": "object", "properties": {"descripcion": {"type": "string"}, "detalle": {"type": "string"},
+                                                          "cantidad": {"type": "number"}, "precio": {"type": "number"}}, "required": ["descripcion"]}},
+        {"name": "cambiar_linea", "description": "Cambia cantidad o precio de una línea por su id; precio fija el precio y quita el automático por tramos.",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "cantidad": {"type": "number"}, "precio": {"type": "number"}}, "required": ["id"]}},
+        {"name": "quitar_linea", "description": "Quita una línea del presupuesto por su id.",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+        {"name": "ajustes_presupuesto", "description": "Cambia notas, validez en días o si es un presupuesto de opciones sin total.",
+         "input_schema": {"type": "object", "properties": {"notas": {"type": "string"}, "validez_dias": {"type": "integer"}, "sin_total": {"type": "boolean"}}}},
+        {"name": "guardar_imagen", "description": "Descarga una foto desde una URL y la guarda; devuelve el id para usarlo en fichas.",
+         "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
+        {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 8},
+    ]
+
+    def linea_ficha(art, cantidad):
+        tr = art.get("tramos") or []
+        return {"id": secrets.token_hex(4), "tipo": "ficha", "art": art, "cantidad": cantidad or 1, "precioAuto": True,
+                "precio": tr[0]["precio"] if tr else 0, "mostrarTramos": True}
+
+    def ejecutar(q, nombre, a):
+        L = q.setdefault("lineas", [])
+        if nombre == "buscar_clientes":
+            t = norm(a["texto"])
+            r = [c for c in clientes_odoo()["clientes"] if t in norm(" ".join([c["n"], c["c"], c["v"], c["m"], c["f"]]))][:10]
+            return r or "Ninguno en Odoo con ese texto"
+        if nombre == "poner_cliente":
+            q["cliente"] = {k: a.get(k, "") or "" for k in ["nombre", "nif", "direccion", "poblacion", "email", "telefono", "contacto"]}
+            return "Cliente puesto"
+        if nombre == "buscar_articulos":
+            palabras = norm(a["texto"]).split()
+            od = [{"odoo_id": p[0], "ref": p[1], "nombre": p[2], "precio": p[3], "tramos": p[4]} for p in productos_odoo()
+                  if all(w in norm(p[1] + " " + p[2]) for w in palabras)][:15]
+            with con() as c:
+                arts = [dict(json.loads(r[1]), id=r[0]) for r in c.execute("SELECT id, data FROM docs WHERE coll='articulos'").fetchall()]
+            gu = [{"id": x["id"], "nombre": x.get("nombre"), "ref": x.get("ref"), "proveedor": x.get("proveedor"), "tramos": x.get("tramos")}
+                  for x in arts if all(w in norm(" ".join(str(x.get(k) or "") for k in ("nombre", "ref", "proveedor", "descripcion"))) for w in palabras)][:10]
+            return {"odoo": od, "guardados": gu}
+        if nombre == "anadir_articulo_odoo":
+            p = next((x for x in productos_odoo() if x[0] == a["odoo_id"]), None)
+            if not p:
+                return "No existe ese artículo en Odoo"
+            tr = [{"desde": t[0], "precio": t[1]} for t in (p[4] or [])] or [{"desde": 1, "precio": p[3]}]
+            art = {"artId": f"odoo-{p[0]}", "nombre": p[2], "ref": p[1], "odooRef": p[1], "origen": "odoo", "tramos": tr,
+                   "imagenes": [f"odoo-{p[5]}"] if p[5] else [], "descripcion": "", "subtitulo": "", "proveedor": "", "refProveedor": "", "colores": []}
+            L.append(linea_ficha(art, a.get("cantidad")))
+            return f"Añadido: {p[2]}"
+        if nombre == "anadir_articulo_guardado":
+            with con() as c:
+                r = c.execute("SELECT data FROM docs WHERE coll='articulos' AND id=?", (a["id"],)).fetchone()
+            if not r:
+                return "No existe ese artículo guardado"
+            art = json.loads(r[0])
+            art.pop("creado", None); art.pop("actualizado", None)
+            art["artId"] = a["id"]
+            L.append(linea_ficha(art, a.get("cantidad")))
+            return f"Añadido: {art.get('nombre')}"
+        if nombre == "anadir_ficha":
+            imgs, fallos = [], []
+            for u in (a.get("imagenes") or [])[:6]:
+                if re.fullmatch(r"[0-9a-f]{32}", u):
+                    imgs.append(u); continue
+                try:
+                    imgs.append(guardar_imagen(u))
+                except Exception as e:
+                    fallos.append(f"{u[:80]}: {e}")
+            art = {"artId": "ia-" + secrets.token_hex(4), "nombre": a["nombre"], "subtitulo": a.get("subtitulo", ""), "descripcion": a.get("descripcion", ""),
+                   "ref": a.get("ref", ""), "proveedor": a.get("proveedor", ""), "refProveedor": a.get("ref_proveedor", ""), "odooRef": "", "origen": "nuevo",
+                   "tramos": sorted(a.get("tramos") or [], key=lambda t: t.get("desde", 0)), "colores": a.get("colores") or [], "imagenes": imgs,
+                   "costeNotas": a.get("coste_notas", "")}
+            if a.get("guardar_en_catalogo"):
+                aid = secrets.token_hex(10)
+                d = {k: v for k, v in art.items() if k != "artId"}
+                d["creado"] = d["actualizado"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                with lock, con() as c:
+                    c.execute("INSERT INTO docs VALUES (?,?,?)", ("articulos", aid, json.dumps(d, ensure_ascii=False)))
+                art["artId"] = aid
+            L.append(linea_ficha(art, a.get("cantidad")))
+            return f"Añadida la ficha con {len(imgs)} fotos" + (f". Fotos que no se pudieron bajar: {fallos}" if fallos else "")
+        if nombre == "anadir_linea_simple":
+            L.append({"id": secrets.token_hex(4), "tipo": "simple", "descripcion": a["descripcion"], "detalle": a.get("detalle", ""),
+                      "cantidad": a.get("cantidad") or 1, "precio": a.get("precio") or 0})
+            return "Línea añadida"
+        if nombre == "cambiar_linea":
+            ln = next((x for x in L if x.get("id") == a["id"]), None)
+            if not ln:
+                return "No existe esa línea"
+            if a.get("cantidad") is not None:
+                ln["cantidad"] = a["cantidad"]
+            if a.get("precio") is not None:
+                ln["precio"] = a["precio"]; ln["precioAuto"] = False
+            return "Línea cambiada"
+        if nombre == "quitar_linea":
+            n = len(L)
+            q["lineas"] = [x for x in L if x.get("id") != a["id"]]
+            return "Quitada" if len(q["lineas"]) < n else "No existe esa línea"
+        if nombre == "ajustes_presupuesto":
+            if "notas" in a: q["notas"] = a["notas"]
+            if "validez_dias" in a: q["validezDias"] = a["validez_dias"]
+            if "sin_total" in a: q["sinTotal"] = a["sin_total"]
+            return "Hecho"
+        if nombre == "guardar_imagen":
+            return {"id": guardar_imagen(a["url"])}
+        return "Herramienta desconocida"
+
+    def resumen(q):
+        c = q.get("cliente") or {}
+        ls = [{"id": l.get("id"), "tipo": l.get("tipo"), "nombre": (l.get("art") or {}).get("nombre") or l.get("descripcion"),
+               "cantidad": l.get("cantidad"), "precio": l.get("precio"), "auto": l.get("precioAuto")} for l in q.get("lineas", [])]
+        return json.dumps({"numero": q.get("numero"), "cliente": c, "lineas": ls, "notas": q.get("notas"), "sin_total": q.get("sinTotal"),
+                           "validez_dias": q.get("validezDias")}, ensure_ascii=False)
+
+    @app.post("/api/presupuestos/asistente")
+    async def asistente(request: Request):
+        current_user(request)
+        if not clave():
+            raise HTTPException(400, "Falta la clave de Claude: guarda el archivo claude_clave.txt en la carpeta datos del NAS")
+        b = await request.json()
+        q = b.get("quote") or {}
+        hist = [m for m in (b.get("historial") or [])[-12:] if m.get("role") in ("user", "assistant") and m.get("content")]
+        while hist and hist[0]["role"] != "user":
+            hist.pop(0)
+        sistema = ("Eres el asistente del presupuestador de Folder Castellón (papelería, regalo de empresa y merchandising personalizado). "
+                   "Juan te escribe en español lo que quiere y tú montas el presupuesto con las herramientas: buscas el cliente en Odoo "
+                   "(o lo pones a mano si no existe), buscas artículos en Odoo y en los guardados, y si te pide artículos de una web "
+                   "la buscas o la abres con web_search/web_fetch, sacas nombre, descripción corta, referencia del proveedor, colores y las "
+                   "URL de las fotos del producto (imágenes grandes, no logos ni miniaturas) y creas la ficha con anadir_ficha. "
+                   "Los precios del presupuesto son de VENTA sin IVA: si de la web sacas un coste de proveedor y Juan no dice margen, "
+                   "pregúntale o dilo claramente en tu respuesta; apunta el coste en coste_notas. No inventes precios ni datos. "
+                   "Contesta breve, diciendo qué has hecho y qué falta. Estado actual del presupuesto: " + resumen(q))
+        msgs = hist + [{"role": "user", "content": b.get("mensaje") or ""}]
+        hecho, n0 = [], json.dumps(q, sort_keys=True)
+
+        def llamar():
+            texto = ""
+            for _ in range(14):
+                r = web.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", timeout=180, headers={
+                    "x-api-key": clave(), "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    json={"model": modelo, "max_tokens": 4000, "system": sistema, "tools": HERR, "messages": msgs})
+                if r.status_code != 200:
+                    raise HTTPException(502, f"Claude respondió {r.status_code}: {r.text[:300]}")
+                res = r.json()
+                bloques = res.get("content", [])
+                texto = "".join(x.get("text", "") for x in bloques if x.get("type") == "text").strip() or texto
+                usos = [x for x in bloques if x.get("type") == "tool_use"]
+                msgs.append({"role": "assistant", "content": bloques})
+                if res.get("stop_reason") == "pause_turn":
+                    continue
+                if not usos:
+                    return texto
+                resultados = []
+                for u in usos:
+                    try:
+                        out = ejecutar(q, u["name"], u.get("input") or {})
+                        if u["name"] not in ("buscar_clientes", "buscar_articulos", "guardar_imagen"):
+                            hecho.append(u["name"])
+                    except Exception as e:
+                        out = f"Error: {e}"
+                    resultados.append({"type": "tool_result", "tool_use_id": u["id"], "content": json.dumps(out, ensure_ascii=False)[:20000]})
+                msgs.append({"role": "user", "content": resultados})
+            return texto or "He hecho varias cosas pero no he terminado; dime si sigo."
+
+        import asyncio
+        texto = await asyncio.to_thread(llamar)
+        return {"texto": texto, "quote": q, "cambios": json.dumps(q, sort_keys=True) != n0, "acciones": hecho}

@@ -335,6 +335,7 @@ function renderEditor(){
     <h1 class="num">${esc(q.numero)}</h1>
     <select id="estado" aria-label="Estado" class="btn sm">${ESTADOS.map(([k,l])=>`<option value="${k}" ${q.estado===k?"selected":""}>${l}</option>`).join("")}</select>
     <span class="muted" id="savest" style="font-size:12px">Guardado</span><span class="spacer"></span>
+    <button class="btn ia-btn" id="ia-open">✨ Asistente</button>
     <button class="btn" id="dup">Duplicar</button>
     <button class="btn" id="send">Enviar por email</button>
     <button class="btn gold" id="pdf">Descargar PDF</button>
@@ -674,7 +675,52 @@ function renderAjustes(){const c=S.cfg;
 }
 
 boot();
+window.__pres={get S(){return S},saveNow:()=>saveNow(),touch:()=>touch(),renderEditor:()=>renderEditor()};
 })();
 </script>
 
+
+<div id="ia" hidden><div class="ia-h"><b>✨ Asistente</b><span class="muted">Escríbeme lo que quieres en este presupuesto</span><button id="ia-x" aria-label="Cerrar">×</button></div>
+<div id="ia-log"><div class="ia-m a">Hola Juan. Dime qué hago, por ejemplo:<br>· «Cliente Panadería Mateu»<br>· «Añade 200 bolígrafos BIC azules y 50 libretas A5»<br>· «Busca en makito.es la mochila Brak y ponla con sus fotos, precio coste ×2»<br>· «Pon 1 línea de marcaje a 0,45 € la unidad»</div></div>
+<form id="ia-f"><textarea id="ia-t" rows="3" placeholder="Escribe aquí… (Enter envía, Mayús+Enter salto de línea)"></textarea><button>Enviar</button></form></div>
+<style>
+.ia-btn{background:linear-gradient(135deg,#3A1F73,#6A3FB5)!important;color:#fff!important;border:0!important}
+#ia{position:fixed;right:16px;bottom:16px;width:min(420px,calc(100vw - 32px));height:min(640px,calc(100vh - 32px));background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(30,15,70,.3);display:flex;flex-direction:column;z-index:60;overflow:hidden;font-family:inherit}
+#ia[hidden]{display:none}
+.ia-h{background:linear-gradient(90deg,#3A1F73,#5B2E9E);color:#fff;padding:12px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ia-h .muted{color:#d9cdf5;font-size:12px;flex-basis:100%;order:3}.ia-h button{margin-left:auto;background:none;border:0;color:#fff;font-size:24px;cursor:pointer;line-height:1}
+#ia-log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#f6f3fc}
+.ia-m{max-width:88%;padding:8px 11px;border-radius:12px;white-space:pre-wrap;font-size:14px;line-height:1.4}
+.ia-m.u{align-self:flex-end;background:#F39A2B;color:#fff}.ia-m.a{align-self:flex-start;background:#fff;border:1px solid #e4def2}
+.ia-m.w{align-self:flex-start;background:#fff;color:#6b6778;font-style:italic}
+.ia-m.e{align-self:flex-start;background:#fde8eb;color:#7a0b1c}
+#ia-f{display:flex;gap:8px;padding:10px;border-top:1px solid #eee}
+#ia-t{flex:1;border:1px solid #d9d4ca;border-radius:10px;padding:8px 10px;font:inherit;resize:none}
+#ia-f button{background:#3A1F73;color:#fff;border:0;border-radius:10px;padding:0 16px;font-weight:700;cursor:pointer}
+#ia-f button:disabled{opacity:.5}
+</style>
+<script>
+(function(){
+  const H={};  // historial por presupuesto
+  const log=()=>document.getElementById('ia-log');
+  function msg(t,c){const d=document.createElement('div');d.className='ia-m '+c;d.textContent=t;log().appendChild(d);log().scrollTop=1e9;return d}
+  document.addEventListener('click',e=>{if(e.target&&e.target.id==='ia-open'){document.getElementById('ia').hidden=false;setTimeout(()=>document.getElementById('ia-t').focus(),50)}});
+  document.getElementById('ia-x').onclick=()=>document.getElementById('ia').hidden=true;
+  document.getElementById('ia-t').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('ia-f').requestSubmit()}};
+  document.getElementById('ia-f').onsubmit=async e=>{
+    e.preventDefault();const ta=document.getElementById('ia-t'),t=ta.value.trim();const P=window.__pres,S=P.S;if(!t||!S.current)return;
+    const id=S.current.id,h=H[id]||(H[id]=[]);ta.value='';msg(t,'u');
+    const btn=e.target.querySelector('button');btn.disabled=true;const w=msg('Trabajando… (si tiene que mirar webs puede tardar un minuto)','w');
+    try{
+      await P.saveNow();
+      const {id:_x,...quote}=S.current;
+      const r=await fetch('/api/presupuestos/asistente',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({quote,mensaje:t,historial:h})});
+      const j=await r.json();if(!r.ok)throw new Error(j.detail||r.statusText);
+      w.remove();msg(j.texto||'Hecho.','a');h.push({role:'user',content:t},{role:'assistant',content:j.texto||'Hecho.'});
+      if(j.cambios&&S.current&&S.current.id===id){S.current={...j.quote,id};P.touch();P.renderEditor();document.getElementById('ia').hidden=false}
+    }catch(er){w.remove();msg(er.message,'e')}
+    btn.disabled=false;ta.focus();
+  };
+})();
+</script>
 </body></html>
