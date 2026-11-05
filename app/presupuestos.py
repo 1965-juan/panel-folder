@@ -283,7 +283,10 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
 
     clave_f = data_dir / "claude_clave.txt"
     modelo = os.environ.get("PRES_MODEL") or os.environ.get("WA_MODEL") or "claude-sonnet-5-5"
-    web = _httpx.Client(timeout=40, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (PanelFolder presupuestos)"})
+    web = _httpx.Client(timeout=40, follow_redirects=True, http2=False, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.6"})
 
     def clave():
         if not clave_f.exists():
@@ -343,8 +346,13 @@ r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuper
         texto = unescape(re.sub(r"<[^>]+>", " ", texto))
         texto = re.sub(r"[ \t]+", " ", texto)
         texto = re.sub(r"\n\s*\n+", "\n", texto).strip()
+        # primero los enlaces que parecen fichas de producto (los menús suelen llenar la lista)
+        def peso(e):
+            u, t = e
+            return 0 if re.search(r"\.html|/product|/producto|product_id=|/p/|/articulo|/item", u, re.I) else 1
+        enlaces.sort(key=peso)
         return {"url": base, "titulo": titulo, "meta": metas, "fotos": imgs[:30], "texto": texto[:12000],
-                "enlaces": [{"url": u, "texto": t} for u, t in enlaces[:80]]}
+                "enlaces": [{"url": u, "texto": t} for u, t in enlaces[:200]]}
 
     HERR = [
         {"name": "buscar_clientes", "description": "Busca clientes en Odoo por nombre, NIF, email o teléfono. Devuelve sus datos de facturación.",
