@@ -349,15 +349,7 @@ def api_web(request: Request):
 # ---------- módulo Presupuestos ----------
 from . import presupuestos as _presupuestos  # noqa: E402
 
-def solo_admin_user(request: Request):
-    """Presupuestos: solo Juan (lleva datos de todas las empresas del grupo)."""
-    u = current_user(request)
-    if not es_admin(u):
-        raise HTTPException(403, "No tienes acceso a este apartado")
-    return u
-
-
-_presupuestos.setup(app, data_dir=DATA, static_dir=BASE / "static", odoo=odoo, current_user=solo_admin_user,
+_presupuestos.setup(app, data_dir=DATA, static_dir=BASE / "static", odoo=odoo, current_user=current_user,
                     all_company_ids=lambda: [c["id"] for c in companies()])
 
 # ---------- módulo WhatsApp ----------

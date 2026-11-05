@@ -156,7 +156,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     ODOO = yo.odoo_url; $('#demo').hidden = !yo.demo;
     $('#ver').textContent = 'versión ' + yo.version;
     $('#upd').hidden = !yo.puede_actualizar;
-    ADMIN = !!yo.admin; $('#nav-pre').hidden = !ADMIN;
+    ADMIN = !!yo.admin;
     const emps = await api('/api/empresas');
     emps.forEach(e => { const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; $('#company').appendChild(o); });
     if (emps.length === 1) {

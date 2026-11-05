@@ -167,4 +167,3 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .ac-add label{display:flex;gap:8px;align-items:center;font-weight:600}.ac-add label input{width:90px}
 .ac-pick{display:flex;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 11px;cursor:pointer;font:inherit}
 .ac-pick:hover{background:#f6f3fc}
-.side nav a[hidden]{display:none}
