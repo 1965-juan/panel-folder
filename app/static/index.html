@@ -10,18 +10,19 @@
 <aside class="side">
   <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
   <nav>
-    <a class="on" href="#ventas" data-v="ventas">Ventas</a>
-    <a href="#web" data-v="web">Web <span class="nb" id="nb-web" hidden></span></a>
-    <a href="#whatsapp" data-v="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
-    <a href="/presupuestos">Presupuestos</a>
-    <a href="#ac" data-v="ac">Panel AC</a>
-    <a class="off" title="Próximamente">Compras y Mayte</a>
+    <a class="on" href="#ventas" data-v="ventas" data-m="ventas">Ventas</a>
+    <a href="#web" data-v="web" data-m="web">Web <span class="nb" id="nb-web" hidden></span></a>
+    <a href="#whatsapp" data-v="whatsapp" data-m="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
+    <a href="/presupuestos" data-m="presupuestos">Presupuestos</a>
+    <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
+    <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
     <a class="off" title="Próximamente">Inventarios</a>
   </nav>
   <div class="side-foot">
     <button id="upd" class="upd" hidden>Actualizar panel</button>
+    <button id="usr-btn" class="upd usr" hidden>Usuarios</button>
     <span id="who"></span> · <a href="/salir">Salir</a><br><small id="ver"></small>
   </div>
 </aside>
@@ -35,6 +36,7 @@
   </header>
   <div id="demo" class="demo" hidden>Modo demostración: datos inventados, no es tu Odoo.</div>
   <div id="err" class="err" hidden></div>
+  <div id="info" class="info" hidden></div>
 
   <section id="v-web" hidden>
     <section class="kpis kpis3">
@@ -47,6 +49,37 @@
       <div class="col" data-k="w-ped"><h2>Pedidos web <span class="n"></span></h2><p class="hint">Confirmados o enviados</p><div class="cards"></div></div>
       <div class="col" data-k="w-car"><h2>Carritos abandonados <span class="n"></span></h2><p class="hint">Se quedaron sin terminar</p><div class="cards"></div></div>
     </section>
+  </section>
+
+  <section id="v-co" hidden>
+    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button></div>
+    <div id="co-subir" class="co-pane">
+      <div class="co-drops">
+        <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra para recibir el material</small></label>
+        <label class="drop d-fac"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="factura"><b>Facturas de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Suben a Odoo como borrador, Odoo las lee solo y Mayte da el OK</small></label>
+      </div>
+      <p class="muted co-emp">Se suben a: <b id="co-emp-n"></b> (cámbialo arriba en el selector de empresa)</p>
+      <h3>Subidos recientemente</h3><div id="co-docs"></div>
+    </div>
+    <div id="co-rec" class="co-pane" hidden>
+      <div class="co-two"><div><h3>Albaranes subidos sin recibir</h3><div id="co-albs"></div></div>
+      <div><h3>Pendiente de llegar de proveedores</h3><input id="co-rq" type="search" placeholder="Buscar proveedor, pedido o artículo…"><div id="co-recs"></div></div></div>
+    </div>
+    <div id="co-fac" class="co-pane" hidden>
+      <section class="kpis kpis3"><div class="kpi k-ped"><span>Leyendo (Odoo)</span><b id="kf-l">–</b><small>se rellenan solas en unos minutos</small></div>
+        <div class="kpi k-web"><span>Listas para el OK</span><b id="kf-o">–</b><small id="kf-oe"></small></div>
+        <div class="kpi k-fac"><span>Con diferencias</span><b id="kf-d">–</b><small>revisar antes de contabilizar</small></div></section>
+      <section class="board board3">
+        <div class="col" data-k="f-ok"><h2>Para dar el OK <span class="n"></span></h2><p class="hint">Cuadran con el pedido y el material ha llegado</p><div class="cards"></div></div>
+        <div class="col" data-k="f-dif"><h2>Con diferencias <span class="n"></span></h2><p class="hint">Cantidad o precio no cuadran, o falta algún dato</p><div class="cards"></div></div>
+        <div class="col" data-k="f-lee"><h2>Leyendo <span class="n"></span></h2><p class="hint">Odoo está leyendo el PDF</p><div class="cards"></div></div>
+      </section>
+    </div>
+    <div id="co-recu" class="co-pane" hidden>
+      <div class="recu-top"><button id="rc-prev">◀</button><b id="rc-mes"></b><button id="rc-next">▶</button>
+        <div class="recu-bar"><div id="rc-bar"></div></div><span id="rc-txt"></span><button id="rc-add" class="btn">+ Añadir recurrente</button></div>
+      <div class="co-two"><div><h3>Faltan por llegar</h3><div id="rc-faltan"></div></div><div><h3>Ya han llegado</h3><div id="rc-ok"></div></div></div>
+    </div>
   </section>
 
   <section id="v-ac" hidden>
@@ -127,6 +160,7 @@
     <div class="col" data-k="facturas"><h2>Facturas <span class="n"></span></h2><p class="hint">Pendientes de cobro</p><div class="cards"></div></div>
   </section>
   </section>
+    <div id="co-drawer" class="drawer" hidden><div class="drawer-in co-dr"><button class="x" id="co-x">×</button><div id="co-db"></div></div></div>
 </main>
 
 <div id="drawer" class="drawer" hidden>
@@ -143,5 +177,6 @@
 </div>
 <script src="/static/app.js"></script>
 <script src="/static/ac.js"></script>
+<script src="/static/compras.js"></script>
 </body>
 </html>

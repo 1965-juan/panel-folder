@@ -116,6 +116,14 @@ class DemoOdoo:
         }
 
     def call(self, model, method, company_ids=None, **params):
+        if model in ("stock.move", "stock.picking", "account.move", "ir.attachment") and method in ("write", "action_post"):
+            return True
+        if method == "button_validate":
+            return {"res_model": "stock.backorder.confirmation", "context": {}}
+        if model == "stock.backorder.confirmation":
+            return [1] if method == "create" else True
+        if model == "ir.attachment" and method == "create":
+            return [1]
         if method == "create":
             return self.call_kw(model, "create", [params.get("vals_list", [{}])[0]])
         if model == "sale.order.line" and method in ("unlink", "write"):
@@ -203,7 +211,7 @@ class DemoOdoo:
                     "order_line": [1],
                 })
             return rows
-        if model == "account.move":
+        if model == "account.move" and not any(isinstance(x, (list, tuple)) and (x[0] == "partner_id" or (x[0] == "state" and x[2] == "draft")) for x in domain):
             return [{
                 "id": 500 + i, "name": f"FV/2026/0{900 + i}",
                 "partner_id": [i % 5 + 1, clientes[i % 5]],
@@ -222,6 +230,40 @@ class DemoOdoo:
                      "stage_id": [1, "New"], "user_id": False},
                     {"id": 2, "contact_name": "RichardDiers", "email_from": "x@spam.com", "description": "lf_message : earn $50,000 https://telegra.ph",
                      "create_date": d(-1) + " 10:00:00", "stage_id": [1, "New"], "user_id": False}]
+        if model == "stock.picking":
+            return [{"id": 29897, "name": "AC/IN/00133", "partner_id": [7007, "FOLDER PAPELERIAS S.A."], "origin": "P00127", "scheduled_date": d(-4) + " 10:00:00",
+                     "backorder_id": [29896, "AC/IN/00132"], "company_id": [1, "DISTRIPLUS"], "purchase_id": [126, "P00127"], "move_ids": [1, 2],
+                     "location_id": [1, "x"], "location_dest_id": [8, "AC/Stock"], "state": "assigned"},
+                    {"id": 29900, "name": "AC/IN/00134", "partner_id": [7277, "DISTRISANTIAGO PAPELERIA S.L."], "origin": "P00135", "scheduled_date": d(1) + " 10:00:00",
+                     "backorder_id": False, "company_id": [1, "DISTRIPLUS"], "purchase_id": [134, "P00135"], "move_ids": [3], "state": "assigned"}]
+        if model == "stock.move":
+            return [{"id": 1, "picking_id": [29897, "AC/IN/00133"], "product_id": [11, "[115460101] Bolígrafo BIC Cristal azul"], "product_uom_qty": 50, "quantity": 0, "purchase_line_id": False},
+                    {"id": 2, "picking_id": [29897, "AC/IN/00133"], "product_id": [88167, "[1622452] BOLSA BURBUJA SAM Nº 14"], "product_uom_qty": 200, "quantity": 0, "purchase_line_id": False},
+                    {"id": 3, "picking_id": [29900, "AC/IN/00134"], "product_id": [12, "[20829] Gorra Karola"], "product_uom_qty": 20, "quantity": 0, "purchase_line_id": False}]
+        if model == "account.move" and any(x[0] == "state" and x[2] == "draft" for x in domain if isinstance(x, (list, tuple))):
+            return [{"id": 9001, "partner_id": [7007, "FOLDER PAPELERIAS S.A."], "ref": "FV-26/11873", "invoice_date": d(-1), "invoice_date_due": d(59),
+                     "amount_untaxed": 256.09, "amount_total": 309.87, "company_id": [1, "DISTRIPLUS"], "invoice_origin": "P00127", "extract_state": "done",
+                     "create_date": d(0) + " 09:00:00", "move_type": "in_invoice", "invoice_line_ids": [71, 72]},
+                    {"id": 9002, "partner_id": False, "ref": "", "invoice_date": False, "invoice_date_due": False, "amount_untaxed": 0, "amount_total": 0,
+                     "company_id": [1, "DISTRIPLUS"], "invoice_origin": False, "extract_state": "waiting_extraction", "create_date": d(0) + " 09:05:00",
+                     "move_type": "in_invoice", "invoice_line_ids": []},
+                    {"id": 9003, "partner_id": [7500, "INMOBILIARIA LOCALES CS S.L."], "ref": "A-112", "invoice_date": d(-2), "invoice_date_due": d(5),
+                     "amount_untaxed": 900, "amount_total": 1089, "company_id": [1, "DISTRIPLUS"], "invoice_origin": False, "extract_state": "done",
+                     "create_date": d(0) + " 09:10:00", "move_type": "in_invoice", "invoice_line_ids": [73]}]
+        if model == "account.move" and any(isinstance(x, (list, tuple)) and x[0] == "partner_id" for x in domain):
+            return [{"id": 9003, "partner_id": [7500, "INMOBILIARIA LOCALES CS S.L."], "ref": "A-112", "invoice_date": d(-2), "amount_total": 1089,
+                     "company_id": [1, "DISTRIPLUS"], "state": "draft"}]
+        if model == "account.move.line":
+            return [{"id": 71, "move_id": [9001, "x"], "product_id": [82715, "[1250101] ADHESIVO EN BARRA 10 GR. FOLDER"], "name": "", "quantity": 24, "price_unit": 0.25, "price_subtotal": 6, "purchase_line_id": [1281, "x"]},
+                    {"id": 72, "move_id": [9001, "x"], "product_id": [114904, "[114860787] MARCADOR STABILO BOSS PASTEL (LILA)"], "name": "", "quantity": 12, "price_unit": 0.72, "price_subtotal": 8.64, "purchase_line_id": [1304, "x"]},
+                    {"id": 73, "move_id": [9003, "x"], "product_id": False, "name": "Alquiler local Tienda 1 noviembre", "quantity": 1, "price_unit": 900, "price_subtotal": 900, "purchase_line_id": False}]
+        if model == "purchase.order.line":
+            return [{"id": 1281, "order_id": [126, "P00127"], "product_qty": 24, "qty_received": 24, "qty_invoiced": 0, "price_unit": 0.25},
+                    {"id": 1304, "order_id": [126, "P00127"], "product_qty": 10, "qty_received": 10, "qty_invoiced": 0, "price_unit": 0.69}]
+        if model in ("ir.attachment", "account.journal"):
+            return [{"id": 1, "res_id": 9001}]
+        if model == "res.partner" and fields and "vat" in fields:
+            return [{"id": 7500, "display_name": "INMOBILIARIA LOCALES CS S.L.", "vat": "B12000000"}, {"id": 7007, "display_name": "FOLDER PAPELERIAS S.A.", "vat": "A84036391"}]
         if model == "sale.order" and domain and domain[0][0] == "id":
             return [{"id": 4806, "client_order_ref": "Recoge Marta Gil · 600123123", "note": ""}]
         if model == "product.product":

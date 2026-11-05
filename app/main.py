@@ -21,7 +21,26 @@ USERS_FILE = DATA / "usuarios.json"
 SECRET_FILE = DATA / "secreto.txt"
 if not SECRET_FILE.exists():
     SECRET_FILE.write_text(secrets.token_hex(32))
-ALLOWED_USERS = [u.strip().lower() for u in os.environ.get("PANEL_USERS", "juan,almacen").split(",") if u.strip()]
+ENV_USERS = [u.strip().lower() for u in os.environ.get("PANEL_USERS", "juan,almacen").split(",") if u.strip()]
+EXTRA_FILE = DATA / "usuarios_extra.json"   # usuarios añadidos desde el panel (p. ej. Mayte)
+
+
+def extra_users():
+    try:
+        return json.loads(EXTRA_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def allowed_users():
+    return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
+
+
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras"]
+
+
+def modulos_de(u):
+    return extra_users().get(u, {}).get("modulos") or TODOS_MODULOS
 DEMO = os.environ.get("PANEL_DEMO") == "1"
 odoo = DemoOdoo() if DEMO else Odoo()
 ODOO_URL = os.environ.get("ODOO_URL", "").rstrip("/")
@@ -71,9 +90,9 @@ def home(request: Request):
 @app.get("/entrar", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     html = (BASE / "static" / "login.html").read_text()
-    opts = "".join(f'<option value="{u}">{u.capitalize()}</option>' for u in ALLOWED_USERS)
+    opts = "".join(f'<option value="{u}">{u.capitalize()}</option>' for u in allowed_users())
     users = load_users()
-    nuevos = [u for u in ALLOWED_USERS if u not in users]
+    nuevos = [u for u in allowed_users() if u not in users]
     aviso = ""
     if nuevos:
         aviso = "Primera vez para: " + ", ".join(n.capitalize() for n in nuevos) + ". La contraseña que escribas quedará guardada como la tuya."
@@ -84,7 +103,7 @@ def login_page(request: Request, error: str = ""):
 @app.post("/entrar")
 def login(request: Request, usuario: str = Form(...), clave: str = Form(...)):
     usuario = usuario.strip().lower()
-    if usuario not in ALLOWED_USERS:
+    if usuario not in allowed_users():
         return RedirectResponse("/entrar?error=Usuario+no+válido", 303)
     users = load_users()
     if usuario not in users:
@@ -126,8 +145,14 @@ for part in os.environ.get("PANEL_USER_COMPANIES", "almacen=DISTRIPLUS").split("
         USER_COMPANIES[u.strip().lower()] = [x.strip().upper() for x in v.split(",") if x.strip()]
 
 
+def regla_empresas(user):
+    if user in extra_users():
+        return [x.upper() for x in extra_users()[user].get("empresas", ["*"])]
+    return USER_COMPANIES.get(user, ["*"])
+
+
 def allowed_companies(user):
-    rule = USER_COMPANIES.get(user, ["*"])
+    rule = regla_empresas(user)
     comps = companies()
     if "*" in rule:
         return comps
@@ -163,14 +188,40 @@ VERSION = (BASE / "VERSION").read_text().strip() if (BASE / "VERSION").exists() 
 
 
 def es_admin(u):
-    return "*" in USER_COMPANIES.get(u, ["*"])
+    return u in ENV_USERS and "*" in USER_COMPANIES.get(u, ["*"])
 
 
 @app.get("/api/yo")
 def yo(request: Request):
     u = current_user(request)
     return {"usuario": u, "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
-            "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u)}
+            "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u),
+            "modulos": modulos_de(u)}
+
+
+@app.get("/api/usuarios")
+def api_usuarios(request: Request):
+    if not es_admin(current_user(request)):
+        raise HTTPException(403, "Solo Juan")
+    reg = load_users()
+    return [{"usuario": u, "extra": u in extra_users(), "empresas": regla_empresas(u), "modulos": modulos_de(u),
+             "tiene_clave": u in reg} for u in allowed_users()]
+
+
+@app.post("/api/usuarios")
+async def api_usuario_nuevo(request: Request):
+    if not es_admin(current_user(request)):
+        raise HTTPException(403, "Solo Juan")
+    b = await request.json()
+    u = re.sub(r"[^a-z0-9]", "", (b.get("usuario") or "").strip().lower())
+    if not u or u in ENV_USERS:
+        raise HTTPException(400, "Nombre de usuario no válido")
+    ex = extra_users()
+    ex[u] = {"empresas": b.get("empresas") or ["*"], "modulos": [m for m in (b.get("modulos") or TODOS_MODULOS) if m in TODOS_MODULOS]}
+    EXTRA_FILE.write_text(json.dumps(ex, indent=1, ensure_ascii=False))
+    if b.get("reiniciar_clave"):
+        reg = load_users(); reg.pop(u, None); save_users(reg)
+    return {"ok": True}
 
 
 @app.post("/api/actualizar")
@@ -260,7 +311,7 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
                "albaranes": albaranes, "facturas": facturas}
         out = {k: [c for c in v if c["cid"] in cids] for k, v in out.items()}
-        if "*" not in USER_COMPANIES.get(u, ["*"]):
+        if "*" not in regla_empresas(u):
             # usuarios limitados: no ven ventas entre empresas del grupo
             grupo = ["DISTRIPLUS", "LOGIPAPER", "INGRAF", "FERMASA"]
             out = {k: [c for c in v if not any(g in c["cliente"].upper() for g in grupo)] for k, v in out.items()}
@@ -379,3 +430,8 @@ _whatsapp.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, es_adm
 from . import panelac as _panelac  # noqa: E402
 
 _panelac.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)
+
+# ---------- módulo Compras ----------
+from . import compras as _compras  # noqa: E402
+
+_compras.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, es_admin=es_admin, demo=DEMO)
