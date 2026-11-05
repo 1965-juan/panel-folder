@@ -28,36 +28,86 @@ def setup(app, *, data_dir: Path, static_dir: Path, odoo, current_user, all_comp
         c.execute("CREATE TABLE IF NOT EXISTS docs (coll TEXT, id TEXT, data TEXT, PRIMARY KEY (coll, id))")
         return c
 
-    # ---------- importación única: datos/importar_presupuestador.zip ----------
-    def importar():
+    # ---------- importación: zip (o carpeta descomprimida) del presupuestador anterior ----------
+    def importar_de(leer, nombres):
+        """leer(nombre) -> bytes; nombres: lista de rutas dentro del paquete."""
+        docs = json.loads(leer("docs.json"))
+        n = 0
+        with lock, con() as c:
+            for coll, items in docs.items():
+                if coll not in COLLS:
+                    continue
+                for did, data in items.items():
+                    if not c.execute("SELECT 1 FROM docs WHERE coll=? AND id=?", (coll, did)).fetchone():
+                        c.execute("INSERT INTO docs VALUES (?,?,?)", (coll, did, json.dumps(data, ensure_ascii=False)))
+                        n += 1
+        fotos = 0
+        for name in nombres:
+            m = re.fullmatch(r"(?:.*/)?blobs/([0-9a-f]{32})\.(png|jpg|jpeg|webp|gif)", name)
+            if m and not (blobs / m.group(1)).exists():
+                (blobs / m.group(1)).write_bytes(leer(name))
+                (blobs / (m.group(1) + ".type")).write_text("image/" + m.group(2).replace("jpg", "jpeg"))
+                fotos += 1
+        return n, fotos
+
+    def importar_zip(z):
         import zipfile
-        z = data_dir / "importar_presupuestador.zip"
-        if not z.exists():
-            return
-        try:
-            with zipfile.ZipFile(z) as zf:
-                docs = json.loads(zf.read("docs.json"))
-                n = 0
-                with lock, con() as c:
-                    for coll, items in docs.items():
-                        if coll not in COLLS:
-                            continue
-                        for did, data in items.items():
-                            if not c.execute("SELECT 1 FROM docs WHERE coll=? AND id=?", (coll, did)).fetchone():
-                                c.execute("INSERT INTO docs VALUES (?,?,?)", (coll, did, json.dumps(data, ensure_ascii=False)))
-                                n += 1
-                for name in zf.namelist():
-                    m = re.fullmatch(r"blobs/([0-9a-f]{32})\.(png|jpg|jpeg|webp|gif)", name)
-                    if m and not (blobs / m.group(1)).exists():
-                        (blobs / m.group(1)).write_bytes(zf.read(name))
-                        ext = m.group(2).replace("jpg", "jpeg")
-                        (blobs / (m.group(1) + ".type")).write_text("image/" + ext)
-            z.rename(data_dir / "importar_presupuestador.hecho.zip")
-            print(f"[presupuestos] importados {n} documentos", flush=True)
-        except Exception as e:
-            print("[presupuestos] error importando:", e, flush=True)
+        with zipfile.ZipFile(z) as zf:
+            nombres = zf.namelist()
+            raiz = next((x[:-len("docs.json")] for x in nombres if x.endswith("docs.json") and "__MACOSX" not in x), None)
+            if raiz is None:
+                raise ValueError("El zip no tiene docs.json")
+            return importar_de(lambda nm: zf.read(nm if nm != "docs.json" else raiz + "docs.json"),
+                               [x for x in nombres if "__MACOSX" not in x])
+
+    def importar():
+        """Al arrancar: busca en datos/ cualquier zip o carpeta del presupuestador sin importar todavía."""
+        candidatos = [p for p in data_dir.glob("*resupuestador*.zip") if ".hecho" not in p.name]
+        for z in candidatos:
+            try:
+                n, f = importar_zip(z)
+                z.rename(z.with_name(z.stem + ".hecho.zip"))
+                print(f"[presupuestos] {z.name}: importados {n} documentos y {f} fotos", flush=True)
+            except Exception as e:
+                print("[presupuestos] error importando", z.name, e, flush=True)
+        for d in data_dir.glob("*resupuestador*"):
+            if d.is_dir() and (d / "docs.json").exists() and not (d / ".hecho").exists():
+                try:
+                    files = [str(x.relative_to(d)) for x in d.rglob("*") if x.is_file()]
+                    n, f = importar_de(lambda nm: (d / nm).read_bytes(), files)
+                    (d / ".hecho").write_text("ok")
+                    print(f"[presupuestos] carpeta {d.name}: importados {n} documentos y {f} fotos", flush=True)
+                except Exception as e:
+                    print("[presupuestos] error importando carpeta", d.name, e, flush=True)
 
     importar()
+
+    @app.post("/api/presupuestos/importar")
+    async def importar_subido(request: Request, archivo: UploadFile = File(...)):
+        current_user(request)
+        import io
+        datos = await archivo.read()
+        try:
+            n, f = importar_zip(io.BytesIO(datos))
+        except Exception as e:
+            raise HTTPException(400, f"No se pudo leer el archivo: {e}")
+        (data_dir / "importar_presupuestador.subido.hecho.zip").write_bytes(datos)
+        return {"ok": True, "documentos": n, "fotos": f}
+
+    @app.get("/presupuestos/importar")
+    def importar_pagina(request: Request):
+        if not request.session.get("user"):
+            return RedirectResponse("/entrar")
+        return Response("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Recuperar presupuestos</title><style>body{font:15px -apple-system,Segoe UI,sans-serif;background:#3A1F73;display:grid;place-items:center;min-height:100vh;margin:0}
+.c{background:#fff;border-radius:14px;padding:28px;max-width:440px;display:flex;flex-direction:column;gap:14px}h2{margin:0;color:#3A1F73}
+button{background:#F39A2B;color:#fff;border:0;border-radius:8px;padding:11px;font-weight:700;font-size:15px;cursor:pointer}#r{font-weight:600}</style>
+<div class=c><h2>Recuperar presupuestos anteriores</h2><p>Elige el archivo <b>importar_presupuestador.zip</b> (está en Descargas).
+Solo añade lo que falta: no borra ni cambia nada de lo que ya tienes.</p>
+<input type=file id=f accept=".zip"><button id=b>Cargar</button><p id=r></p><a href="/presupuestos">← Ir a Presupuestos</a></div>
+<script>b.onclick=async()=>{if(!f.files[0])return r.textContent='Elige el archivo primero';r.textContent='Cargando…';
+const fd=new FormData();fd.append('archivo',f.files[0]);const x=await fetch('/api/presupuestos/importar',{method:'POST',body:fd});const j=await x.json();
+r.textContent=x.ok?`Hecho: ${j.documentos} documentos y ${j.fotos} fotos recuperados.`:'Error: '+(j.detail||x.status)}</script>""", media_type="text/html")
 
     def check(coll):
         if coll not in COLLS:
