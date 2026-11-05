@@ -87,9 +87,10 @@ function acLine(g, l, locs, i) {
     <td class="n qe" title="Pulsa para cambiar la cantidad"><b>${acNum(l.qty_ordered)}</b> <span class="ed">✎</span></td>
     <td class="n">${acNum(l.qty_delivered)}</td><td class="n pend">${acNum(l.qty_pending)}</td>
     <td class="est"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
-    ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0; return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}${s > 0 ? ' hay' : ''}">
-      <input type="number" min="0" data-loc="${x.id}" value="${sel[x.id] || ''}" placeholder="–" ${x.read_only ? 'disabled' : ''}>
-      <small data-fill="${x.id}" class="${s > 0 && !x.read_only ? 'can' : ''}" title="Stock en ${escH(x.name)}">${acNum(s)}</small></td>`; }).join('')}
+    ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0, max = Math.max(0, Math.min(s, l.qty_pending));
+      return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}">
+      <span data-fill="${x.id}" class="stk ${s > 0 ? (x.read_only ? 'vp' : 'si can') : 'no'}" title="Stock en ${escH(x.name)}${s > 0 && !x.read_only ? ' · pulsa para coger' : ''}">${acNum(s)}</span>
+      ${x.read_only ? '' : `<input type="number" min="0" max="${max}" step="1" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
     <td class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
   r.querySelector('.art').textContent = l.product_name;
   r.querySelector('.art').title = l.product_name + (l.product_barcode ? ' · ' + l.product_barcode : '');
@@ -100,7 +101,7 @@ function acLine(g, l, locs, i) {
     const c = acSelCount(); $('#ac-ok').disabled = !c; $('#ac-ok').textContent = c ? `✓ Validar selección (${c})` : '✓ Validar selección';
   };
   r.querySelectorAll('input[data-loc]').forEach(i => i.oninput = save);
-  r.querySelectorAll('small.can').forEach(s => s.onclick = () => {
+  r.querySelectorAll('.stk.can').forEach(s => s.onclick = () => {
     const i = r.querySelector(`input[data-loc="${s.dataset.fill}"]`);
     const ya = [...r.querySelectorAll('input[data-loc]')].filter(x => x !== i).reduce((a, x) => a + (parseFloat(x.value) || 0), 0);
     i.value = Math.max(0, Math.min(parseFloat(s.textContent.replace(',', '.')) || 0, l.qty_pending - ya)); save();
