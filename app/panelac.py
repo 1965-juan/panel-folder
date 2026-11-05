@@ -126,3 +126,20 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                         out["documents"] += r.get("documents") or []
             return out
         return guard(run)
+
+    @app.get("/api/ac/proveedor/{product_id}")
+    def ac_proveedor(product_id: int, request: Request, company: str = "all"):
+        _, cids = ctx(request, company)
+        return guard(lambda: {"estado": odoo.call_kw("sale.order", "get_purchase_status", [product_id], company_ids=cids),
+                              "proveedores": odoo.call_kw("sale.order", "get_supplier_info", [product_id], company_ids=cids)})
+
+    @app.post("/api/ac/pedir")
+    async def ac_pedir(request: Request, company: str = "all"):
+        _, cids = ctx(request, company)
+        b = await body(request)
+        qty = float(b.get("qty") or 0)
+        if qty <= 0:
+            raise HTTPException(400, "Cantidad no válida")
+        line = int(b["line_id"]) if b.get("line_id") else False
+        return guard(lambda: odoo.call_kw("sale.order", "ac_create_purchase_order",
+                                          [int(b["product_id"]), int(b["partner_id"]), qty, line], company_ids=cids))

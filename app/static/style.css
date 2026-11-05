@@ -205,3 +205,12 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .act td.loc input{padding:0 2px}
 .act tr.ln td{height:84px}
 .act td.ckc,.act td.art,.act td.n,.act td.est,.act td.acts{vertical-align:middle}
+.act td.est{cursor:pointer}.act td.est:hover{background:#f3effa!important}
+.act td.est .oo{text-decoration:underline dotted}
+.acts .prv{border:1px solid #d6cfe6;background:#fff;color:var(--purple);border-radius:7px;cursor:pointer;padding:3px 6px;font-size:12px;margin-right:4px}
+.act col.c-acc{width:170px}
+#ac-list.cargando{opacity:.6;transition:opacity .2s}
+#ac-prov .pv{display:flex;flex-direction:column;gap:6px}#ac-prov .pv label{display:flex;gap:8px;align-items:center;font-weight:500}
+#ac-prov .pv label b{margin-left:auto}#ac-prov .qp{display:flex;gap:8px;align-items:center;font-weight:600}
+#ac-prov h4{margin:14px 0 6px;color:var(--purple)}#ac-prov table td:first-child a{font-weight:700}
+#ac-prov .pv input{width:auto;padding:0;margin:0}#ac-prov .pv label{justify-content:flex-start}

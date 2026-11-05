@@ -151,6 +151,15 @@ class DemoOdoo:
                     o["lines"] = [l for l in o["lines"] if l["qty_pending"] > 0]
                 self.ac[coll] = [o for o in self.ac[coll] if o["lines"]]
             return {"picking_names": ["AC/OUT/00999"], "documents": [{"id": 1, "report_name": "stock.report_deliveryslip", "type": "albaran", "name": "AC/OUT/00999"}]}
+        if method == "get_purchase_status":
+            return {"po_lines": [{"po_id": 126, "po_name": "P00127", "partner_id": 7007, "partner_name": "FOLDER PAPELERIAS S.A.", "state": "draft",
+                                  "state_label": "Borrador", "qty_ordered": 2, "qty_received": 0, "qty_pending": 2, "date_planned": "04 nov"}],
+                    "total_on_order": 2, "demand_orders": 1, "demand_repos": 0, "demand_total": 1}
+        if method == "get_supplier_info":
+            return [{"partner_id": 7007, "partner_name": "FOLDER PAPELERIAS S.A.", "price": 4.71, "min_qty": 0, "currency_symbol": "€"},
+                    {"partner_id": 7029, "partner_name": "APLI PAPER S.A.", "price": 4.71, "min_qty": 0, "currency_symbol": "€"}]
+        if method == "ac_create_purchase_order":
+            return {"po_name": "P00127", "is_new": False, "merged": True}
         if method == "create" and model == "sale.order.line":
             v = args[0]
             for o in self.ac["orders"]:

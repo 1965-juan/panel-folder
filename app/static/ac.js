@@ -86,12 +86,12 @@ function acLine(g, l, locs, i) {
     <td class="art"></td>
     <td class="n qe" title="Pulsa para cambiar la cantidad"><b>${acNum(l.qty_ordered)}</b> <span class="ed">✎</span></td>
     <td class="n">${acNum(l.qty_delivered)}</td><td class="n pend">${acNum(l.qty_pending)}</td>
-    <td class="est"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
+    <td class="est" title="Ver pedidos a proveedor y pedir"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
     ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0, max = Math.max(0, Math.min(s, l.qty_pending));
       return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}">
       <span data-fill="${x.id}" class="stk ${s > 0 ? (x.read_only ? 'vp' : 'si can') : 'no'}" title="Stock en ${escH(x.name)}${s > 0 && !x.read_only ? ' · pulsa para coger' : ''}">${acNum(s)}</span>
-      ${x.read_only ? '<span class="hueco"></span>' : `<input type="number" min="0" max="${max}" step="1" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
-    <td class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
+      ${x.read_only ? '<span class="hueco"></span>' : `<input type="number" min="0" step="any" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
+    <td class="acts"><button class="prv" title="Pedir a proveedor">Prov.</button><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
   r.querySelector('.art').textContent = l.product_name;
   r.querySelector('.art').title = l.product_name + (l.product_barcode ? ' · ' + l.product_barcode : '');
   const save = () => {
@@ -124,6 +124,7 @@ function acLine(g, l, locs, i) {
   };
   // Enter en una casilla de ubicación valida esa línea
   r.querySelectorAll('input[data-loc]').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); if (ACSEL[k]) acValidar([k]); } }));
+  r.querySelector('.est').onclick = r.querySelector('.prv').onclick = () => acProv(g, l);
   r.querySelector('.del').onclick = async () => {
     if (!confirm(`¿Quitar del pedido ${g.ref}?\n${l.product_name}`)) return;
     try { await jpost(`/api/ac/borrar?company=${company}`, { tipo: g.tipo, id: l.line_id }); delete ACSEL[k]; acLoad(); } catch (e) { alertBox(e.message); }
@@ -138,7 +139,15 @@ async function acValidar(keys) {
   const b = $('#ac-ok'); b.disabled = true; b.textContent = 'Validando…';
   try {
     const r = await jpost(`/api/ac/validar?company=${company}`, body);
-    keys.forEach(k => delete ACSEL[k]);
+    keys.forEach(k => {
+      const s = ACSEL[k]; delete ACSEL[k]; if (!s) return;
+      const q = Object.values(s.t).reduce((a, v) => a + v, 0);
+      const coll = s.tipo === 'cliente' ? AC.orders : AC.reposicion;
+      coll.forEach(o => o.lines.forEach(l => { if ((l.line_id || l.move_id) === s.id || l.move_id === s.id) { l.qty_delivered += q; l.qty_pending = Math.max(0, l.qty_pending - q); } }));
+      coll.forEach(o => o.lines = o.lines.filter(l => l.qty_pending > 0));
+    });
+    AC.orders = AC.orders.filter(o => o.lines.length); AC.reposicion = AC.reposicion.filter(o => o.lines.length);
+    acRender();
     const d = $('#ac-docs');
     d.innerHTML = `<b>✓ Validado.</b> ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
       ${r.documents.length ? '<span>Para imprimir:</span> ' + r.documents.map(x => `<a target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name || x.type || 'documento')}</a>`).join(' ') : ''}
@@ -149,9 +158,37 @@ async function acValidar(keys) {
 }
 $('#ac-ok').onclick = () => acValidar(Object.keys(ACSEL));
 let acT; $('#ac-q').oninput = () => { clearTimeout(acT); acT = setTimeout(acRender, 200); };
+let acCargando = false;
 async function acLoad() {
-  try { AC = await api(`/api/ac/datos?company=${company}`); acRender(); } catch (e) { showErr(e.message); }
+  if (acCargando) return; acCargando = true; $('#ac-list').classList.add('cargando');
+  try { const d = await api(`/api/ac/datos?company=${company}`); AC = d; acRender(); } catch (e) { showErr(e.message); }
+  acCargando = false; $('#ac-list').classList.remove('cargando');
 }
+async function acProv(g, l) {
+  const box = $('#ac-prov-b'); $('#ac-prov-t').textContent = l.product_name; box.innerHTML = '<p class="muted">Cargando…</p>'; $('#ac-prov').hidden = false;
+  try {
+    const d = await api(`/api/ac/proveedor/${l.product_id}?company=${company}`), e = d.estado || {}, pv = d.proveedores || [];
+    const falta = Math.max(1, (e.demand_total || l.qty_pending) - (e.total_on_order || 0));
+    box.innerHTML = `<p><b>Lo necesitan:</b> ${acNum(e.demand_total)} (pedidos ${acNum(e.demand_orders)} · tiendas ${acNum(e.demand_repos)}) · <b>ya pedido:</b> ${acNum(e.total_on_order)}</p>
+      <h4>Pedidos a proveedor en curso</h4>
+      ${(e.po_lines || []).length ? `<table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Estado</th><th>Pedido</th><th>Recibido</th><th>Pend.</th><th>Previsto</th></tr></thead><tbody>${e.po_lines.map(p => `<tr>
+        <td><a target="_blank" rel="noopener" href="${ODOO}/odoo/purchase/${p.po_id}">${escH(p.po_name)}</a></td><td>${escH(p.partner_name)}</td><td>${escH(p.state_label)}</td>
+        <td>${acNum(p.qty_ordered)}</td><td>${acNum(p.qty_received)}</td><td><b>${acNum(p.qty_pending)}</b></td><td>${escH(p.date_planned || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No hay pedidos a proveedor de este artículo.</p>'}
+      <h4>Pedir a proveedor</h4>
+      ${pv.length ? `<div class="pv">${pv.map((p, i) => `<label><input type="radio" name="pv" value="${p.partner_id}" ${i ? '' : 'checked'}> ${escH(p.partner_name)} <b>${acNum(p.price)} ${escH(p.currency_symbol || '€')}</b></label>`).join('')}</div>
+        <label class="qp">Cantidad <input id="ac-pq" type="number" min="1" step="any" value="${falta}"></label>
+        <button id="ac-pgo" class="ac-go">Pedir</button>
+        <p class="muted">Si ya hay un pedido en borrador a ese proveedor, se añade ahí.</p>` : '<p class="muted">Este artículo no tiene proveedores. Añádelo en Odoo (pestaña Compra del producto).</p>'}`;
+    if ($('#ac-pgo')) $('#ac-pgo').onclick = async () => {
+      const pid = box.querySelector('input[name=pv]:checked').value, qty = parseFloat($('#ac-pq').value);
+      try { const r = await jpost(`/api/ac/pedir?company=${company}`, { product_id: l.product_id, partner_id: pid, qty, line_id: g.tipo === 'cliente' ? l.line_id : null });
+        alertBox(r.is_new ? `Pedido de compra ${r.po_name} creado` : `Añadido al borrador ${r.po_name}`); $('#ac-prov').hidden = true; acLoad();
+      } catch (x) { alertBox(x.message); }
+    };
+  } catch (x) { box.innerHTML = `<p class="err">${escH(x.message)}</p>`; }
+}
+$('#ac-prov-x').onclick = () => $('#ac-prov').hidden = true;
+$('#ac-prov').onclick = e => { if (e.target.id === 'ac-prov') $('#ac-prov').hidden = true; };
 function acAddOpen(g) {
   ACADD = g; $('#ac-add-t').textContent = `Añadir artículo a ${g.ref} · ${g.nombre}`;
   $('#ac-add-q').value = ''; $('#ac-add-n').value = 1; $('#ac-add-r').innerHTML = '<p class="muted">Escribe al menos 2 letras o pasa el código de barras</p>';

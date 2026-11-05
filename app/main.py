@@ -106,8 +106,16 @@ def logout(request: Request):
 
 
 # ---------- API común ----------
+_COMP = {"t": 0, "v": None}
+
+
 def companies():
-    return odoo.search_read("res.company", [], ["name"], order="id")
+    # las empresas casi nunca cambian: se guardan 10 minutos para no preguntar a Odoo en cada clic
+    import time as _t
+    if not _COMP["v"] or _t.time() - _COMP["t"] > 600:
+        _COMP["v"] = odoo.search_read("res.company", [], ["name"], order="id")
+        _COMP["t"] = _t.time()
+    return _COMP["v"]
 
 
 # Empresas que ve cada usuario: PANEL_USER_COMPANIES="almacen=DISTRIPLUS;juan=*"
