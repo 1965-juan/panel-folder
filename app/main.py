@@ -31,6 +31,14 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_FILE.read_text(), max_ag
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
 
+@app.middleware("http")
+async def sin_cache_vieja(request, call_next):
+    resp = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path == "/presupuestos":
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 # ---------- usuarios ----------
 def load_users():
     return json.loads(USERS_FILE.read_text()) if USERS_FILE.exists() else {}
@@ -55,7 +63,9 @@ def current_user(request: Request):
 def home(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/entrar")
-    return FileResponse(BASE / "static" / "index.html")
+    html = (BASE / "static" / "index.html").read_text()
+    html = re.sub(r'(/static/[\w.-]+\.(?:js|css))"', lambda m: f'{m.group(1)}?v={VERSION}"', html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/entrar", response_class=HTMLResponse)
