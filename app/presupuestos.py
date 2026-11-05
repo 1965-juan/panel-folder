@@ -68,6 +68,10 @@ def setup(app, *, data_dir: Path, static_dir: Path, odoo, current_user, all_comp
     def page(request: Request):
         if not request.session.get("user"):
             return RedirectResponse("/entrar")
+        try:
+            current_user(request)
+        except HTTPException:
+            return RedirectResponse("/")
         return FileResponse(static_dir / "presupuestos.html")
 
     # ---------- almacén ----------
