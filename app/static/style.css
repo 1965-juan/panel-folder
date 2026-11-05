@@ -126,3 +126,44 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 @media (max-width:900px){.wa-wrap,.wa-pane{grid-template-columns:1fr;height:auto}.wa-chat{min-height:60vh}}
 .bub.sys{align-self:center;max-width:86%;background:#fff6e5;border:1px dashed #F39A2B;font-size:13px}
 .wa-open{background:#25D366;color:#fff;text-decoration:none;border-radius:8px;padding:4px 10px;font-weight:700}
+
+/* ---------- Panel AC ---------- */
+#v-ac[hidden]{display:none}
+.ac-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.ac-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ac-chips button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;cursor:pointer;font:inherit;font-size:13px}
+.ac-chips button.on{background:var(--purple);border-color:var(--purple);color:#fff}
+#ac-q{flex:1;min-width:240px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+.ac-go{background:var(--green);color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer}
+.ac-go:disabled{opacity:.45;cursor:default}
+.ac-docs{background:#e9f7ef;border:1px solid #9fd8b6;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.ac-docs[hidden]{display:none}.ac-docs a{font-weight:600}.ac-docs .x2{margin-left:auto;border:0;background:none;font-size:20px;cursor:pointer}
+#ac-list{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(40,20,80,.08);overflow:auto}
+.ac-row{display:grid;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:13.5px;min-width:max-content}
+.ac-h{background:#f3effa;font-weight:700;color:var(--purple);position:sticky;top:0;z-index:1;font-size:13px}
+.ac-h .ro,.loc.ro{opacity:.55;font-style:italic}
+.ac-ord{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;background:#faf8f4;border-bottom:1px solid var(--line);border-left:5px solid var(--purple);min-width:max-content}
+.ac-ord.reposicion{border-left-color:var(--orange);background:#fff8ef}
+.ac-ord .nm{font-weight:600}.ac-ord .sp{margin-left:auto;display:flex;gap:6px}
+.t-del{background:#F39A2B;color:#fff;border-radius:5px;padding:1px 8px;font-size:12px;font-weight:700}
+.t-bad{background:#C8102E;color:#fff;border-radius:5px;padding:1px 8px;font-size:12px;font-weight:700}
+.t-cli{background:#14B8A6;color:#fff;border-radius:5px;padding:1px 8px;font-size:12px;font-weight:700}
+.t-tie{background:#6A3FB5;color:#fff;border-radius:5px;padding:1px 8px;font-size:12px;font-weight:700}
+.lnk{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--purple);text-decoration:none}
+.ac-row .art small{color:var(--muted)}
+.ac-row .ed{border:0;background:none;cursor:pointer;color:var(--muted)}
+.bdg{border-radius:5px;padding:2px 7px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.b-ok{background:#d8f2e2;color:#145c37}.b-warn{background:#ffe9cc;color:#8a4b00}.b-bad{background:#fde0e4;color:#8c0b20}.b-prov{background:#e7e0f5;color:#3A1F73}
+.oo{display:block;color:var(--muted);font-size:11px}
+.loc{display:flex;flex-direction:column;align-items:center;gap:2px}
+.loc input{width:58px;padding:4px;border:1.5px solid #c9c5bb;border-radius:6px;text-align:center;font:inherit}
+.loc input:disabled{background:#f2f0ec;border-color:#e4e1da}
+.loc small{font-size:11.5px;color:var(--muted)}.loc small.can{color:var(--green);font-weight:700;cursor:pointer;text-decoration:underline dotted}
+.acts{display:flex;gap:4px;justify-content:flex-end}
+.acts .del{border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;padding:3px 6px}
+.acts .val{border:1px solid var(--green);background:#fff;color:var(--green);border-radius:7px;cursor:pointer;padding:3px 9px;font-weight:600}
+.ac-add{width:min(560px,100%);display:flex;flex-direction:column;gap:10px}
+.ac-add input{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+.ac-add label{display:flex;gap:8px;align-items:center;font-weight:600}.ac-add label input{width:90px}
+.ac-pick{display:flex;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 11px;cursor:pointer;font:inherit}
+.ac-pick:hover{background:#f6f3fc}

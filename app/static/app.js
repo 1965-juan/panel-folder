@@ -131,12 +131,12 @@ async function loadWeb(badgeOnly) {
   } catch (e) { showErr(e.message); }
 }
 function route() {
-  const v = ({ '#web': 'web', '#whatsapp': 'whatsapp' })[location.hash] || 'ventas';
+  const v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac' })[location.hash] || 'ventas';
   document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
-  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp';
-  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp' })[v] || 'Ventas';
-  $('#q').hidden = $('#company').hidden = v !== 'ventas';
-  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else load();
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac';
+  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC' })[v] || 'Ventas';
+  $('#q').hidden = v !== 'ventas'; $('#company').hidden = v !== 'ventas' && v !== 'ac';
+  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else load();
 }
 window.addEventListener('hashchange', route);
 setInterval(() => loadWeb(true), 5 * 60 * 1000);
@@ -147,7 +147,7 @@ $('#drawer').onclick = e => { if (e.target.id === 'drawer') $('#drawer').hidden 
 $('#reload').onclick = () => route();
 $('#tgcad').onclick = () => { const b = document.querySelector('.cards.cad'); b.hidden = !b.hidden; };
 let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 400); };
-$('#company').onchange = e => { company = e.target.value; try { localStorage.setItem('pf_company', company); } catch (x) {} load(); };
+$('#company').onchange = e => { company = e.target.value; try { localStorage.setItem('pf_company', company); } catch (x) {} route(); };
 
 (async () => {
   try {

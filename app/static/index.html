@@ -14,7 +14,7 @@
     <a href="#web" data-v="web">Web <span class="nb" id="nb-web" hidden></span></a>
     <a href="#whatsapp" data-v="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
     <a href="/presupuestos">Presupuestos</a>
-    <a class="off" title="Próximamente">Panel AC</a>
+    <a href="#ac" data-v="ac">Panel AC</a>
     <a class="off" title="Próximamente">Compras y Mayte</a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
@@ -47,6 +47,22 @@
       <div class="col" data-k="w-ped"><h2>Pedidos web <span class="n"></span></h2><p class="hint">Confirmados o enviados</p><div class="cards"></div></div>
       <div class="col" data-k="w-car"><h2>Carritos abandonados <span class="n"></span></h2><p class="hint">Se quedaron sin terminar</p><div class="cards"></div></div>
     </section>
+  </section>
+
+  <section id="v-ac" hidden>
+    <div class="ac-bar">
+      <div class="ac-chips" id="ac-f"></div>
+      <div class="ac-chips" id="ac-ver"><span class="muted">Ver:</span></div>
+      <input id="ac-q" type="search" placeholder="Buscar cliente, pedido, artículo, código o barras…" autocomplete="off">
+      <button id="ac-ok" class="ac-go" disabled>✓ Validar selección</button>
+    </div>
+    <div id="ac-docs" class="ac-docs" hidden></div>
+    <div id="ac-list"></div>
+    <div id="ac-modal" class="drawer" hidden><div class="drawer-in ac-add">
+      <button class="x" id="ac-add-x">×</button><h3 id="ac-add-t">Añadir artículo</h3>
+      <input id="ac-add-q" placeholder="Nombre, referencia o código de barras…" autocomplete="off">
+      <label>Cantidad <input id="ac-add-n" type="number" min="1" value="1"></label>
+      <div id="ac-add-r"></div></div></div>
   </section>
 
   <section id="v-wa" hidden>
@@ -123,5 +139,6 @@
   </div>
 </div>
 <script src="/static/app.js"></script>
+<script src="/static/ac.js"></script>
 </body>
 </html>

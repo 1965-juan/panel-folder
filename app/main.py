@@ -356,3 +356,8 @@ _presupuestos.setup(app, data_dir=DATA, static_dir=BASE / "static", odoo=odoo, c
 from . import whatsapp as _whatsapp  # noqa: E402
 
 _whatsapp.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, es_admin=es_admin, demo=DEMO)
+
+# ---------- módulo Panel AC ----------
+from . import panelac as _panelac  # noqa: E402
+
+_panelac.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)
