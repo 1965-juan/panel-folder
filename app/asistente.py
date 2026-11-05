@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from fastapi import Request, HTTPException
 
-ESCRITURA = {"pedir_a_proveedor", "cambiar_cantidad", "quitar_linea", "anadir_linea"}
+ESCRITURA = {"pedir_a_proveedor", "cambiar_cantidad", "quitar_linea", "anadir_linea", "devolucion_cliente"}
 
 
 def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
@@ -38,6 +38,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
          "input_schema": {"type": "object", "properties": {"product_id": {"type": "integer"}}, "required": ["product_id"]}},
         {"name": "pendiente_de_proveedores", "description": "Lo que está pendiente de llegar de proveedores (recepciones abiertas), filtrable por proveedor o artículo.",
          "input_schema": {"type": "object", "properties": {"filtro": {"type": "string"}}}},
+        {"name": "entregas_cliente", "description": "Entregas ya hechas a un cliente (albaranes de salida validados) con lo que se le sirvió, para saber qué puede devolver. Por pedido (S02799), albarán (AC/OUT/01483) o cliente.",
+         "input_schema": {"type": "object", "properties": {"pedido": {"type": "string"}, "albaran": {"type": "string"}, "cliente": {"type": "string"}}}},
+        {"name": "devolucion_cliente", "description": "CAMBIA ODOO: registra que un cliente devuelve material de una entrega (albarán validado): crea la devolución, la valida (el material vuelve al almacén) y deja el pedido bien. reponer=true si hay que volver a enviárselo; si no, se quita del pedido. abonar=true crea el abono en borrador si ya estaba facturado. Solo con confirmado=true.",
+         "input_schema": {"type": "object", "properties": {
+             "albaran_id": {"type": "integer"}, "articulos": {"type": "array", "items": {"type": "object", "properties": {"product_id": {"type": "integer"}, "cantidad": {"type": "number"}}}},
+             "reponer": {"type": "boolean"}, "abonar": {"type": "boolean"}, "confirmado": {"type": "boolean"}}, "required": ["albaran_id", "articulos", "confirmado"]}},
         {"name": "pedir_a_proveedor", "description": "CAMBIA ODOO: pide un artículo a un proveedor (crea o suma al borrador de compra). Solo con confirmado=true tras el 'sí' del usuario.",
          "input_schema": {"type": "object", "properties": {"product_id": {"type": "integer"}, "partner_id": {"type": "integer"}, "cantidad": {"type": "number"},
                                                           "linea_pedido_id": {"type": "integer"}, "confirmado": {"type": "boolean"}}, "required": ["product_id", "partner_id", "cantidad", "confirmado"]}},
@@ -57,6 +63,68 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
     def es_grupo(nombre, claves):
         n = (nombre or "").upper()
         return any(k in n for k in claves)
+
+    def devolver(a, cids):
+        pid = int(a["albaran_id"])
+        pk = odoo.search_read("stock.picking", [("id", "=", pid), ("picking_type_code", "=", "outgoing"), ("state", "=", "done")],
+                              ["name", "company_id", "sale_id", "partner_id"], company_ids=cids)
+        if not pk:
+            return "Ese albarán no es una entrega validada"
+        pk = pk[0]
+        c1 = [pk["company_id"][0]] + [c for c in cids if c != pk["company_id"][0]]
+        quiere = {int(x["product_id"]): float(x["cantidad"]) for x in a.get("articulos") or [] if float(x.get("cantidad") or 0) > 0}
+        if not quiere:
+            return "No has dicho qué artículos ni cuántos"
+        wctx = {"active_id": pid, "active_ids": [pid], "active_model": "stock.picking", "allowed_company_ids": c1}
+        w = odoo.call("stock.return.picking", "create", None, vals_list=[{"picking_id": pid}], context=wctx)
+        w = w[0] if isinstance(w, list) else w
+        lineas = odoo.search_read("stock.return.picking.line", [("wizard_id", "=", w)], ["product_id", "move_quantity", "quantity"], company_ids=c1)
+        faltan = set(quiere)
+        for l in lineas:
+            q = quiere.get(l["product_id"][0], 0)
+            if q > (l.get("move_quantity") or q):
+                return f"Del artículo {l['product_id'][1]} solo se entregaron {l['move_quantity']:g} en ese albarán"
+            faltan.discard(l["product_id"][0])
+            odoo.call("stock.return.picking.line", "write", None, ids=[l["id"]], vals={"quantity": q, "to_refund": True}, context=wctx)
+        if faltan:
+            return f"Esos artículos no están en el albarán {pk['name']}"
+        try:
+            res = odoo.call("stock.return.picking", "action_create_returns", None, ids=[w], context=wctx)
+        except Exception:
+            res = odoo.call("stock.return.picking", "create_returns", None, ids=[w], context=wctx)
+        rid = (res or {}).get("res_id")
+        if not rid:
+            return "Odoo no ha creado la devolución; hazla en Odoo desde el albarán (botón Devolver)"
+        # validar la devolución: el material vuelve a entrar
+        rp = odoo.search_read("stock.picking", [("id", "=", rid)], ["name", "move_ids"], company_ids=c1)[0]
+        for m in odoo.search_read("stock.move", [("id", "in", rp["move_ids"])], ["product_uom_qty"], company_ids=c1):
+            odoo.call("stock.move", "write", c1, ids=[m["id"]], vals={"quantity": m["product_uom_qty"], "picked": True})
+        v = odoo.call("stock.picking", "button_validate", c1, ids=[rid])
+        if isinstance(v, dict) and v.get("res_model"):
+            return f"He creado la devolución {rp['name']} pero Odoo pide confirmar algo más ({v.get('name')}): termínala en Odoo"
+        out = {"devolucion": rp["name"], "validada": True, "de_albaran": pk["name"]}
+        so = (pk.get("sale_id") or [0])[0]
+        if so:
+            sl = odoo.search_read("sale.order.line", [("order_id", "=", so), ("product_id", "in", list(quiere))],
+                                  ["product_id", "product_uom_qty", "qty_delivered", "qty_invoiced"], company_ids=c1)
+            if not a.get("reponer"):
+                for l in sl:
+                    nueva = max(l["qty_delivered"], l["product_uom_qty"] - quiere.get(l["product_id"][0], 0))
+                    if nueva != l["product_uom_qty"]:
+                        odoo.call("sale.order.line", "write", c1, ids=[l["id"]], vals={"product_uom_qty": nueva})
+                out["pedido"] = "quitado del pedido para que no vuelva a salir como pendiente"
+            else:
+                out["pedido"] = "queda pendiente de volver a servir (sale en el Panel AC)"
+            if a.get("abonar") and any(l["qty_invoiced"] > 0 for l in sl):
+                wi = odoo.call("sale.advance.payment.inv", "create", None, vals_list=[{"advance_payment_method": "delivered"}],
+                               context={"active_ids": [so], "active_id": so, "active_model": "sale.order", "allowed_company_ids": c1})
+                wi = wi[0] if isinstance(wi, list) else wi
+                odoo.call("sale.advance.payment.inv", "create_invoices", None, ids=[wi],
+                          context={"active_ids": [so], "active_id": so, "active_model": "sale.order", "allowed_company_ids": c1})
+                ab = odoo.search_read("account.move", [("move_type", "=", "out_refund"), ("state", "=", "draft"), ("invoice_origin", "ilike", odoo.search_read(
+                    "sale.order", [("id", "=", so)], ["name"], company_ids=c1)[0]["name"])], ["name", "amount_total"], company_ids=c1, limit=1, order="id desc")
+                out["abono"] = f"abono en borrador por {ab[0]['amount_total']:.2f} € (lo revisa contabilidad)" if ab else "no hacía falta abono"
+        return out
 
     def ejecutar(nombre, a, cids, restringido=False):
         oculta = grupo() if restringido else []
@@ -147,6 +215,28 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
                     out.append({"recepcion": p["name"], "proveedor": (p["partner_id"] or [0, ""])[1], "pedido": p.get("origin"),
                                 "previsto": (p.get("scheduled_date") or "")[:10], "articulos": ls})
             return out or "No hay nada pendiente de llegar con ese filtro"
+        if nombre == "entregas_cliente":
+            dom = [("picking_type_code", "=", "outgoing"), ("state", "=", "done")]
+            if a.get("albaran"):
+                dom.append(("name", "ilike", a["albaran"]))
+            elif a.get("pedido"):
+                dom.append(("origin", "ilike", a["pedido"]))
+            elif a.get("cliente"):
+                dom.append(("partner_id.name", "ilike", a["cliente"]))
+            else:
+                return "Dime el pedido, el albarán o el cliente"
+            pk = odoo.search_read("stock.picking", dom, ["name", "partner_id", "origin", "date_done", "move_ids", "sale_id"], company_ids=cids, limit=8, order="date_done desc")
+            pk = [p for p in pk if not es_grupo((p.get("partner_id") or [0, ""])[1], oculta)]
+            if not pk:
+                return "No encuentro entregas validadas con eso"
+            mids = [m for p in pk for m in p["move_ids"]]
+            mv = odoo.search_read("stock.move", [("id", "in", mids), ("state", "=", "done")], ["picking_id", "product_id", "quantity"], company_ids=cids)
+            return [{"albaran_id": p["id"], "albaran": p["name"], "cliente": (p.get("partner_id") or [0, ""])[1], "pedido": p.get("origin"),
+                     "fecha": (p.get("date_done") or "")[:10],
+                     "servido": [{"product_id": m["product_id"][0], "articulo": m["product_id"][1], "cantidad": m["quantity"]} for m in mv if m["picking_id"][0] == p["id"]]}
+                    for p in pk]
+        if nombre == "devolucion_cliente":
+            return devolver(a, cids)
         if nombre == "pedir_a_proveedor":
             return odoo.call_kw("sale.order", "ac_create_purchase_order", [a["product_id"], a["partner_id"], a["cantidad"], a.get("linea_pedido_id") or False], company_ids=cids)
         if nombre == "cambiar_cantidad":
@@ -189,7 +279,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
                    "pendientes, pedidos a proveedor y lo que falta por llegar. No inventes datos: si no lo encuentras, dilo. "
                    "Para CAMBIAR algo en Odoo (pedir a proveedor, cambiar cantidades, quitar o añadir líneas): primero di exactamente qué vas a "
                    "hacer y pregunta '¿lo hago?'; solo cuando el usuario conteste que sí, llama a la herramienta con confirmado=true. "
-                   "Si te piden algo que no puedes hacer (por ejemplo validar, devolver material o traspasos), explica cómo hacerlo en el "
+                   "DEVOLUCIONES DE CLIENTE: busca la entrega con entregas_cliente, confirma qué artículos y cuántos devuelve, pregunta si hay que "
+                   "volver a enviárselo (reponer) y si ya estaba facturado si se hace abono; resume y pregunta '¿lo hago?' antes de devolucion_cliente. "
+                   "Si te piden algo que no puedes hacer (por ejemplo validar entregas o traspasos), explica cómo hacerlo en el "
                    "Panel AC o en Odoo y no lo intentes. Cuando des listas, usa viñetas cortas."
                    + (" Trabajas solo con DISTRIPLUS: no menciones nunca otras empresas ni ventas entre empresas." if restringido else ""))
         hechos = []
