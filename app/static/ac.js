@@ -84,11 +84,11 @@ function acLine(g, l, locs, i) {
   r.className = 'ln ' + cat + (i % 2 ? ' odd' : '');
   r.innerHTML = `<td class="ckc"><input type="checkbox" class="ck" ${Object.values(sel).some(v => v > 0) ? 'checked' : ''}></td>
     <td class="art"></td>
-    <td class="n"><b>${acNum(l.qty_ordered)}</b> <button class="ed" title="Cambiar cantidad">✎</button></td>
+    <td class="n qe" title="Pulsa para cambiar la cantidad"><b>${acNum(l.qty_ordered)}</b> <span class="ed">✎</span></td>
     <td class="n">${acNum(l.qty_delivered)}</td><td class="n pend">${acNum(l.qty_pending)}</td>
     <td class="est"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
     ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0; return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}${s > 0 ? ' hay' : ''}">
-      <input type="number" min="0" data-loc="${x.id}" value="${sel[x.id] || ''}" placeholder="–" ${x.read_only || s <= 0 ? 'disabled' : ''}>
+      <input type="number" min="0" data-loc="${x.id}" value="${sel[x.id] || ''}" placeholder="–" ${x.read_only ? 'disabled' : ''}>
       <small data-fill="${x.id}" class="${s > 0 && !x.read_only ? 'can' : ''}" title="Stock en ${escH(x.name)}">${acNum(s)}</small></td>`; }).join('')}
     <td class="acts"><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
   r.querySelector('.art').textContent = l.product_name;
@@ -106,11 +106,23 @@ function acLine(g, l, locs, i) {
     i.value = Math.max(0, Math.min(parseFloat(s.textContent.replace(',', '.')) || 0, l.qty_pending - ya)); save();
   });
   r.querySelector('.ck').onchange = e => { if (e.target.checked) { acAuto(g, l); acRender(); } else { delete ACSEL[k]; acRender(); } };
-  r.querySelector('.ed').onclick = async () => {
-    const v = prompt(`Nueva cantidad pedida para:\n${l.product_name}`, l.qty_ordered); if (v === null) return;
-    const qty = parseFloat(String(v).replace(',', '.')); if (!(qty > 0)) return alertBox('Cantidad no válida. Para quitar la línea usa la papelera.');
-    try { await jpost(`/api/ac/cantidad?company=${company}`, { tipo: g.tipo, id: l.line_id, qty }); acLoad(); } catch (e) { alertBox(e.message); }
+  const qe = r.querySelector('.qe');
+  qe.onclick = () => {
+    if (qe.querySelector('input')) return;
+    qe.innerHTML = `<input class="qin" type="number" min="0.01" step="any" value="${l.qty_ordered}">`;
+    const inp = qe.querySelector('input'); inp.focus(); inp.select();
+    let hecho = false;
+    const guardar = async () => {
+      if (hecho) return; hecho = true;
+      const qty = parseFloat(String(inp.value).replace(',', '.'));
+      if (!(qty > 0) || qty === l.qty_ordered) { if (qty <= 0) alertBox('Para quitar la línea usa la papelera'); return acRender(); }
+      try { await jpost(`/api/ac/cantidad?company=${company}`, { tipo: g.tipo, id: l.line_id, qty }); acLoad(); } catch (e) { alertBox(e.message); acRender(); }
+    };
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); guardar(); } else if (e.key === 'Escape') { hecho = true; acRender(); } };
+    inp.onblur = guardar;
   };
+  // Enter en una casilla de ubicación valida esa línea
+  r.querySelectorAll('input[data-loc]').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); if (ACSEL[k]) acValidar([k]); } }));
   r.querySelector('.del').onclick = async () => {
     if (!confirm(`¿Quitar del pedido ${g.ref}?\n${l.product_name}`)) return;
     try { await jpost(`/api/ac/borrar?company=${company}`, { tipo: g.tipo, id: l.line_id }); delete ACSEL[k]; acLoad(); } catch (e) { alertBox(e.message); }

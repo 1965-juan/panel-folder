@@ -180,3 +180,8 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .ac-add label{display:flex;gap:8px;align-items:center;font-weight:600}.ac-add label input{width:90px}
 .ac-pick{display:flex;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 11px;cursor:pointer;font:inherit}
 .ac-pick:hover{background:#f6f3fc}
+.act td.qe{cursor:pointer}.act td.qe:hover{background:#fff6e8!important}
+.act td.qe .ed{color:var(--muted);font-size:12px}
+.act td.qe input.qin{width:100%;max-width:60px;padding:4px 2px;border:2px solid var(--orange);border-radius:6px;text-align:center;font:inherit;font-weight:700}
+.act td.loc input{border-color:#cfc9bd}
+.act td.art{white-space:normal!important;overflow:hidden;word-break:break-word}
