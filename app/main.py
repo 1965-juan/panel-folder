@@ -435,6 +435,7 @@ _panelac.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=gua
 from . import compras as _compras  # noqa: E402
 
 _compras.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, es_admin=es_admin, demo=DEMO)
+_compras.setup_fotos(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
 
 
 @app.get("/api/diag")

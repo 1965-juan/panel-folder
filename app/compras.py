@@ -361,3 +361,100 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             return []
         return guard(lambda: odoo.search_read("res.partner", ["|", ("name", "ilike", q), ("vat", "ilike", q)], ["display_name", "vat"],
                                               company_ids=cids, limit=12))
+
+
+def setup_fotos(app, *, odoo, current_user, scope, guard):
+    """Subir el Excel de un proveedor con fotos incrustadas (como el de Depesche) y ponerlas en los artículos por EAN."""
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+    from fastapi.responses import HTMLResponse
+
+    NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+          "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
+
+    def leer_excel(datos):
+        z = zipfile.ZipFile(io.BytesIO(datos))
+        ss = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall("m:si", NS):
+                ss.append("".join(t.text or "" for t in si.iter("{%s}t" % NS["m"])))
+        sheet = ET.fromstring(z.read("xl/worksheets/sheet1.xml"))
+        filas = {}
+        for row in sheet.iter("{%s}row" % NS["m"]):
+            n = int(row.get("r"))
+            for c in row.findall("m:c", NS):
+                col = re.match(r"[A-Z]+", c.get("r")).group(0)
+                v = c.find("m:v", NS)
+                val = (v.text if v is not None else "") or ""
+                if c.get("t") == "s" and val:
+                    val = ss[int(val)]
+                elif c.get("t") == "inlineStr":
+                    val = "".join(t.text or "" for t in c.iter("{%s}t" % NS["m"]))
+                filas.setdefault(n, {})[col] = val.strip()
+        cab = filas.get(1, {})
+        col_ean = next((k for k, v in cab.items() if "EAN" in v.upper() or "BARRAS" in v.upper()), None)
+        col_ref = next((k for k, v in cab.items() if v.upper().replace(".", "") in ("ART NO", "ARTNO", "REF", "REFERENCIA", "CÓDIGO", "CODIGO")), None)
+        # imágenes y su fila
+        rels = ET.fromstring(z.read("xl/drawings/_rels/drawing1.xml.rels"))
+        rid2f = {r.get("Id"): "xl/drawings/" + r.get("Target") for r in rels}
+        dr = ET.fromstring(z.read("xl/drawings/drawing1.xml"))
+        fotos = []
+        for anc in list(dr):
+            fr = anc.find("xdr:from", NS)
+            blip = anc.find(".//a:blip", NS)
+            if fr is None or blip is None:
+                continue
+            fila = int(fr.find("xdr:row", NS).text) + 1
+            f = rid2f.get(blip.get("{%s}embed" % NS["r"]), "")
+            f = f.replace("xl/drawings/../", "xl/")
+            if f in z.namelist():
+                fotos.append((fila, z.read(f)))
+        return [{"fila": fi, "ean": filas.get(fi, {}).get(col_ean, "") if col_ean else "", "ref": filas.get(fi, {}).get(col_ref, "") if col_ref else "",
+                 "foto": b} for fi, b in fotos], bool(col_ean)
+
+    @app.post("/api/compras/fotos_excel")
+    async def fotos_excel(request: Request, archivo: UploadFile = File(...), sobrescribir: str = Form("no")):
+        u = current_user(request)
+        cids, _ = scope(u, "all")
+        datos = await archivo.read()
+
+        def run():
+            try:
+                items, hay_ean = leer_excel(datos)
+            except Exception as e:
+                raise HTTPException(400, f"No he podido leer el Excel: {e}")
+            if not hay_ean:
+                raise HTTPException(400, "El Excel no tiene una columna EAN / código de barras")
+            out = {"fotos": len(items), "puestas": 0, "ya_tenian": 0, "no_encontrados": []}
+            for it in items:
+                ean = re.sub(r"\D", "", it["ean"])
+                if not ean:
+                    continue
+                p = odoo.search_read("product.product", ["|", ("barcode", "=", ean), ("barcode", "=", "0" + ean)],
+                                     ["product_tmpl_id", "image_128"], company_ids=cids, limit=1)
+                if not p:
+                    out["no_encontrados"].append(it["ref"] or ean)
+                    continue
+                if p[0].get("image_128") and sobrescribir != "si":
+                    out["ya_tenian"] += 1
+                    continue
+                odoo.call("product.template", "write", cids, ids=[p[0]["product_tmpl_id"][0]], vals={"image_1920": base64.b64encode(it["foto"]).decode()})
+                out["puestas"] += 1
+            return out
+        return guard(run)
+
+    @app.get("/compras/fotos")
+    def fotos_pagina(request: Request):
+        current_user(request)
+        return HTMLResponse("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Fotos desde Excel</title>
+<style>body{font:15px -apple-system,Segoe UI,sans-serif;background:#3A1F73;display:grid;place-items:center;min-height:100vh;margin:0}
+.c{background:#fff;border-radius:14px;padding:28px;max-width:460px;display:flex;flex-direction:column;gap:12px}h2{margin:0;color:#3A1F73}
+button{background:#F39A2B;color:#fff;border:0;border-radius:8px;padding:11px;font-weight:700;font-size:15px;cursor:pointer}#r{font-weight:600;white-space:pre-wrap}</style>
+<div class=c><h2>Fotos de artículos desde Excel</h2><p>Sube el Excel del proveedor que trae las fotos dentro (por ejemplo el de Depesche). Cada foto se pone en el artículo de Odoo con el mismo código de barras (EAN).</p>
+<input type=file id=f accept=".xlsx"><label><input type=checkbox id=s> Cambiar también las fotos que ya tengan</label><button id=b>Poner fotos</button><p id=r></p><a href="/#compras">← Volver al panel</a></div>
+<script>b.onclick=async()=>{if(!f.files[0])return r.textContent='Elige el Excel';r.textContent='Subiendo y poniendo fotos…';const fd=new FormData();fd.append('archivo',f.files[0]);fd.append('sobrescribir',s.checked?'si':'no');
+const x=await fetch('/api/compras/fotos_excel',{method:'POST',body:fd});const j=await x.json();
+r.textContent=x.ok?`Hecho: ${j.puestas} fotos puestas de ${j.fotos}.`+(j.ya_tenian?`\\n${j.ya_tenian} ya tenían foto (no tocadas).`:'')+(j.no_encontrados.length?`\\nNo están en Odoo: ${j.no_encontrados.join(', ')}`:''):'Error: '+(j.detail||x.status)}</script>""")
