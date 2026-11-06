@@ -114,6 +114,42 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         return FileResponse(carpeta / r["fichero"], media_type="application/pdf", filename=r["nombre"],
                             content_disposition_type="inline")
 
+    def leer_con_claude(datos):
+        import os as _os
+        import httpx as _hx
+        cf = data_dir / "claude_clave.txt"
+        k = re.findall(r"sk-ant-[A-Za-z0-9_\-]+", cf.read_text(errors="ignore")) if cf.exists() else []
+        if not k:
+            raise HTTPException(400, "Falta la clave de Claude en el NAS")
+        pide = ("Lee este documento de proveedor (factura, albarán o confirmación de pedido) y devuelve SOLO un JSON con: "
+                '{"tipo": "factura|albaran|pedido", "proveedor": "", "nif_proveedor": "", "numero": "", "fecha": "AAAA-MM-DD", '
+                '"lineas": [{"ref": "", "ean": "", "descripcion": "", "cantidad": 0, "precio": 0, "descuento": 0, "iva": 21, "importe": 0}], '
+                '"base": 0, "iva_total": 0, "total": 0, "portes": 0}. Precios unitarios sin IVA y ya con el descuento de línea aplicado en "precio" '
+                'solo si el documento no muestra el descuento aparte. Números con punto decimal. No inventes nada: si un dato no está, déjalo vacío.')
+        r = _hx.post(_os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", timeout=180, headers={
+            "x-api-key": k[0], "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": _os.environ.get("PANEL_MODEL", "claude-sonnet-5-5"), "max_tokens": 8000, "messages": [{"role": "user", "content": [
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(datos).decode()}},
+                {"type": "text", "text": pide}]}]})
+        if r.status_code != 200:
+            raise HTTPException(502, f"Claude respondió {r.status_code}: {r.text[:200]}")
+        txt = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+        m = re.search(r"\{[\s\S]*\}", txt)
+        return json.loads(m.group(0)) if m else {"error": txt[:500]}
+
+    @app.post("/api/compras/docs/{did}/leer")
+    def doc_leer(did: str, request: Request):
+        """Lee el PDF con Claude y devuelve sus datos (proveedor, número, líneas…)."""
+        current_user(request)
+        with con() as c:
+            r = c.execute("SELECT fichero FROM docs WHERE id=?", (did,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
+        with lock, con() as c:
+            c.execute("UPDATE docs SET nota=? WHERE id=?", (json.dumps(datos, ensure_ascii=False)[:20000], did))
+        return datos
+
     @app.post("/api/compras/docs/{did}/a_factura")
     def doc_a_factura(did: str, request: Request, company: str = "all"):
         """Un PDF subido como albarán que en realidad es una factura: lo manda a Odoo como factura en borrador."""
