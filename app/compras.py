@@ -114,6 +114,28 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         return FileResponse(carpeta / r["fichero"], media_type="application/pdf", filename=r["nombre"],
                             content_disposition_type="inline")
 
+    @app.post("/api/compras/docs/{did}/a_factura")
+    def doc_a_factura(did: str, request: Request, company: str = "all"):
+        """Un PDF subido como albarán que en realidad es una factura: lo manda a Odoo como factura en borrador."""
+        u, cid, cids = una_empresa(request, company)
+        with con() as c:
+            r = c.execute("SELECT * FROM docs WHERE id=?", (did,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        datos = (carpeta / r["fichero"]).read_bytes()
+
+        def run():
+            emp = r["empresa"] or cid
+            jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", emp)], ["id"], company_ids=[emp], limit=1)
+            att = odoo.call("ir.attachment", "create", [emp], vals_list=[{"name": r["nombre"], "datas": base64.b64encode(datos).decode(), "mimetype": "application/pdf"}])
+            att = att[0] if isinstance(att, list) else att
+            act = odoo.call("account.journal", "create_document_from_attachment", [emp], ids=[jr[0]["id"]], attachment_ids=[att])
+            oid = (act or {}).get("res_id")
+            with lock, con() as c:
+                c.execute("UPDATE docs SET tipo='factura', estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (oid, did))
+            return {"ok": True, "factura_id": oid}
+        return guard(run)
+
     @app.delete("/api/compras/docs/{did}")
     def borrar_doc(did: str, request: Request):
         current_user(request)
