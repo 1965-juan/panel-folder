@@ -73,7 +73,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     att = odoo.call("ir.attachment", "create", [cid], vals_list=[{
                         "name": f.filename or "factura.pdf", "datas": base64.b64encode(datos).decode(), "mimetype": "application/pdf"}])
                     att = att[0] if isinstance(att, list) else att
-                    act = odoo.call("account.journal", "create_document_from_attachment", [cid], ids=[jr[0]["id"]], attachment_ids=[att])
+                    act = odoo.call("account.journal", "create_document_from_attachment", [cid], ids=[jr[0]["id"]], attachment_ids=[att],
+                                    context={"default_move_type": "in_invoice", "allowed_company_ids": [cid]})
                     oid = (act or {}).get("res_id")
                     if not oid:
                         dom = (act or {}).get("domain") or []
@@ -165,7 +166,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", emp)], ["id"], company_ids=[emp], limit=1)
             att = odoo.call("ir.attachment", "create", [emp], vals_list=[{"name": r["nombre"], "datas": base64.b64encode(datos).decode(), "mimetype": "application/pdf"}])
             att = att[0] if isinstance(att, list) else att
-            act = odoo.call("account.journal", "create_document_from_attachment", [emp], ids=[jr[0]["id"]], attachment_ids=[att])
+            act = odoo.call("account.journal", "create_document_from_attachment", [emp], ids=[jr[0]["id"]], attachment_ids=[att],
+                                context={"default_move_type": "in_invoice", "allowed_company_ids": [emp]})
             oid = (act or {}).get("res_id")
             with lock, con() as c:
                 c.execute("UPDATE docs SET tipo='factura', estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (oid, did))
