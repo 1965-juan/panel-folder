@@ -46,7 +46,10 @@ def leer_extracto(nombre, datos):
     tablas = []
     low = (nombre or "").lower()
     if low.endswith(".xls") or datos[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        from .vendor import xlrd
+        try:
+            from .vendor import xlrd
+        except ImportError:
+            import xlrd
         wb = xlrd.open_workbook(file_contents=datos)
         for sh in wb.sheets():
             tablas.append((sh.name, [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(sh.nrows)]))
@@ -61,19 +64,27 @@ def leer_extracto(nombre, datos):
         wbx = ET.fromstring(z.read("xl/workbook.xml"))
         nombre_hoja = (wbx.find(".//m:sheet", ns).get("name") if wbx.find(".//m:sheet", ns) is not None else "")
         filas = []
+
+        def _ncol(letras):
+            n = 0
+            for ch in letras:
+                n = n * 26 + ord(ch) - 64
+            return n - 1
         for row in ET.fromstring(z.read("xl/worksheets/sheet1.xml")).iter("{%s}row" % ns["m"]):
             fila = {}
             for c in row.findall("m:c", ns):
-                col = re.match(r"[A-Z]+", c.get("r")).group(0)
+                col = _ncol(re.match(r"[A-Z]+", c.get("r")).group(0))
+                t = c.get("t")
                 v = c.find("m:v", ns)
                 val = v.text if v is not None else ""
-                if c.get("t") == "s" and val:
+                if t == "inlineStr":
+                    val = "".join(x.text or "" for x in c.iter("{%s}t" % ns["m"]))
+                elif t == "s" and val:
                     val = ss[int(val)]
-                elif c.get("t") != "s" and val and re.fullmatch(r"-?\d+(\.\d+)?", val):
+                elif t not in ("s", "str") and val and re.fullmatch(r"-?\d+(\.\d+)?([eE]-?\d+)?", val):
                     val = float(val)
                 fila[col] = val
-            cols = sorted(fila, key=lambda k: (len(k), k))
-            filas.append([fila[k] for k in cols])
+            filas.append([fila.get(i, "") for i in range(max(fila) + 1)] if fila else [])
         tablas.append((nombre_hoja, filas))
     else:  # CSV
         import csv
@@ -86,7 +97,10 @@ def leer_extracto(nombre, datos):
 
     for hoja, rows in tablas:
         # cabecera: fila con "Fecha" e "Importe"
-        hi = next((i for i, r in enumerate(rows[:15]) if any("fecha" in str(x).lower() for x in r) and any("importe" in str(x).lower() for x in r)), None)
+        def _esfecha(x):
+            x = str(x).strip().lower()
+            return "fecha" in x or x.startswith("f. ") or x.startswith("f.")
+        hi = next((i for i, r in enumerate(rows[:15]) if any(_esfecha(x) for x in r) and any("importe" in str(x).lower() for x in r)), None)
         if hi is None:
             continue
         cab = [str(x).strip().lower() for x in rows[hi]]
@@ -96,7 +110,10 @@ def leer_extracto(nombre, datos):
                 if any(k in h for k in claves) and not any(e in h for e in evitar):
                     return i
             return None
-        cf, cm, cd, ci, cs = col("fecha", evitar=("valor",)), col("movimiento", "concepto", "descripci"), col("más datos", "mas datos", "observ", "detalle"), col("importe"), col("saldo")
+        cf = col("fecha", evitar=("valor",))
+        if cf is None:
+            cf = next((i for i, h in enumerate(cab) if h.startswith("f.") and "valor" not in h), None)
+        cm, cd, ci, cs = col("movimiento", "concepto", "descripci", "etiqueta"), col("más datos", "mas datos", "observ", "detalle"), col("importe"), col("saldo")
         filas = []
         for r in rows[hi + 1:]:
             if ci is None or ci >= len(r):
@@ -110,6 +127,31 @@ def leer_extracto(nombre, datos):
         m = re.search(r"(\d{6,})", hoja or "") or re.search(r"(\d{6,})", nombre or "")
         return (m.group(1) if m else ""), filas
     raise ValueError("No encuentro la tabla de movimientos (columnas Fecha e Importe)")
+
+
+BANCOS = {"bbva": ("bbva", "bilbao"), "sabadell": ("sabadell",), "santander": ("santander",), "caixa": ("caixa",)}
+ENTIDAD = {"bbva": "0182", "sabadell": "0081", "santander": "0049", "caixa": "2100"}  # código de banco dentro del IBAN
+EMPRESAS = ("distriplus", "logipaper", "ingraf", "fermasa")
+
+
+def _por_nombre(nombre, js):
+    """Sin número de cuenta en el Excel: adivina por el nombre del archivo (banco + empresa), p. ej. "bbva_logipaper.xlsx"."""
+    n = (nombre or "").lower()
+    banco = next((k for k in BANCOS if k in n), None)
+    if not banco:
+        return None
+    cand = [x for x in js if any(b in x["name"].lower() for b in BANCOS[banco])
+            or (len(x["iban_digitos"]) >= 8 and x["iban_digitos"][2:6] == ENTIDAD[banco])]
+    emp = next((e for e in EMPRESAS if e in n), None)
+    if emp:
+        cand = [x for x in cand if emp in x["company_id"][1].lower()]
+        if emp == "fermasa":
+            cand = [x for x in cand if ("inmob" in n) == ("inmob" in x["company_id"][1].lower())]
+    if len(cand) > 1:  # varias cuentas del mismo banco y empresa: probar con palabras del archivo (general, imprenta…)
+        pal = [w for w in re.findall(r"[a-z]{5,}", n) if w not in EMPRESAS and w not in BANCOS and w not in ("caixa", "xlsx")]
+        fino = [x for x in cand if any(w in x["name"].lower() for w in pal)]
+        cand = fino or cand
+    return cand[0] if len(cand) == 1 else None
 
 
 def setup(app, *, odoo, current_user, scope, guard, odoo_url):
@@ -144,9 +186,11 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             j = None
             if diario:
                 j = next((x for x in js if str(x["id"]) == str(diario)), None)
-            elif pista:
+            if not j and pista:
                 cand = [x for x in js if x["iban_digitos"] and x["iban_digitos"].endswith(pista[-7:])]
                 j = cand[0] if len(cand) == 1 else None
+            if not j:
+                j = _por_nombre(archivo.filename, js)
             out = {"archivo": archivo.filename, "pista": pista, "diario": None, "filas": filas,
                    "diarios": [{"id": x["id"], "nombre": x["name"], "empresa": x["company_id"][1], "iban": x.get("bank_acc_number") or ""} for x in js]}
             if not j:
