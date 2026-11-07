@@ -52,7 +52,7 @@
   </section>
 
   <section id="v-co" hidden>
-    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button></div>
+    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button></div>
     <div id="co-subir" class="co-pane">
       <div class="co-drops">
         <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra para recibir el material</small></label>
@@ -74,6 +74,11 @@
         <div class="col" data-k="f-dif"><h2>Con diferencias <span class="n"></span></h2><p class="hint">Cantidad o precio no cuadran, o falta algún dato</p><div class="cards"></div></div>
         <div class="col" data-k="f-lee"><h2>Leyendo <span class="n"></span></h2><p class="hint">Odoo está leyendo el PDF</p><div class="cards"></div></div>
       </section>
+    </div>
+    <div id="co-ban" class="co-pane" hidden>
+      <label class="drop d-ban"><input type="file" accept=".xls,.xlsx,.csv" multiple id="bn-f"><b>Extractos del banco</b><span>Arrastra aquí los Excel descargados del banco</span><small>Se reconoce la cuenta sola y no se duplica lo que ya está en Odoo</small></label>
+      <div id="bn-prev"></div>
+      <h3>Sin conciliar <a class="lnk" id="bn-odoo" target="_blank" rel="noopener">Conciliar en Odoo</a></h3><div id="bn-pend"></div>
     </div>
     <div id="co-recu" class="co-pane" hidden>
       <div class="recu-top"><button id="rc-prev">◀</button><b id="rc-mes"></b><button id="rc-next">▶</button>

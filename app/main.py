@@ -456,3 +456,8 @@ def diag(request: Request):
 from . import asistente as _asistente  # noqa: E402
 
 _asistente.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)
+
+# ---------- módulo Bancos (extractos para contabilidad) ----------
+from . import bancos as _bancos  # noqa: E402
+
+_bancos.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)

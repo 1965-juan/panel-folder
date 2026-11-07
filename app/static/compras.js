@@ -9,8 +9,8 @@ async function coBadge() {
 function coTab(t) {
   CO_TAB = t;
   document.querySelectorAll('.co-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  ['subir', 'rec', 'fac', 'recu'].forEach(k => $('#co-' + k).hidden = k !== t);
-  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu })[t]();
+  ['subir', 'rec', 'fac', 'recu', 'ban'].forEach(k => $('#co-' + k).hidden = k !== t);
+  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend })[t]();
 }
 document.querySelectorAll('.co-tabs button').forEach(b => b.onclick = () => coTab(b.dataset.t));
 function coOpen() {
@@ -223,3 +223,47 @@ $('#usr-btn').onclick = async () => {
   };
   $('#co-drawer').hidden = false;
 };
+
+/* --- bancos --- */
+const bnDrop = document.querySelector('.d-ban');
+bnDrop.ondragover = e => { e.preventDefault(); bnDrop.classList.add('over'); };
+bnDrop.ondragleave = () => bnDrop.classList.remove('over');
+bnDrop.ondrop = e => { e.preventDefault(); bnDrop.classList.remove('over'); bnLeer([...e.dataTransfer.files]); };
+$('#bn-f').onchange = () => { bnLeer([...$('#bn-f').files]); $('#bn-f').value = ''; };
+async function bnLeer(files, diario) {
+  for (const f of files) {
+    const fd = new FormData(); fd.append('archivo', f); if (diario) fd.append('diario', diario);
+    const box = document.createElement('div'); box.className = 'bn-box'; box.innerHTML = `<p class="muted">Leyendo ${escH(f.name)}…</p>`; $('#bn-prev').prepend(box);
+    try {
+      const r = await fetch('/api/bancos/leer', { method: 'POST', body: fd, credentials: 'same-origin' }); const d = await r.json(); if (!r.ok) throw new Error(d.detail || r.statusText);
+      bnPinta(box, d, f);
+    } catch (e) { box.innerHTML = `<p class="err">${escH(f.name)}: ${escH(e.message)}</p>`; }
+  }
+}
+function bnPinta(box, d, file) {
+  const nuevas = d.filas.filter(x => !x.ya_en_odoo), ya = d.filas.length - nuevas.length;
+  box.innerHTML = `<div class="bn-h"><b>${escH(d.archivo)}</b>
+    <label>Cuenta: <select>${d.diario ? '' : '<option value="">— elige la cuenta —</option>'}${d.diarios.map(j => `<option value="${j.id}" ${d.diario && d.diario.id === j.id ? 'selected' : ''}>${escH(j.nombre)} · ${escH(j.empresa.split(' ')[0])} · …${escH(j.iban.slice(-4))}</option>`).join('')}</select></label>
+    <span class="bdg b-ok">${nuevas.length} nuevos</span>${ya ? `<span class="bdg">${ya} ya en Odoo</span>` : ''}</div>
+    <table class="co-t bn-t"><thead><tr><th>Fecha</th><th>Concepto</th><th>Más datos</th><th>Importe</th><th></th></tr></thead><tbody>${d.filas.map(x => `<tr class="${x.ya_en_odoo ? 'ya' : ''}"><td>${coDate(x.fecha)}</td><td>${escH(x.concepto)}</td><td>${escH(x.empresa)}</td>
+      <td class="${x.importe < 0 ? 'neg' : 'pos'}">${eur(x.importe)}</td><td>${x.ya_en_odoo === undefined ? '' : x.ya_en_odoo ? 'ya está' : 'nuevo'}</td></tr>`).join('')}</tbody></table>
+    ${d.diario ? (nuevas.length ? `<button class="ac-go bn-go">Meter ${nuevas.length} movimientos en Odoo</button>` : '<p class="muted">✓ Todo este extracto ya está en Odoo.</p>') : '<p class="err">No reconozco la cuenta: elígela arriba.</p>'}`;
+  box.querySelector('select').onchange = e => { box.remove(); bnLeer([file], e.target.value); };
+  const b = box.querySelector('.bn-go');
+  if (b) b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Metiendo…';
+    try { const r = await jpost('/api/bancos/importar', { diario: d.diario.id, filas: d.filas }); box.innerHTML = `<div class="ac-docs"><b>✓ ${escH(d.diario.nombre)}:</b> ${r.creadas} movimientos metidos en Odoo.</div>`; bnPend(); }
+    catch (e) { alertBox(e.message); b.disabled = false; b.textContent = 'Reintentar'; }
+  };
+}
+async function bnPend() {
+  const box = $('#bn-pend'); box.innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    const d = await api('/api/bancos/pendientes'); $('#bn-odoo').href = d.odoo_url + '/odoo/accounting';
+    if (!d.lineas.length) { box.innerHTML = '<p class="empty">✓ No queda nada sin conciliar en los bancos</p>'; return; }
+    const g = {}; d.lineas.forEach(l => (g[l.cuenta] = g[l.cuenta] || []).push(l));
+    box.innerHTML = Object.entries(g).map(([c, ls]) => `<h4>${escH(c)} <span class="muted">(${ls.length})</span></h4>` + ls.map(l => `<div class="bn-l"><span>${coDate(l.fecha)}</span><span class="cc"><b>${escH(l.concepto)}</b> <small>${escH(l.empresa)}</small></span>
+      <span class="${l.importe < 0 ? 'neg' : 'pos'}">${eur(l.importe)}</span>
+      <span class="sg">${l.sugerencias.length ? l.sugerencias.map(s => `<a target="_blank" rel="noopener" href="${d.odoo_url}/odoo/action-account.action_move_${l.importe > 0 ? 'out' : 'in'}_invoice_type/${s.id}">💡 ${escH(s.factura)} · ${escH(s.cliente)}</a>`).join('') : '<small class="muted">sin factura que cuadre por importe</small>'}</span></div>`).join('')).join('');
+  } catch (e) { box.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+}
