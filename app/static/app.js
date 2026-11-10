@@ -329,8 +329,11 @@ $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhoo
     log.scrollTop = 1e9; return d;
   };
   H.forEach(m => pinta(m.content, m.role === 'user' ? 'u' : 'a'));
-  $('#as-fab').onclick = () => { $('#as').hidden = false; $('#as-fab').hidden = true; setTimeout(() => $('#as-t').focus(), 50); };
-  $('#as-x').onclick = () => { $('#as').hidden = true; $('#as-fab').hidden = false; };
+  const abre = () => { $('#as').hidden = false; $('#as-bar').hidden = true; setTimeout(() => $('#as-t').focus(), 50); };
+  $('#as-fab').onclick = abre;
+  $('#as-x').onclick = () => { $('#as').hidden = true; $('#as-bar').hidden = false; };
+  $('#as-bar').onsubmit = e => { e.preventDefault(); const t = $('#as-bar-t').value.trim(); abre(); if (t) { $('#as-t').value = t; $('#as-bar-t').value = ''; $('#as-f').requestSubmit(); } };
+  $('#as-bar-t').onfocus = () => { if (!$('#as-bar-t').value) {} };
   $('#as-new').onclick = () => { H = []; guarda(); log.querySelectorAll('.as-m:not(.ini),.as-sug').forEach(x => x.remove()); };
   $('#as-big').onclick = () => $('#as').classList.toggle('grande');
   $('#as-t').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#as-f').requestSubmit(); } };

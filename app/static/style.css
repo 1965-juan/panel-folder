@@ -329,3 +329,8 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .mp-o.on{background:#efe8fb}.mp-o small{display:block;color:#666}.mp-o span{display:block}
 @media (max-width:900px){.ma{grid-template-columns:1fr}}
 #ma-cts{font-size:12px;margin:0 0 6px}
+#as-bar{position:fixed;left:calc(50% + 100px);transform:translateX(-50%);bottom:14px;width:min(720px,calc(100vw - 260px));display:flex;gap:8px;align-items:center;background:#fff;border:2px solid #5B2E9E;border-radius:28px;padding:6px 6px 6px 16px;box-shadow:0 8px 24px rgba(58,31,115,.25);z-index:29}
+#as-bar[hidden]{display:none}#as-bar span{font-size:18px}#as-bar input{flex:1;border:0;outline:0;font:inherit;font-size:15px;background:transparent}
+#as-bar button{background:linear-gradient(135deg,#3A1F73,#F39A2B);color:#fff;border:0;border-radius:22px;padding:8px 16px;font-weight:700;cursor:pointer}
+main,.main{padding-bottom:80px}
+@media (max-width:900px){#as-bar{left:50%;width:calc(100vw - 32px)}}
