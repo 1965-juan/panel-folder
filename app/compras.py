@@ -297,7 +297,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         mejor, punt = None, 0
         for pl in po_lines:
             tp = _tokens(pl["name"] + " " + (pl["product_id"][1] if pl.get("product_id") else ""))
-            if nums and not nums <= tp:
+            if nums and not (nums & tp):
                 continue
             comunes = len(td & tp)
             if comunes >= 2 and comunes > punt:
