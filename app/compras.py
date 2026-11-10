@@ -269,6 +269,23 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
         def run():
             lec = _lectura(r, bool(releer))
+            # ¿ya está en compras? (pedido con la misma ref. del proveedor, o factura con ese número enlazada a un pedido)
+            num = (lec.get("numero") or "").strip()
+            if num and not r["compra"]:
+                ya = odoo.search_read("purchase.order", [("company_id", "=", r["empresa"]), ("partner_ref", "=ilike", num), ("state", "!=", "cancel")],
+                                      ["name", "picking_ids"], company_ids=[r["empresa"]], limit=1)
+                if not ya:
+                    fx = odoo.search_read("account.move", [("company_id", "=", r["empresa"]), ("move_type", "=", "in_invoice"), ("ref", "=ilike", num)],
+                                          ["invoice_origin"], company_ids=[r["empresa"]], limit=1)
+                    if fx and fx[0].get("invoice_origin"):
+                        ya = odoo.search_read("purchase.order", [("company_id", "=", r["empresa"]), ("name", "=", fx[0]["invoice_origin"].split(",")[0].strip())],
+                                              ["name", "picking_ids"], company_ids=[r["empresa"]], limit=1)
+                if ya:
+                    pk = odoo.search_read("stock.picking", [("id", "in", ya[0]["picking_ids"])], ["name"], company_ids=[r["empresa"]]) if ya[0]["picking_ids"] else []
+                    comp = {"pedido": ya[0]["name"], "pedido_id": ya[0]["id"], "recepciones": [x["name"] for x in pk], "ya_estaba": True}
+                    with lock, con() as c:
+                        c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(comp, ensure_ascii=False), r["id"]))
+                    return {"doc": {"id": r["id"], "nombre": r["nombre"], "tipo": r["tipo"]}, "compra": comp}
             prov = _buscar_proveedor(lec, cids)
             lineas = _casar_lineas(lec.get("lineas") or [], prov and prov["id"], cids)
             abiertos = []
@@ -380,7 +397,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                                                                   "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
             # 4) factura en borrador enlazada (solo si el PDF es una factura)
             factura = None
-            if r["tipo"] == "factura":
+            if r["tipo"] == "factura" or (lec.get("tipo") or "").lower() == "factura":
                 mid = r["odoo_id"] if r["odoo_model"] == "account.move" else None
                 if mid:
                     st = odoo.search_read("account.move", [("id", "=", mid)], ["state"], company_ids=c1)

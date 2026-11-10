@@ -73,7 +73,7 @@ async function coPasar(did, releer) {
     const nuevos = L.filter(l => !l.product_id).length;
     const base = L.reduce((a, l) => a + (+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100), 0);
     db.innerHTML = `<h3>Pasar a compras · ${escH(d.doc.nombre)}</h3>
-      <p class="muted">${d.doc.tipo === 'factura' ? '🧾 Factura' : '📦 Albarán'} ${escH(lec.numero || '')} · ${coDate(lec.fecha || '')} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
+      <p class="muted">${(lec.tipo || d.doc.tipo) === 'factura' ? '🧾 Factura' : (lec.tipo === 'pedido' ? '📋 Confirmación de pedido' : '📦 Albarán')} ${escH(lec.numero || '')} · ${coDate(lec.fecha || '')} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
       <iframe class="co-pdf" src="/api/compras/pdf/${d.doc.id}#view=FitH"></iframe>
       <div class="pc-prov"><b>Proveedor:</b> ${prov ? `${escH(prov.display_name)} <small class="muted">${escH(prov.vat || '')}</small> <a href="#" id="pc-cprov">cambiar</a>`
         : `<span class="err-t">No lo encuentro (${escH(lec.proveedor || '?')} ${escH(lec.nif_proveedor || '')}).</span>`}
@@ -91,7 +91,7 @@ async function coPasar(did, releer) {
       </tbody></table>
       <p class="muted">Base según líneas: <b>${eu(base)}</b>${lec.base ? ` · base del PDF: <b>${eu(lec.base)}</b>` : ''}${lec.total ? ` · total PDF: ${eu(lec.total)}` : ''}${lec.portes ? ` · portes: ${eu(lec.portes)}` : ''}</p>
       ${nuevos ? `<p class="pc-aviso">Se crearán <b>${nuevos}</b> artículos nuevos con su ref. y EAN del proveedor y el coste. Luego revisad el precio de venta y la foto.</p>` : ''}
-      <p class="muted">Se crea el pedido de compra confirmado. La recepción queda en <b>Recepciones</b> para que almacén compruebe lo que llega${d.doc.tipo === 'factura' ? ', y la factura queda en borrador enlazada al pedido para que Mayte le dé el OK' : ''}.</p>
+      <p class="muted">Se crea el pedido de compra confirmado. La recepción queda en <b>Recepciones</b> para que almacén compruebe lo que llega${d.doc.tipo === 'factura' || lec.tipo === 'factura' ? ', y la factura queda en borrador enlazada al pedido para que Mayte le dé el OK' : ''}.</p>
       <button class="ac-go" id="pc-go" ${prov ? '' : 'disabled'}>🛒 Crear pedido de compra</button><div id="pc-res"></div>`;
     $('#pc-rel').onclick = e => { e.preventDefault(); coPasar(did, true); };
     const cp = $('#pc-cprov'); if (cp) cp.onclick = e => { e.preventDefault(); $('#pc-bprov').hidden = false; $('#pc-qprov').focus(); };
@@ -129,8 +129,8 @@ async function coPasar(did, releer) {
     };
   };
   if (d.compra) {
-    db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · recepción ${escH((d.compra.recepciones || []).join(', '))}</div>`;
-    return;
+    db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">Este documento ya tiene el pedido <b>${escH(d.compra.pedido)}</b> · recepción ${escH((d.compra.recepciones || []).join(', ') || '—')}. No hace falta pasarlo otra vez.</div>`;
+    coDocs(); return;
   }
   pinta();
 }
