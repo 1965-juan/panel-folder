@@ -281,11 +281,18 @@ async function coFac() {
     document.querySelector(`.col[data-k="${k}"] .n`).textContent = l.length;
     l.forEach(x => {
       const d = document.createElement('div'); d.className = 'card fcard ' + x.estado;
-      const recibido = !x.sin_pedido && !x.avisos.some(a => a.includes('han llegado'));
+      const MARCA = { gasto: '🧾 Gasto sin entrada', recibido: '📦 Marcado como recibido' };
+      const chipEntrada = x.marca ? `<span class="chip verde" title="${escH(x.marca.usuario)}">${MARCA[x.marca.tipo]} · ${escH(x.marca.usuario)}</span>`
+        : x.recepcion === 'recibido' ? '<span class="chip verde">✓ Material recibido</span>'
+        : x.recepcion === 'pendiente' ? '<span class="chip rojo">Almacén no lo ha recibido todo</span>' : '<span class="chip rojo">Sin cuadrar con albarán / pedido</span>';
       d.innerHTML = `<div class="c1"><span class="ref"></span><b>${eur(x.total)}</b></div>
         <div class="cli">${x.numero ? 'Nº ' + escH(x.numero) : '<i>sin nº</i>'} · ${coDate(x.fecha) || '<i>sin fecha</i>'}${x.abono ? ' · <b>ABONO</b>' : ''}</div>
         <div class="chips">${x.pedidos.map(p => `<span class="chip">${escH(p)}</span>`).join('')}
-          ${x.estado === 'leyendo' ? '' : x.sin_pedido ? '<span class="chip gris">Sin pedido de compra (gasto)</span>' : recibido ? '<span class="chip verde">✓ Material recibido</span>' : '<span class="chip rojo">Material sin llegar del todo</span>'}</div>
+          ${x.estado === 'leyendo' ? '' : chipEntrada}</div>
+        ${x.estado === 'leyendo' ? '' : `<div class="fent">${x.marca ? `<button class="lnk" data-a="quitar">quitar marca</button>`
+          : `${x.recepcion === 'sin_pedido' ? `<button class="lnk" data-a="cuadrar">⇄ Cuadrar con pedido</button>` : ''}
+             <button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>
+             ${x.recepcion !== 'recibido' ? `<button class="lnk" data-a="recibido">📦 Material recibido</button>` : ''}`}</div>`}
         <div class="avs"></div>
         <div class="c3"><span class="emp"></span><span>${x.vence ? 'vence ' + coDate(x.vence) : ''}</span></div>
         <div class="fbtn">${x.pdf ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/web/content/${x.pdf}">Ver PDF</a>` : ''}
@@ -294,7 +301,14 @@ async function coFac() {
       d.querySelector('.ref').textContent = x.proveedor; d.querySelector('.emp').textContent = x.empresa;
       const avs = d.querySelector('.avs');
       [...(x.estado !== 'leyendo' && x.faltan.length ? ['Falta: ' + x.faltan.join(', ')] : []), ...x.avisos].forEach(a => { const v = document.createElement('div'); v.className = 'av'; v.textContent = '⚠ ' + a; avs.appendChild(v); });
+      d.querySelectorAll('.fent [data-a]').forEach(bt => bt.onclick = async () => {
+        const a = bt.dataset.a;
+        if (a === 'cuadrar') return coFacCuadrar(x);
+        if (a === 'recibido' && !confirm('¿Confirmas que el material de esta factura ha llegado? Quedará apuntado a tu nombre.')) return;
+        try { await jpost(`/api/compras/facturas/${x.id}/marcar`, { tipo: a === 'quitar' ? '' : a }); coFac(); } catch (e) { alertBox(e.message); }
+      });
       const b = d.querySelector('.okb');
+      if (b && !x.entrada_ok) { b.disabled = true; b.title = 'Primero: cuadrarla con su pedido, que almacén reciba el material, o marcarla como gasto / recibido'; }
       if (b) b.onclick = async () => {
         if (x.estado === 'diferencias' && !confirm('Esta factura tiene diferencias:\n\n' + [...x.faltan.map(f => 'Falta ' + f), ...x.avisos].join('\n') + '\n\n¿Contabilizarla igualmente?')) return;
         b.disabled = true; b.textContent = 'Contabilizando…';
@@ -305,6 +319,24 @@ async function coFac() {
     });
   };
   pinta('f-ok', ok); pinta('f-dif', dif); pinta('f-lee', lee);
+}
+async function coFacCuadrar(x) {
+  const db = $('#co-db'); $('#co-drawer').hidden = false;
+  db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Buscando pedidos de este proveedor…</p>`;
+  try {
+    const d = await api(`/api/compras/facturas/${x.id}/pedidos`);
+    db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Factura ${escH(d.factura.ref || '')} · base ${eur(d.factura.base)}. Elige el pedido al que corresponde: las líneas de la factura pasan a ser las del pedido y ya se puede comprobar con lo que ha llegado.</p>
+      ${d.pedidos.length ? d.pedidos.map(p => `<div class="co-alb ${p.coincide ? 'on' : ''}"><span class="ic">🛒</span><div><b>${escH(p.name)}</b> ${p.coincide ? '<span class="bdg b-ok">mismo nº de documento</span>' : ''}
+        <small class="muted">${coDate(p.fecha)} · base ${eur(p.base)} · ${escH(p.ref)} · ${p.recibido === 'full' ? 'recibido' : p.recibido === 'partial' ? 'recibido en parte' : 'sin recibir'}</small></div>
+        <button class="lnk" data-p="${p.id}">Cuadrar con este</button></div>`).join('')
+      : '<p class="empty">Este proveedor no tiene pedidos pendientes de facturar. Si es material, primero súbelo como albarán y cuádralo con su pedido; si es un gasto, márcala como gasto.</p>'}`;
+    db.querySelectorAll('[data-p]').forEach(bt => bt.onclick = async () => {
+      bt.disabled = true;
+      try { const r = await jpost(`/api/compras/facturas/${x.id}/enlazar`, { pedido_id: +bt.dataset.p });
+        db.insertAdjacentHTML('beforeend', `<div class="ac-docs">✓ Factura cuadrada con ${escH(r.pedido)} · base ${eur(r.base)} (la del PDF era ${eur(x.base)}). Revisa la diferencia si la hay.</div>`); coFac();
+      } catch (e) { alertBox(e.message); bt.disabled = false; }
+    });
+  } catch (e) { db.innerHTML += `<p class="err">${escH(e.message)}</p>`; }
 }
 /* --- recurrentes --- */
 function coMes(delta) { const [y, m] = CO_MES.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); CO_MES = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); coRecu(); }

@@ -34,6 +34,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         CREATE TABLE IF NOT EXISTS recurrentes (id INTEGER PRIMARY KEY AUTOINCREMENT, empresa INTEGER, empresa_nombre TEXT,
             partner_id INTEGER, partner_nombre TEXT, concepto TEXT, importe REAL, dia INTEGER, activo INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS recurrentes_marcas (rid INTEGER, mes TEXT, nota TEXT, PRIMARY KEY (rid, mes));
+        CREATE TABLE IF NOT EXISTS factura_marcas (move_id INTEGER PRIMARY KEY, tipo TEXT, usuario TEXT, cuando REAL, nota TEXT);
         """)
         try:
             c.execute("ALTER TABLE docs ADD COLUMN lectura TEXT")
@@ -57,6 +58,40 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         return u, int(company), cids
 
     # ---------- subir PDF ----------
+    def recuperar_huerfanos():
+        """PDF guardados en disco sin fila en la base (subidas que fallaron al guardar): se vuelven a dar de alta,
+        enlazados con su factura de Odoo si se llegó a crear (se busca el adjunto por su huella)."""
+        import hashlib
+        try:
+            with con() as c:
+                conocidos = {r["fichero"] for r in c.execute("SELECT fichero FROM docs").fetchall()}
+            for f in sorted(carpeta.glob("*.pdf")):
+                if f.name in conocidos:
+                    continue
+                datos = f.read_bytes()
+                sha = hashlib.sha1(datos).hexdigest()
+                tipo, nombre, emp, model, oid, estado = "albaran", f"recuperado_{time.strftime('%d%m_%H%M', time.localtime(f.stat().st_mtime))}.pdf", 1, None, None, "pendiente"
+                try:
+                    at = odoo.search_read("ir.attachment", [("checksum", "=", sha), ("res_model", "=", "account.move"), ("res_id", "!=", 0)],
+                                          ["name", "res_id", "company_id"], company_ids=[1, 2, 3, 4, 5], limit=1)
+                    if at:
+                        mv = odoo.search_read("account.move", [("id", "=", at[0]["res_id"])], ["company_id"], company_ids=[1, 2, 3, 4, 5])
+                        tipo, nombre, model, oid, estado = "factura", at[0]["name"], "account.move", at[0]["res_id"], "en_odoo"
+                        emp = mv[0]["company_id"][0] if mv else 1
+                    else:
+                        at = odoo.search_read("ir.attachment", [("checksum", "=", sha)], ["name"], company_ids=[1, 2, 3, 4, 5], limit=1)
+                        if at:
+                            nombre = at[0]["name"].replace("MAIL_", "")
+                except Exception:
+                    pass
+                with lock, con() as c:
+                    c.execute("INSERT OR IGNORE INTO docs (id, tipo, nombre, fichero, empresa, subido, usuario, estado, odoo_model, odoo_id, nota) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                              (f.stem, tipo, nombre, f.name, emp, f.stat().st_mtime, "recuperado", estado, model, oid, None))
+        except Exception as e:
+            print("recuperar_huerfanos:", e)
+    if not demo:
+        threading.Thread(target=recuperar_huerfanos, daemon=True).start()
+
     @app.post("/api/compras/subir")
     async def subir(request: Request, tipo: str = Form(...), company: str = Form("all"), archivos: list[UploadFile] = File(...)):
         u, cid, cids = una_empresa(request, company)
@@ -95,7 +130,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             elif tipo == "factura" and demo:
                 model, oid, estado = "account.move", 9001, "en_odoo"
             with lock, con() as c:
-                c.execute("INSERT INTO docs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                c.execute("INSERT INTO docs (id, tipo, nombre, fichero, empresa, subido, usuario, estado, odoo_model, odoo_id, nota) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                           (did, tipo, f.filename, fich.name, cid, time.time(), u, estado, model, oid, item.get("error")))
             item.update(estado=estado, odoo_id=oid)
             out.append(item)
@@ -636,6 +671,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             atts = odoo.search_read("ir.attachment", [("res_model", "=", "account.move"), ("res_id", "in", [m["id"] for m in mv]),
                                                       ("mimetype", "=", "application/pdf")], ["res_id"], company_ids=cids) if mv else []
             con_pdf = {a["res_id"]: a["id"] for a in atts}
+            with con() as c:
+                marcas = {r["move_id"]: {"tipo": r["tipo"], "usuario": r["usuario"], "cuando": r["cuando"]} for r in c.execute("SELECT * FROM factura_marcas").fetchall()}
             out = []
             for m in mv:
                 lineas, avisos, pedidos = [], [], set()
@@ -661,13 +698,22 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 if not m.get("ref"):
                     faltan.append("nº de factura")
                 leyendo = m.get("extract_state") in ("waiting_extraction", "extract_not_ready")
-                estado = "leyendo" if leyendo else ("diferencias" if avisos or faltan else "ok")
+                ls = por_factura.get(m["id"], [])
+                if not pedidos:
+                    recepcion = "sin_pedido"
+                elif any(l["quantity"] > (pol.get((l.get("purchase_line_id") or [0])[0]) or {}).get("qty_received", 0) + 1e-6 for l in ls if l.get("purchase_line_id")):
+                    recepcion = "pendiente"
+                else:
+                    recepcion = "recibido"
+                marca = marcas.get(m["id"])
+                entrada_ok = recepcion == "recibido" or bool(marca)
+                estado = "leyendo" if leyendo else ("diferencias" if avisos or faltan or not entrada_ok else "ok")
                 out.append({"id": m["id"], "proveedor": (m.get("partner_id") or [0, "Sin proveedor"])[1], "numero": m.get("ref") or "",
                             "fecha": m.get("invoice_date") or "", "vence": m.get("invoice_date_due") or "",
                             "base": m["amount_untaxed"], "total": m["amount_total"], "empresa": m["company_id"][1],
                             "abono": m["move_type"] == "in_refund", "pedidos": sorted(pedidos) or ([m["invoice_origin"]] if m.get("invoice_origin") else []),
                             "lineas": lineas, "avisos": avisos, "faltan": faltan, "estado": estado, "pdf": con_pdf.get(m["id"]),
-                            "sin_pedido": not pedidos})
+                            "sin_pedido": not pedidos, "recepcion": recepcion, "marca": marca, "entrada_ok": entrada_ok})
             return out
         return guard(run)
 
@@ -681,10 +727,81 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 raise HTTPException(404, "La factura ya no está en borrador")
             if not m[0].get("partner_id") or not m[0].get("invoice_date"):
                 raise HTTPException(400, "Falta el proveedor o la fecha: complétalo en Odoo antes de darle el OK")
+            with con() as c:
+                marca = c.execute("SELECT tipo FROM factura_marcas WHERE move_id=?", (mid,)).fetchone()
+            if not marca:
+                ln = odoo.search_read("account.move.line", [("move_id", "=", mid), ("display_type", "=", "product")], ["quantity", "purchase_line_id"], company_ids=cids)
+                pls = [l["purchase_line_id"][0] for l in ln if l.get("purchase_line_id")]
+                if not pls:
+                    raise HTTPException(400, "Esta factura no está cuadrada con ningún pedido: cuádrala con su albarán/pedido, o márcala como gasto o como material recibido")
+                rec = {p["id"]: p["qty_received"] for p in odoo.search_read("purchase.order.line", [("id", "in", pls)], ["qty_received"], company_ids=cids)}
+                if any(l["quantity"] > rec.get((l.get("purchase_line_id") or [0])[0], 0) + 1e-6 for l in ln if l.get("purchase_line_id")):
+                    raise HTTPException(400, "Almacén todavía no ha recibido todo el material de esta factura. Si ha llegado, que lo reciban en Recepciones o márcalo como recibido")
             odoo.call("account.move", "action_post", [m[0]["company_id"][0]], ids=[mid])
             with lock, con() as c:
                 c.execute("UPDATE docs SET estado='contabilizada' WHERE odoo_model='account.move' AND odoo_id=?", (mid,))
             return {"ok": True}
+        return guard(run)
+
+    @app.post("/api/compras/facturas/{mid}/marcar")
+    async def factura_marcar(mid: int, request: Request):
+        """tipo: 'gasto' (no lleva entrada de material), 'recibido' (el material llegó sin pasar por compras) o '' para quitar la marca."""
+        u, cids = ctx(request, "all")
+        b = await request.json()
+        tipo = b.get("tipo") or ""
+        if tipo not in ("", "gasto", "recibido"):
+            raise HTTPException(400, "Marca no válida")
+        with lock, con() as c:
+            if tipo:
+                c.execute("INSERT OR REPLACE INTO factura_marcas VALUES (?,?,?,?,?)", (mid, tipo, u, time.time(), b.get("nota") or ""))
+            else:
+                c.execute("DELETE FROM factura_marcas WHERE move_id=?", (mid,))
+        return {"ok": True}
+
+    @app.get("/api/compras/facturas/{mid}/pedidos")
+    def factura_pedidos(mid: int, request: Request):
+        """Pedidos de compra del proveedor de la factura que todavía tienen algo sin facturar."""
+        _, cids = ctx(request, "all")
+
+        def run():
+            m = odoo.search_read("account.move", [("id", "=", mid)], ["partner_id", "ref", "amount_untaxed"], company_ids=cids)
+            if not m or not m[0].get("partner_id"):
+                raise HTTPException(400, "La factura no tiene proveedor: ponlo en Odoo primero")
+            ps = odoo.search_read("purchase.order", [("partner_id", "child_of", m[0]["partner_id"][0]), ("state", "in", ["purchase", "done"]),
+                                                     ("invoice_status", "in", ["to invoice", "no"])],
+                                  ["name", "date_order", "amount_untaxed", "partner_ref", "receipt_status", "invoice_status", "company_id"], company_ids=cids, order="id desc", limit=15)
+            return {"factura": {"ref": m[0].get("ref"), "base": m[0]["amount_untaxed"], "proveedor": m[0]["partner_id"][1]},
+                    "pedidos": [{"id": p["id"], "name": p["name"], "fecha": (p["date_order"] or "")[:10], "base": p["amount_untaxed"], "ref": p.get("partner_ref") or "",
+                                 "recibido": p.get("receipt_status"), "facturable": p.get("invoice_status") == "to invoice",
+                                 "coincide": bool(m[0].get("ref") and (p.get("partner_ref") or "").strip().lower() == m[0]["ref"].strip().lower())} for p in ps]}
+        return guard(run)
+
+    @app.post("/api/compras/facturas/{mid}/enlazar")
+    async def factura_enlazar(mid: int, request: Request):
+        """Cuadra la factura con un pedido: las líneas de la factura pasan a ser las del pedido (lo pedido que falte por facturar)."""
+        _, cids = ctx(request, "all")
+        b = await request.json()
+        po_id = int(b.get("pedido_id") or 0)
+
+        def run():
+            m = odoo.search_read("account.move", [("id", "=", mid), ("state", "=", "draft")], ["company_id"], company_ids=cids)
+            if not m:
+                raise HTTPException(404, "La factura ya no está en borrador")
+            pol = odoo.search_read("purchase.order.line", [("order_id", "=", po_id), ("display_type", "=", False)],
+                                   ["product_id", "name", "product_qty", "qty_invoiced", "qty_received", "price_unit", "discount", "tax_ids"], company_ids=cids)
+            lineas = []
+            for pl in pol:
+                q = round(pl["product_qty"] - pl["qty_invoiced"], 4)
+                if q > 0 and pl.get("product_id"):
+                    lineas.append([0, 0, {"purchase_line_id": pl["id"], "product_id": pl["product_id"][0], "name": pl["name"], "quantity": q,
+                                          "price_unit": pl["price_unit"], "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl.get("tax_ids") or []]]}])
+            if not lineas:
+                raise HTTPException(400, "Ese pedido ya está facturado entero")
+            po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name"], company_ids=cids)[0]
+            odoo.call("account.move", "write", cids, ids=[mid], vals={"invoice_line_ids": [[5, 0, 0]] + lineas, "invoice_origin": po["name"]},
+                      context={"default_move_type": "in_invoice"})
+            t = odoo.search_read("account.move", [("id", "=", mid)], ["amount_untaxed", "amount_total"], company_ids=cids)[0]
+            return {"ok": True, "pedido": po["name"], "base": t["amount_untaxed"], "total": t["amount_total"]}
         return guard(run)
 
     # ---------- facturas recurrentes ----------
