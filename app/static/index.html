@@ -52,7 +52,7 @@
   </section>
 
   <section id="v-co" hidden>
-    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button></div>
+    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button><button data-t="alb">🧾 Facturar albaranes</button><button data-t="ent">↔ Entre empresas</button></div>
     <div id="co-subir" class="co-pane">
       <div class="co-drops">
         <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra para recibir el material</small></label>
@@ -79,6 +79,18 @@
       <label class="drop d-ban"><input type="file" accept=".xls,.xlsx,.csv" multiple id="bn-f"><b>Extractos del banco</b><span>Arrastra aquí los Excel descargados del banco</span><small>Se reconoce la cuenta sola y no se duplica lo que ya está en Odoo</small></label>
       <div id="bn-prev"></div>
       <h3>Sin conciliar <a class="lnk" id="bn-odoo" target="_blank" rel="noopener">Conciliar en Odoo</a></h3><div id="bn-pend"></div>
+    </div>
+    <div id="co-alb" class="co-pane" hidden>
+      <div class="recu-top"><b>Albaranes servidos sin facturar</b><span class="muted">Cada cliente lleva marcada la empresa de su última factura. Cámbiala si hace falta, marca y factura.</span>
+        <input id="fa-q" type="search" placeholder="Buscar cliente o albarán…"></div>
+      <div id="fa-l"></div>
+      <div class="fa-bar"><span id="fa-res"></span><button class="btn" id="fa-bor">Crear borradores</button><button class="ac-go" id="fa-dir">Facturar directamente</button></div>
+      <div id="fa-out"></div>
+    </div>
+    <div id="co-ent" class="co-pane" hidden>
+      <div class="recu-top"><button id="en-prev">◀</button><b id="en-mes"></b><button id="en-next">▶</button>
+        <span class="muted">Material del almacén central entre Distriplus y Logipaper · última compra + 5 %</span></div>
+      <div id="en-box"></div>
     </div>
     <div id="co-recu" class="co-pane" hidden>
       <div class="recu-top"><button id="rc-prev">◀</button><b id="rc-mes"></b><button id="rc-next">▶</button>

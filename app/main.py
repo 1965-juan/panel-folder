@@ -466,3 +466,8 @@ _bancos.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guar
 from . import fichas as _fichas  # noqa: E402
 
 _fichas.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- facturar albaranes y cuentas entre empresas ----------
+from . import entre_empresas as _entre  # noqa: E402
+
+_entre.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)

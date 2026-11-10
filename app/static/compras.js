@@ -9,8 +9,8 @@ async function coBadge() {
 function coTab(t) {
   CO_TAB = t;
   document.querySelectorAll('.co-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  ['subir', 'rec', 'fac', 'recu', 'ban'].forEach(k => $('#co-' + k).hidden = k !== t);
-  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend })[t]();
+  ['subir', 'rec', 'fac', 'recu', 'ban', 'alb', 'ent'].forEach(k => $('#co-' + k).hidden = k !== t);
+  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend, alb: faCargar, ent: enCargar })[t]();
 }
 document.querySelectorAll('.co-tabs button').forEach(b => b.onclick = () => coTab(b.dataset.t));
 function coOpen() {
@@ -309,8 +309,8 @@ async function coFac() {
     document.querySelector(`.col[data-k="${k}"] .n`).textContent = l.length;
     l.forEach(x => {
       const d = document.createElement('div'); d.className = 'card fcard ' + x.estado;
-      const MARCA = { gasto: '🧾 Gasto sin entrada', recibido: '📦 Marcado como recibido' };
-      const chipEntrada = x.marca ? `<span class="chip verde" title="${escH(x.marca.usuario)}">${MARCA[x.marca.tipo]} · ${escH(x.marca.usuario)}</span>`
+      const MARCA = { gasto: '🧾 Gasto sin entrada', recibido: '📦 Marcado como recibido', pedido: '⇄ Cruzada con pedido del almacén' };
+      const chipEntrada = x.marca && x.marca.tipo !== 'pedido' ? `<span class="chip verde" title="${escH(x.marca.usuario)}">${MARCA[x.marca.tipo]} · ${escH(x.marca.usuario)}</span>`
         : x.recepcion === 'recibido' ? '<span class="chip verde">✓ Material recibido</span>'
         : x.recepcion === 'pendiente' ? '<span class="chip rojo">Almacén no lo ha recibido todo</span>' : '<span class="chip rojo">Sin cuadrar con albarán / pedido</span>';
       d.innerHTML = `<div class="c1"><span class="ref"></span><b>${eur(x.total)}</b></div>
@@ -355,7 +355,7 @@ async function coFacCuadrar(x) {
     const d = await api(`/api/compras/facturas/${x.id}/pedidos`);
     db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Factura ${escH(d.factura.ref || '')} · base ${eur(d.factura.base)}. Elige el pedido al que corresponde: las líneas de la factura pasan a ser las del pedido y ya se puede comprobar con lo que ha llegado.</p>
       ${d.pedidos.length ? d.pedidos.map(p => `<div class="co-alb ${p.coincide ? 'on' : ''}"><span class="ic">🛒</span><div><b>${escH(p.name)}</b> ${p.coincide ? '<span class="bdg b-ok">mismo nº de documento</span>' : ''}
-        <small class="muted">${coDate(p.fecha)} · base ${eur(p.base)} · ${escH(p.ref)} · ${p.recibido === 'full' ? 'recibido' : p.recibido === 'partial' ? 'recibido en parte' : 'sin recibir'}</small></div>
+        <small class="muted">${escH(p.empresa || '')} · ${coDate(p.fecha)} · base ${eur(p.base)} · ${escH(p.ref)} · ${p.recibido === 'full' ? 'recibido' : p.recibido === 'partial' ? 'recibido en parte' : 'sin recibir'}</small></div>
         <button class="lnk" data-p="${p.id}">Cuadrar con este</button></div>`).join('')
       : '<p class="empty">Este proveedor no tiene pedidos pendientes de facturar. Si es material, primero súbelo como albarán y cuádralo con su pedido; si es un gasto, márcala como gasto.</p>'}`;
     db.querySelectorAll('[data-p]').forEach(bt => bt.onclick = async () => {
@@ -365,6 +365,76 @@ async function coFacCuadrar(x) {
       } catch (e) { alertBox(e.message); bt.disabled = false; }
     });
   } catch (e) { db.innerHTML += `<p class="err">${escH(e.message)}</p>`; }
+}
+/* --- facturar albaranes (asistente de Nextdoo, con la empresa por defecto de cada cliente) --- */
+let FA = null;
+async function faCargar() {
+  $('#fa-l').innerHTML = '<p class="muted">Cargando albaranes…</p>'; $('#fa-out').innerHTML = '';
+  try { FA = await api('/api/facturar/albaranes'); } catch (e) { $('#fa-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
+  FA.grupos.forEach(g => g.albaranes.forEach(a => a.marcado = false));
+  faPinta();
+}
+function faPinta() {
+  const q = ($('#fa-q').value || '').toLowerCase();
+  const opt = sel => FA.empresas.map(e => `<option value="${e.id}" ${e.id === sel ? 'selected' : ''}>${escH(e.nombre.split(' ')[0])}</option>`).join('');
+  const gs = FA.grupos.filter(g => !q || (g.cliente + ' ' + g.albaranes.map(a => a.ref + ' ' + a.pedido).join(' ')).toLowerCase().includes(q));
+  $('#fa-l').innerHTML = gs.length ? gs.map(g => { const i = FA.grupos.indexOf(g); return `<div class="fa-g">
+      <div class="fa-h"><label><input type="checkbox" data-g="${i}" ${g.albaranes.every(a => a.marcado) ? 'checked' : ''}> <b>${escH(g.cliente)}</b></label>
+        <span>${eur(g.total)}</span><select data-e="${i}">${opt(g.empresa)}</select><small class="muted">${g.ultima ? 'última: ' + escH(g.ultima) : 'sin facturas anteriores'}</small></div>
+      ${g.albaranes.map((a, k) => `<label class="fa-a"><input type="checkbox" data-g="${i}" data-k="${k}" ${a.marcado ? 'checked' : ''}> ${escH(a.ref)} · ${escH(a.pedido)} · ${coDate(a.fecha)} · ${eur(a.importe)}
+        ${a.almacen.startsWith('AC') ? '' : `<span class="bdg b-warn">sale de ${escH(a.almacen)}</span>`}</label>`).join('')}</div>`; }).join('')
+    : '<p class="empty">No hay albaranes pendientes de facturar</p>';
+  $('#fa-l').querySelectorAll('select[data-e]').forEach(s => s.onchange = () => { FA.grupos[s.dataset.e].empresa = +s.value; faRes(); });
+  $('#fa-l').querySelectorAll('input[data-g]').forEach(c => c.onchange = () => {
+    const g = FA.grupos[c.dataset.g];
+    if (c.dataset.k === undefined) g.albaranes.forEach(a => a.marcado = c.checked); else g.albaranes[c.dataset.k].marcado = c.checked;
+    faPinta();
+  });
+  faRes();
+}
+function faRes() {
+  const por = {};
+  FA.grupos.forEach(g => g.albaranes.filter(a => a.marcado).forEach(a => { const e = FA.empresas.find(x => x.id === g.empresa); const k = e ? e.nombre.split(' ')[0] : g.empresa; por[k] = (por[k] || 0) + a.importe; }));
+  $('#fa-res').textContent = Object.keys(por).length ? 'Marcado: ' + Object.entries(por).map(([k, v]) => `${k} ${eur(v)}`).join(' · ') + ' (sin IVA)' : 'Marca los albaranes que quieras facturar';
+}
+$('#fa-q').oninput = () => FA && faPinta();
+async function faFacturar(modo) {
+  const grupos = FA.grupos.map(g => ({ empresa: g.empresa, picking_ids: g.albaranes.filter(a => a.marcado).map(a => a.id) })).filter(g => g.picking_ids.length);
+  if (!grupos.length) return alertBox('Marca algún albarán');
+  if (!confirm(modo === 'directo' ? '¿Facturar y contabilizar directamente los albaranes marcados?' : '¿Crear las facturas en borrador?')) return;
+  $('#fa-out').innerHTML = '<p class="muted">Facturando en Odoo…</p>';
+  try {
+    const r = await jpost('/api/facturar/albaranes', { grupos, modo });
+    $('#fa-out').innerHTML = `<div class="ac-docs"><b>✓ Hecho</b>${r.hechos.map(h => h.facturas.map(f => `<br>${escH(f.nombre)} · ${escH(f.cliente)} · ${eur(f.total)} ${f.estado === 'draft' ? '(borrador)' : ''}
+      <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${f.id}">abrir</a>`).join('')).join('')}</div>`;
+    const out = $('#fa-out').innerHTML; await faCargar(); $('#fa-out').innerHTML = out;
+  } catch (e) { $('#fa-out').innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+}
+$('#fa-bor').onclick = () => faFacturar('borrador'); $('#fa-dir').onclick = () => faFacturar('directo');
+/* --- cuentas entre empresas --- */
+let EN_MES = (() => { const d = new Date(); d.setDate(0); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+$('#en-prev').onclick = () => { const [y, m] = EN_MES.split('-').map(Number); const d = new Date(y, m - 2, 1); EN_MES = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); enCargar(); };
+$('#en-next').onclick = () => { const [y, m] = EN_MES.split('-').map(Number); const d = new Date(y, m, 1); EN_MES = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); enCargar(); };
+async function enCargar() {
+  const box = $('#en-box'); box.innerHTML = '<p class="muted">Calculando…</p>';
+  let d; try { d = await api('/api/entre_empresas?mes=' + EN_MES); } catch (e) { box.innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
+  $('#en-mes').textContent = d.texto_mes.charAt(0).toUpperCase() + d.texto_mes.slice(1);
+  const tarjeta = (sentido, tit, sub, importe, n) => { const h = d.hechas[sentido]; return `<div class="kpi en-k"><span>${tit}</span><b>${eur(importe)}</b><small>${sub} · ${n} líneas · sin IVA</small>
+    <div class="fa-bar"><a class="lnk" target="_blank" rel="noopener" href="/api/entre_empresas/pdf?mes=${d.mes}&sentido=${sentido}">Ver PDF del detalle</a>
+    ${h ? `<span class="bdg b-ok">Facturas creadas (${escH(h.usuario)})</span> <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${h.venta_id}">venta</a> <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${h.compra_id}">compra</a>`
+        : importe > 0 ? `<button class="ac-go" data-s="${sentido}">Crear las dos facturas (borrador)</button>` : ''}</div></div>`; };
+  box.innerHTML = `<section class="kpis">${tarjeta('distri_a_logi', 'Distriplus factura a Logipaper', 'material del almacén central que vendió Logipaper', d.distri_a_logi, d.ventas.length)}
+    ${tarjeta('logi_a_distri', 'Logipaper factura a Distriplus', 'compras de Logipaper que entraron en el almacén central', d.logi_a_distri, d.compras.length)}</section>
+    <p class="muted">Cada liquidación crea la factura de venta en una empresa y la de compra en la otra, en borrador, con una sola línea "Venta general mes de ${escH(d.texto_mes)} según PDF adjunto" y el PDF del detalle adjunto. Lo que se venden entre ellas como cliente (Tienda 3) va aparte y no entra aquí.</p>
+    <details><summary>Detalle: material vendido por Logipaper (${d.ventas.length})</summary><table class="co-t pc-t"><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Artículo</th><th>Cant.</th><th>Últ. compra</th><th>Importe</th></tr></thead><tbody>
+      ${d.ventas.map(v => `<tr><td>${coDate(v.fecha)}</td><td>${escH(v.factura)}</td><td>${escH(v.cliente)}</td><td>${escH(v.producto)}</td><td>${v.cantidad}</td><td title="${escH(v.origen_coste)}">${eur(v.coste)}</td><td>${eur(v.importe)}</td></tr>`).join('')}</tbody></table></details>
+    <details><summary>Detalle: compras de Logipaper entradas en el almacén central (${d.compras.length})</summary><table class="co-t pc-t"><thead><tr><th>Fecha</th><th>Factura proveedor</th><th>Proveedor</th><th>Pedido</th><th>Base</th><th>Importe</th></tr></thead><tbody>
+      ${d.compras.map(x => `<tr><td>${coDate(x.fecha)}</td><td>${escH(x.factura)}</td><td>${escH(x.proveedor)}</td><td>${escH(x.pedido)}</td><td>${eur(x.base)}</td><td>${eur(x.importe)}</td></tr>`).join('')}</tbody></table></details>`;
+  box.querySelectorAll('[data-s]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Crear en borrador la factura de venta y la de compra de esta liquidación?')) return;
+    b.disabled = true;
+    try { await jpost('/api/entre_empresas/crear', { mes: d.mes, sentido: b.dataset.s }); enCargar(); } catch (e) { alertBox(e.message); b.disabled = false; }
+  });
 }
 /* --- recurrentes --- */
 function coMes(delta) { const [y, m] = CO_MES.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); CO_MES = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); coRecu(); }
