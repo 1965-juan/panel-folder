@@ -92,9 +92,14 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         u, cids = ctx(request)
 
         def run():
-            pk = odoo.search_read("stock.picking", [("picking_type_code", "=", "outgoing"), ("state", "=", "done"), ("invoice_state", "=", "pending"),
-                                                    ("sale_id", "!=", False)],
-                                  ["name", "partner_id", "date_done", "origin", "sale_id", "company_id", "location_id", "move_ids"], company_ids=cids, order="date_done asc", limit=500)
+            F = ["name", "partner_id", "date_done", "origin", "sale_id", "company_id", "location_id", "move_ids", "invoice_state"]
+            base = [("picking_type_code", "=", "outgoing"), ("state", "=", "done"), ("sale_id", "!=", False)]
+            try:
+                pk = odoo.search_read("stock.picking", base + [("albaran_invoiced", "=", False)], F, company_ids=cids, order="date_done asc", limit=800)
+            except Exception:
+                desde = (dt.date.today() - dt.timedelta(days=180)).isoformat()
+                pk = odoo.search_read("stock.picking", base + [("date_done", ">=", desde)], F, company_ids=cids, order="date_done asc", limit=3000)
+            pk = [p for p in pk if p.get("invoice_state") == "pending"]
             mids = [m for p in pk for m in p["move_ids"]]
             mv = odoo.search_read("stock.move", [("id", "in", mids), ("state", "=", "done")], ["picking_id", "quantity", "sale_line_id"], company_ids=cids) if mids else []
             slids = [m["sale_line_id"][0] for m in mv if m.get("sale_line_id")]
@@ -163,9 +168,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
     def ultima_compra(pids, hasta):
         """Precio neto de la última compra de cada artículo hasta esa fecha (cualquier empresa); si no hay, coste de Distriplus."""
         out = {}
+        # sin las compras entre nuestras propias empresas (no son precio de proveedor)
+        propios = [c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=TODAS)]
         for i in range(0, len(pids), 200):
             trozo = pids[i:i + 200]
             for l in odoo.search_read("purchase.order.line", [("product_id", "in", trozo), ("order_id.state", "in", ["purchase", "done"]),
+                                                              ("order_id.partner_id", "not in", propios),
                                                               ("order_id.date_order", "<=", hasta.isoformat() + " 23:59:59"), ("price_unit", ">", 0)],
                                       ["product_id", "price_unit", "discount", "order_id"], company_ids=TODAS, order="id desc"):
                 out.setdefault(l["product_id"][0], (round(l["price_unit"] * (1 - (l.get("discount") or 0) / 100), 4), l["order_id"][1]))
