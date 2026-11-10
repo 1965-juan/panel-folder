@@ -50,11 +50,12 @@ async function coDocs() {
       $('#co-docs').insertAdjacentHTML('beforeend', `<div class="co-doc"><span class="ic">${d.tipo === 'albaran' ? '📦' : '🧾'}</span>
         <a target="_blank" rel="noopener" href="/api/compras/pdf/${d.id}">${escH(d.nombre)}</a><span class="bdg ${c}">${t}</span>
         <small class="muted">${escH(d.usuario)} · ${hora(d.subido)}</small>
-        ${d.compra ? `<span class="bdg b-ok" title="Entrada ${escH((d.compra.recepciones || []).join(', '))}">✓ ${escH(d.compra.pedido)}</span>`
+        ${d.compra ? `<span class="bdg b-ok" title="Entrada ${escH((d.compra.recepciones || []).join(', '))}">✓ ${escH(d.compra.pedido)}</span><button class="lnk co-fi" data-p="${escH(d.compra.pedido)}">📷 Fichas</button>`
                    : `<button class="ac-go co-pc" data-id="${d.id}">⇄ Cuadrar con pedido</button>`}
         ${d.nota ? `<small class="err-t">${escH(d.nota)}</small>` : ''}</div>`);
     });
     $('#co-docs').querySelectorAll('.co-pc').forEach(b => b.onclick = () => coPasar(b.dataset.id));
+    $('#co-docs').querySelectorAll('.co-fi').forEach(b => b.onclick = () => coFichas({ pedido: b.dataset.p }));
   } catch (e) { showErr(e.message); }
 }
 /* --- cuadrar un albarán/factura con el pedido de compra abierto del proveedor --- */
@@ -68,8 +69,9 @@ async function coPasar(did, opts = {}) {
   catch (e) { db.innerHTML = `<h3>Cuadrar con el pedido</h3><p class="err">${escH(e.message)}</p>`; return; }
   const lec = d.lectura || {};
   const eu = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
-  if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>`; return; }
-  if (d.ya_cuadrado) { db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">El documento ${escH(lec.numero)} ya está en el pedido confirmado <b>${escH(d.ya_cuadrado)}</b>. Recíbelo desde Recepciones.</div>`; return; }
+  const fiBtn = (ref) => { db.insertAdjacentHTML('beforeend', `<button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`); $('#pc-fi').onclick = () => coFichas(ref); };
+  if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>`; fiBtn({ pedido: d.compra.pedido }); return; }
+  if (d.ya_cuadrado) { db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">El documento ${escH(lec.numero)} ya está en el pedido confirmado <b>${escH(d.ya_cuadrado)}</b>. Recíbelo desde Recepciones.</div>`; fiBtn({ pedido: d.ya_cuadrado }); return; }
   const L = d.lineas || [];
   const cab = `<h3>Cuadrar con el pedido · ${escH(d.doc.nombre)}</h3>
     <p class="muted">${escH(lec.proveedor || '')} · nº ${escH(lec.numero || '?')} · ${coDate(lec.fecha || '')} · base ${eu(lec.base)} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
@@ -142,9 +144,66 @@ async function coPasar(did, opts = {}) {
           Entrada para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> → pestaña Recepciones.
           ${r.pendiente ? `<br>Lo que no ha venido queda en <b>${escH(r.pendiente)}</b> (borrador).` : ''}
           ${r.anadidas.length ? `<br>Añadidas al pedido: ${r.anadidas.map(escH).join(', ')}.` : ''}
-          ${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>`;
+          ${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>
+          <button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`;
+        $('#pc-fi').onclick = () => coFichas({ pedido_id: r.pedido_id });
         $('#pc-go').remove(); coDocs();
       } catch (e) { alertBox(e.message); $('#pc-go').disabled = false; $('#pc-go').textContent = '✓ Cuadrar y confirmar pedido'; }
+    };
+  };
+  pinta();
+}
+/* --- completar fichas desde la web del fabricante --- */
+async function coFichas(ref) {
+  const db = $('#co-db'); $('#co-drawer').hidden = false;
+  db.innerHTML = `<h3>Completar fichas</h3><p class="muted">Cargando artículos…</p>`;
+  let d; try { d = await jpost('/api/fichas/de_pedido', ref); } catch (e) { db.innerHTML = `<h3>Completar fichas</h3><p class="err">${escH(e.message)}</p>`; return; }
+  const P = d.productos, W = {};
+  P.forEach(p => p.marcar = !p.tiene_foto || !p.ean);
+  const pinta = (estado) => {
+    db.innerHTML = `<h3>Completar fichas · ${escH(d.pedido)}</h3><p class="muted">${escH(d.proveedor)} · ${P.length} artículos. Se busca la ficha del fabricante y solo se rellena lo que esté vacío.</p>
+      ${estado || ''}
+      <table class="co-t pc-t"><thead><tr><th></th><th>Ahora en Odoo</th><th>Encontrado en la web</th></tr></thead><tbody>
+      ${P.map((p, i) => { const w = W[p.product_id]; return `<tr><td><input type="checkbox" data-m="${i}" ${p.marcar ? 'checked' : ''}></td>
+        <td>${p.tiene_foto ? `<img class="fi-img" src="/api/fichas/foto_odoo/${p.product_id}">` : '<span class="pc-que">sin foto</span>'}<br><b>${escH(p.nombre)}</b><br>
+          <small>EAN: ${escH(p.ean) || '<span class="pc-que" style="display:inline">falta</span>'} · Ref.: ${escH(p.ref_interna) || '<span class="pc-que" style="display:inline">falta</span>'}${p.cod_proveedor ? ' · Cód. prov.: ' + escH(p.cod_proveedor) : ''}</small></td>
+        <td>${!w ? '<small class="muted">—</small>' : w.error ? `<span class="err-t">${escH(w.error)}</span><small class="muted">${escH(w.nota || '')}</small>` : `
+          ${w.foto_id ? `<img class="fi-img big" src="/api/fichas/foto/${w.foto_id}">` : `<span class="pc-que">sin foto válida</span>`}
+          ${w.seguro === false ? '<div class="pc-aviso">⚠️ No está seguro de que sea el mismo: revísalo</div>' : ''}
+          <div class="fi-d"><b>${escH(w.marca || '')} ${escH(w.nombre || '')}</b>
+          ${w.url_ficha ? `<a target="_blank" rel="noopener" href="${escH(w.url_ficha)}">ver ficha</a>` : ''}<br>
+          ${[['foto', w.foto_id && (p.tiene_foto ? 'cambiar foto' : 'poner foto')], ['ean', w.ean && !p.ean && 'EAN ' + w.ean], ['ref', !p.ref_interna && p.cod_proveedor && 'ref. ' + p.cod_proveedor],
+             ['descripcion', w.descripcion && !p.descripcion && 'descripción'], ['proveedor', p.x_proveedor === false && 'proveedor'], ['tpv', p.en_tpv === false && 'disponible en TPV']]
+            .filter(x => x[1]).map(([k, txt]) => `<label class="fi-op"><input type="checkbox" data-o="${i}" data-k="${k}" ${k === 'foto' && p.tiene_foto ? '' : 'checked'}> ${escH(txt)}</label>`).join('')}
+          ${w.descripcion ? `<small class="muted">${escH(w.descripcion)}</small>` : ''}<small class="muted">${escH(w.nota || '')}</small></div>`}</td></tr>`; }).join('')}
+      </tbody></table>
+      <button class="ac-go" id="fi-bus">🔎 Buscar en la web los marcados</button> <button class="ac-go" id="fi-ap" ${Object.keys(W).length ? '' : 'hidden'}>✓ Guardar en Odoo lo marcado</button><div id="fi-res"></div>`;
+    db.querySelectorAll('input[data-m]').forEach(c => c.onchange = () => P[c.dataset.m].marcar = c.checked);
+    $('#fi-bus').onclick = async () => {
+      const sel = P.filter(p => p.marcar); if (!sel.length) return alertBox('Marca algún artículo');
+      $('#fi-bus').disabled = true; $('#fi-bus').textContent = 'Buscando…';
+      try {
+        const { trabajo } = await jpost('/api/fichas/buscar', { productos: sel });
+        const tick = async () => {
+          const t = await api('/api/fichas/trabajo/' + trabajo); Object.assign(W, t.res);
+          if (!t.fin) { pinta(`<p class="pc-aviso">Buscando en las webs de los fabricantes: ${t.hechos} de ${t.total}… (tarda un poco, puedes dejarlo abierto)</p>`); $('#fi-bus').disabled = true; setTimeout(tick, 4000); }
+          else pinta(`<p class="muted">Búsqueda terminada. Revisa y marca lo que quieras guardar.</p>`);
+        };
+        tick();
+      } catch (e) { alertBox(e.message); $('#fi-bus').disabled = false; }
+    };
+    $('#fi-ap').onclick = async () => {
+      const items = [];
+      P.forEach((p, i) => { const w = W[p.product_id]; if (!w || w.error) return; const it = { product_id: p.product_id };
+        db.querySelectorAll(`input[data-o="${i}"]:checked`).forEach(c => { const k = c.dataset.k;
+          if (k === 'foto') { it.foto_id = w.foto_id; it.pisar_foto = p.tiene_foto; } if (k === 'ean') it.ean = w.ean; if (k === 'ref') it.ref = p.cod_proveedor;
+          if (k === 'descripcion') it.descripcion = w.descripcion; if (k === 'proveedor') it.proveedor = d.proveedor; if (k === 'tpv') it.tpv = true; });
+        if (Object.keys(it).length > 1) items.push(it); });
+      if (!items.length) return alertBox('No hay nada marcado para guardar');
+      $('#fi-ap').disabled = true;
+      try { const r = await jpost('/api/fichas/aplicar', { items });
+        $('#fi-res').innerHTML = `<div class="ac-docs"><b>✓ Guardado en Odoo</b>${r.hechos.map(h => '<br>' + escH(h)).join('')}${r.avisos.map(a => '<br>⚠️ ' + escH(a)).join('')}</div>`;
+      } catch (e) { alertBox(e.message); $('#fi-ap').disabled = false; }
     };
   };
   pinta();

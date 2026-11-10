@@ -461,3 +461,8 @@ _asistente.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope
 from . import bancos as _bancos  # noqa: E402
 
 _bancos.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)
+
+# ---------- fichas: fotos y datos desde la web del fabricante ----------
+from . import fichas as _fichas  # noqa: E402
+
+_fichas.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
