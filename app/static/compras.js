@@ -70,7 +70,7 @@ async function coPasar(did, releer) {
   let prov = d.proveedor;
   const eu = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
   const pinta = () => {
-    const nuevos = L.filter(l => !l.product_id).length;
+    const nuevos = L.filter(l => !l.product_id && l.crear).length, faltan = L.filter(l => !l.product_id && !l.crear && +l.cantidad > 0).length;
     const base = L.reduce((a, l) => a + (+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100), 0);
     db.innerHTML = `<h3>Pasar a compras · ${escH(d.doc.nombre)}</h3>
       <p class="muted">${(lec.tipo || d.doc.tipo) === 'factura' ? '🧾 Factura' : (lec.tipo === 'pedido' ? '📋 Confirmación de pedido' : '📦 Albarán')} ${escH(lec.numero || '')} · ${coDate(lec.fecha || '')} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
@@ -86,13 +86,18 @@ async function coPasar(did, releer) {
         <td><input type="number" step="any" min="0" data-i="${i}" data-k="precio" value="${l.precio}"></td>
         <td>${l.descuento ? l.descuento + '%' : ''}</td>
         <td>${l.product_id ? `<span class="pc-ok">✓ ${escH(l.producto)}</span> <small class="muted">${CO_COMO[l.como] || ''}</small> <a href="#" data-cam="${i}">cambiar</a>`
-          : `<span class="pc-new">＋ Se crea nuevo</span> <a href="#" data-cam="${i}">buscar en Odoo</a>`}
+          : l.crear ? `<span class="pc-new">＋ Se crea nuevo</span> <a href="#" data-cam="${i}">buscar en Odoo</a>`
+          : `<span class="pc-que">¿Cuál es?</span> ${(l.sugerencias || []).map(sg => `<a href="#" class="pc-sug" data-i="${i}" data-id="${sg.id}">${escH(sg.name)}</a>`).join('')}
+             <a href="#" data-cam="${i}">🔎 buscar otro</a> · <a href="#" class="pc-crea" data-i="${i}">＋ es nuevo, crearlo</a>`}
           <div class="pc-bus" data-b="${i}" hidden><input placeholder="Nombre, ref. o EAN"><div></div></div></td></tr>`).join('')}
       </tbody></table>
       <p class="muted">Base según líneas: <b>${eu(base)}</b>${lec.base ? ` · base del PDF: <b>${eu(lec.base)}</b>` : ''}${lec.total ? ` · total PDF: ${eu(lec.total)}` : ''}${lec.portes ? ` · portes: ${eu(lec.portes)}` : ''}</p>
       ${nuevos ? `<p class="pc-aviso">Se crearán <b>${nuevos}</b> artículos nuevos con su ref. y EAN del proveedor y el coste. Luego revisad el precio de venta y la foto.</p>` : ''}
       <p class="muted">Se crea el pedido de compra confirmado. La recepción queda en <b>Recepciones</b> para que almacén compruebe lo que llega${d.doc.tipo === 'factura' || lec.tipo === 'factura' ? ', y la factura queda en borrador enlazada al pedido para que Mayte le dé el OK' : ''}.</p>
-      <button class="ac-go" id="pc-go" ${prov ? '' : 'disabled'}>🛒 Crear pedido de compra</button><div id="pc-res"></div>`;
+      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas por decidir: elige el artículo de Odoo o márcalo como nuevo.</p>` : ''}
+      <button class="ac-go" id="pc-go" ${prov && !faltan ? '' : 'disabled'}>🛒 Crear pedido de compra</button><div id="pc-res"></div>`;
+    db.querySelectorAll('.pc-sug').forEach(a => a.onclick = e => { e.preventDefault(); const l = L[a.dataset.i]; l.product_id = +a.dataset.id; l.producto = a.textContent; l.como = 'a mano'; pinta(); });
+    db.querySelectorAll('.pc-crea').forEach(a => a.onclick = e => { e.preventDefault(); L[a.dataset.i].crear = true; pinta(); });
     $('#pc-rel').onclick = e => { e.preventDefault(); coPasar(did, true); };
     const cp = $('#pc-cprov'); if (cp) cp.onclick = e => { e.preventDefault(); $('#pc-bprov').hidden = false; $('#pc-qprov').focus(); };
     let tp; $('#pc-qprov').oninput = e => { clearTimeout(tp); tp = setTimeout(async () => {
@@ -104,13 +109,13 @@ async function coPasar(did, releer) {
     db.querySelectorAll('[data-cam]').forEach(a => a.onclick = e => {
       e.preventDefault(); const i = a.dataset.cam, box = db.querySelector(`[data-b="${i}"]`); box.hidden = false;
       const inp = box.querySelector('input'), out = box.querySelector('div'); inp.focus(); let t;
-      out.innerHTML = L[i].product_id ? `<a href="#" class="pc-opt" data-nuevo="1">＋ No es ninguno: crear artículo nuevo</a>` : '';
-      const bindNuevo = () => { const n = out.querySelector('[data-nuevo]'); if (n) n.onclick = ev => { ev.preventDefault(); L[i].product_id = null; L[i].producto = null; L[i].como = null; pinta(); }; };
+      out.innerHTML = `<a href="#" class="pc-opt" data-nuevo="1">＋ No es ninguno: crear artículo nuevo</a>`;
+      const bindNuevo = () => { const n = out.querySelector('[data-nuevo]'); if (n) n.onclick = ev => { ev.preventDefault(); L[i].product_id = null; L[i].producto = null; L[i].como = null; L[i].crear = true; pinta(); }; };
       bindNuevo();
       inp.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
         const r = await api(`/api/ac/productos?q=${encodeURIComponent(inp.value)}&company=${d.doc.empresa}`);
-        out.innerHTML = r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)}</a>`).join('') + (L[i].product_id ? `<a href="#" class="pc-opt" data-nuevo="1">＋ Crear artículo nuevo</a>` : '');
-        out.querySelectorAll('[data-id]').forEach(o => o.onclick = ev => { ev.preventDefault(); const p = r.find(x => x.id == o.dataset.id); L[i].product_id = p.id; L[i].producto = p.display_name; L[i].como = 'a mano'; pinta(); });
+        out.innerHTML = r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)}</a>`).join('') + `<a href="#" class="pc-opt" data-nuevo="1">＋ Crear artículo nuevo</a>`;
+        out.querySelectorAll('[data-id]').forEach(o => o.onclick = ev => { ev.preventDefault(); const p = r.find(x => x.id == o.dataset.id); L[i].product_id = p.id; L[i].producto = p.display_name; L[i].como = 'a mano'; L[i].crear = false; pinta(); });
         bindNuevo();
       }, 300); };
     });
@@ -118,7 +123,7 @@ async function coPasar(did, releer) {
       if (!confirm(`¿Crear y confirmar el pedido de compra a ${prov.display_name}?`)) return;
       $('#pc-go').disabled = true; $('#pc-go').textContent = 'Creando en Odoo…';
       try {
-        const r = await jpost(`/api/compras/docs/${did}/a_compras`, { partner_id: prov.id, lineas: L.map(l => ({ ...l, crear: !l.product_id })) });
+        const r = await jpost(`/api/compras/docs/${did}/a_compras`, { partner_id: prov.id, lineas: L.map(l => ({ ...l, crear: !l.product_id && !!l.crear, sugerencias: undefined })) });
         $('#pc-res').innerHTML = `<div class="ac-docs"><b>✓ Pedido ${escH(r.pedido)} confirmado.</b><br>
           Recepción para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> (en la pestaña Recepciones).
           ${r.factura ? `<br>Factura en borrador enlazada para Mayte (total ${eu(r.factura.total)}).` : ''}

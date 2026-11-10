@@ -228,6 +228,31 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 return ps[0]
         return None
 
+    VACIAS = {"de", "del", "la", "el", "con", "para", "por", "y", "en", "unidad", "unidades", "pack", "caja", "color", "colores",
+              "rotulador", "boligrafo", "bolígrafo", "cartucho", "toner", "tóner", "tinta", "original", "compatible", "generico", "genérico",
+              "negro", "azul", "rojo", "verde", "amarillo", "cyan", "magenta", "permanente", "marcador", "punta", "redonda", "biselada"}
+
+    def _sugerencias(ref, desc, cids):
+        """Artículos parecidos para que el usuario elija (no se casan solos para no equivocarse)."""
+        vistos, out = set(), []
+
+        def add(rs):
+            for p in rs:
+                if p["id"] not in vistos and len(out) < 6:
+                    vistos.add(p["id"]); out.append({"id": p["id"], "name": p["display_name"]})
+        palabras = [w for w in re.findall(r"[\w/\-\.]+", desc.lower()) if w not in VACIAS and len(w) >= 2]
+        nums = [w for w in palabras if re.search(r"\d", w)]
+        txt = [w for w in palabras if not re.search(r"\d", w)]
+        # marca + modelo (p. ej. "edding" + "500", "stabilo" "boss" "70")
+        claves = (txt[:1] + nums[:1]) if nums else txt[:2]
+        for intento in (txt[:2] + nums[:1], claves):
+            if len(intento) >= 2 and len(out) < 6:
+                dom = [("purchase_ok", "=", True)] + [("name", "ilike", w) for w in intento]
+                add(odoo.search_read("product.product", dom, ["display_name"], company_ids=cids, limit=6))
+        if ref and len(ref) >= 4 and len(out) < 6:
+            add(odoo.search_read("product.product", ["|", ("default_code", "ilike", ref), ("name", "ilike", ref)], ["display_name"], company_ids=cids, limit=4))
+        return out
+
     def _casar_lineas(lineas, partner_id, cids):
         out = []
         for l in lineas:
@@ -254,9 +279,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 pp = odoo.search_read("product.product", [("name", "=ilike", desc), ("purchase_ok", "=", True)], ["display_name"], company_ids=cids, limit=2)
                 if len(pp) == 1:
                     prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "nombre"
+            sug = []
+            if not prod:
+                sug = _sugerencias(ref, desc, cids)
             out.append({"ref": ref, "ean": ean, "descripcion": desc, "cantidad": _num(l.get("cantidad")), "precio": _num(l.get("precio")),
                         "descuento": _num(l.get("descuento")), "iva": _num(l.get("iva")) or 21.0,
-                        "product_id": prod["id"] if prod else None, "producto": prod["name"] if prod else None, "como": como})
+                        "product_id": prod["id"] if prod else None, "producto": prod["name"] if prod else None, "como": como,
+                        "sugerencias": sug})
         return out
 
     @app.post("/api/compras/docs/{did}/preparar")
