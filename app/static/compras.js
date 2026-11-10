@@ -40,23 +40,51 @@ document.querySelectorAll('.drop').forEach(d => {
   d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); coSubir([...e.dataTransfer.files].filter(f => /pdf$/i.test(f.name) || f.type === 'application/pdf'), inp.dataset.tipo); };
 });
 const CO_EST = { pendiente: ['Por recibir', 'b-warn'], recibido: ['Recibido', 'b-ok'], en_odoo: ['En Odoo (borrador)', 'b-prov'], contabilizada: ['Contabilizada', 'b-ok'], error: ['Error', 'b-bad'], descartado: ['Descartado', ''] };
+let CO_BJ_T = null;
+const BJ_PASO = { leyendo: ['⏳ Leyendo', 'b-warn'], pendiente: ['Falta hacer algo', 'b-bad'], espera: ['Esperando almacén', 'b-warn'],
+  ok: ['Lista para el OK', 'b-ok'], terminado: ['✓ Terminado', 'b-ok'], error: ['Error', 'b-bad'] };
 async function coDocs() {
   $('#co-emp-n').textContent = company === 'all' ? 'elige empresa arriba' : coEmpNombre();
-  try {
-    const l = (await api(`/api/compras/docs?company=${company}`)).filter(d => d.estado !== 'descartado');
-    $('#co-docs').innerHTML = l.length ? '' : '<p class="empty">Todavía no se ha subido nada</p>';
-    l.slice(0, 40).forEach(d => {
-      const [t, c] = CO_EST[d.estado] || [d.estado, ''];
-      $('#co-docs').insertAdjacentHTML('beforeend', `<div class="co-doc"><span class="ic">${d.tipo === 'albaran' ? '📦' : '🧾'}</span>
-        <a target="_blank" rel="noopener" href="/api/compras/pdf/${d.id}">${escH(d.nombre)}</a><span class="bdg ${c}">${t}</span>
-        <small class="muted">${escH(d.usuario)} · ${hora(d.subido)}</small>
-        ${d.compra ? `<span class="bdg b-ok" title="Entrada ${escH((d.compra.recepciones || []).join(', '))}">✓ ${escH(d.compra.pedido)}</span><button class="lnk co-fi" data-p="${escH(d.compra.pedido)}">📷 Fichas</button>`
-                   : `<button class="ac-go co-pc" data-id="${d.id}">⇄ Cuadrar con pedido</button>`}
-        ${d.nota ? `<small class="err-t">${escH(d.nota)}</small>` : ''}</div>`);
-    });
-    $('#co-docs').querySelectorAll('.co-pc').forEach(b => b.onclick = () => coPasar(b.dataset.id));
-    $('#co-docs').querySelectorAll('.co-fi').forEach(b => b.onclick = () => coFichas({ pedido: b.dataset.p }));
-  } catch (e) { showErr(e.message); }
+  clearTimeout(CO_BJ_T);
+  let l;
+  try { l = await api(`/api/compras/bandeja?company=${company}`); } catch (e) { showErr(e.message); return; }
+  const pend = l.filter(x => x.paso !== 'terminado'), fin = l.filter(x => x.paso === 'terminado');
+  const n = k => pend.filter(x => x.paso === k).length;
+  $('#bj-res').textContent = pend.length ? `${pend.length} en curso · ${n('pendiente')} por hacer · ${n('espera')} esperando almacén · ${n('ok')} listas para el OK${n('leyendo') ? ' · ' + n('leyendo') + ' leyendo' : ''}` : 'Todo terminado';
+  const eu2 = v => v || v === 0 ? eur(+v) : '';
+  const card = x => {
+    const [pt, pc] = BJ_PASO[x.paso] || [x.paso, ''];
+    const tipo = x.tipo === 'albaran' ? '📦 Albarán' : '🧾 Factura';
+    const btn = { cuadrar: `<button class="ac-go" data-a="cuadrar">⇄ Cuadrar con pedido</button>`, cuadrar_factura: `<button class="ac-go" data-a="cuadrar_factura">⇄ Cuadrar con pedido</button>`,
+      gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
+      ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
+      fichas: `<button class="lnk" data-a="fichas">📷 Fichas</button>`, releer: `<button class="lnk" data-a="releer">volver a leer</button>`,
+      descartar: `<button class="lnk del" data-a="descartar">descartar</button>` };
+    return `<div class="bj-card p-${x.paso}" data-id="${x.id}"><div class="bj-1"><span>${tipo}</span><b>${escH(x.proveedor || x.nombre)}</b>
+        <span class="bdg ${pc}">${pt}</span></div>
+      <div class="bj-2">${x.numero ? 'Nº ' + escH(x.numero) : ''} ${x.fecha ? '· ' + coDate(x.fecha) : ''} ${x.total ? '· <b>' + eu2(x.total) + '</b>' : ''}
+        ${x.tipo_leido && x.tipo_leido !== (x.tipo === 'albaran' ? 'albaran' : 'factura') ? `<small class="muted">(el PDF parece ${escH(x.tipo_leido)})</small>` : ''}
+        · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
+      <div class="bj-3">${escH(x.texto || '')}</div>
+      <div class="bj-4">${(x.acciones || []).map(a => btn[a] || '').join(' ')}
+        ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
+  };
+  $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
+  $('#bj-nfin').textContent = fin.length; $('#bj-fin-l').innerHTML = fin.map(card).join('');
+  document.querySelectorAll('.bj-card [data-a]').forEach(b => b.onclick = async () => {
+    const x = l.find(y => y.id === b.closest('.bj-card').dataset.id), a = b.dataset.a;
+    try {
+      if (a === 'cuadrar') return coPasar(x.id);
+      if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
+      if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
+      if (a === 'releer') { await jpost(`/api/compras/docs/${x.id}/releer`, {}); return coDocs(); }
+      if (a === 'descartar') { if (!confirm('¿Descartar este documento de la bandeja? (no borra nada de Odoo)')) return; await fetch('/api/compras/docs/' + x.id, { method: 'DELETE' }); return coDocs(); }
+      if (a === 'recibido' && !confirm('¿Confirmas que el material de esta factura ha llegado? Quedará apuntado a tu nombre.')) return;
+      if (a === 'gasto' || a === 'recibido' || a === 'quitar_marca') { await jpost(`/api/compras/facturas/${x.odoo_id}/marcar`, { tipo: a === 'quitar_marca' ? '' : a }); return coDocs(); }
+      if (a === 'ok') { b.disabled = true; b.textContent = 'Contabilizando…'; await jpost(`/api/compras/facturas/${x.odoo_id}/ok?company=${company}`, {}); alertBox('Factura contabilizada'); coBadge(); return coDocs(); }
+    } catch (e) { alertBox(e.message); coDocs(); }
+  });
+  if (pend.some(x => x.paso === 'leyendo') && !$('#co-subir').hidden) CO_BJ_T = setTimeout(coDocs, 6000);
 }
 /* --- cuadrar un albarán/factura con el pedido de compra abierto del proveedor --- */
 async function coPasar(did, opts = {}) {
@@ -333,7 +361,7 @@ async function coFacCuadrar(x) {
     db.querySelectorAll('[data-p]').forEach(bt => bt.onclick = async () => {
       bt.disabled = true;
       try { const r = await jpost(`/api/compras/facturas/${x.id}/enlazar`, { pedido_id: +bt.dataset.p });
-        db.insertAdjacentHTML('beforeend', `<div class="ac-docs">✓ Factura cuadrada con ${escH(r.pedido)} · base ${eur(r.base)} (la del PDF era ${eur(x.base)}). Revisa la diferencia si la hay.</div>`); coFac();
+        db.insertAdjacentHTML('beforeend', `<div class="ac-docs">✓ Factura cuadrada con ${escH(r.pedido)} · base ${eur(r.base)} (la del PDF era ${eur(x.base)}). Revisa la diferencia si la hay.</div>`); coFac(); coDocs();
       } catch (e) { alertBox(e.message); bt.disabled = false; }
     });
   } catch (e) { db.innerHTML += `<p class="err">${escH(e.message)}</p>`; }
