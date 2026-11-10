@@ -372,8 +372,31 @@ async function faCargar() {
   $('#fa-l').innerHTML = '<p class="muted">Cargando albaranes…</p>'; $('#fa-out').innerHTML = '';
   try { FA = await api('/api/facturar/albaranes'); } catch (e) { $('#fa-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
   FA.grupos.forEach(g => g.albaranes.forEach(a => a.marcado = false));
-  faPinta();
+  $('#fa-emp').innerHTML = '<option value="">la de cada cliente</option>' + FA.empresas.map(e => `<option value="${e.id}">${escH(e.nombre.split(' ')[0])}</option>`).join('');
+  if (!$('#fa-fecha').value) $('#fa-fecha').value = new Date().toISOString().slice(0, 10);
+  faPinta(); feCargar();
 }
+$('#fa-emp').onchange = () => { const v = +$('#fa-emp').value; if (!v) return; FA.grupos.forEach(g => { if (g.albaranes.some(a => a.marcado)) g.empresa = v; }); $('#fa-emp').value = ''; faPinta(); };
+let FE = [];
+async function feCargar() {
+  try { FE = await api('/api/facturar/sin_enviar'); } catch (e) { $('#fe-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
+  $('#fe-n').textContent = FE.length;
+  $('#fe-l').innerHTML = FE.length ? `<table class="co-t pc-t"><tbody>${FE.map((f, i) => `<tr><td><input type="checkbox" data-f="${i}" ${f.marcado ? 'checked' : ''} ${f.email ? '' : 'disabled'}></td>
+    <td><b>${escH(f.nombre)}</b>${f.abono ? ' <span class="bdg b-warn">abono</span>' : ''}</td><td>${escH(f.cliente)}</td><td>${f.email ? escH(f.email) : '<span class="err-t" style="display:inline">sin email</span>'}</td>
+    <td>${coDate(f.fecha)}</td><td>${escH(f.empresa)}</td><td>${eur(f.total)}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">Todas las facturas están enviadas</p>';
+  $('#fe-l').querySelectorAll('[data-f]').forEach(c => c.onchange = () => FE[c.dataset.f].marcado = c.checked);
+}
+$('#fe-all').onchange = e => { FE.forEach(f => f.marcado = !!f.email && e.target.checked); feCargar2(); };
+function feCargar2() { $('#fe-l').querySelectorAll('[data-f]').forEach(c => c.checked = !!FE[c.dataset.f].marcado); }
+$('#fe-go').onclick = async () => {
+  const ids = FE.filter(f => f.marcado).map(f => f.id); if (!ids.length) return alertBox('Marca alguna factura');
+  if (!confirm(`¿Enviar ${ids.length} factura(s) por email a sus clientes?`)) return;
+  $('#fe-go').disabled = true; $('#fe-res').textContent = 'Enviando…';
+  try { const r = await jpost('/api/facturar/enviar', { ids });
+    $('#fe-res').textContent = `${r.enviadas.length} enviadas` + (r.errores.length ? ` · ${r.errores.length} con problema: ${r.errores.join(' | ')}` : '');
+    await feCargar();
+  } catch (e) { alertBox(e.message); } finally { $('#fe-go').disabled = false; }
+};
 function faPinta() {
   const q = ($('#fa-q').value || '').toLowerCase();
   const opt = sel => FA.empresas.map(e => `<option value="${e.id}" ${e.id === sel ? 'selected' : ''}>${escH(e.nombre.split(' ')[0])}</option>`).join('');
@@ -401,12 +424,14 @@ $('#fa-q').oninput = () => FA && faPinta();
 async function faFacturar(modo) {
   const grupos = FA.grupos.map(g => ({ empresa: g.empresa, picking_ids: g.albaranes.filter(a => a.marcado).map(a => a.id) })).filter(g => g.picking_ids.length);
   if (!grupos.length) return alertBox('Marca algún albarán');
-  if (!confirm(modo === 'directo' ? '¿Facturar y contabilizar directamente los albaranes marcados?' : '¿Crear las facturas en borrador?')) return;
+  const fch = $('#fa-fecha').value ? coDate($('#fa-fecha').value) : 'hoy';
+  if (!confirm((modo === 'directo' ? '¿Facturar y contabilizar directamente los albaranes marcados' : '¿Crear las facturas en borrador') + ` con fecha ${fch}?`)) return;
   $('#fa-out').innerHTML = '<p class="muted">Facturando en Odoo…</p>';
   try {
-    const r = await jpost('/api/facturar/albaranes', { grupos, modo });
+    const r = await jpost('/api/facturar/albaranes', { grupos, modo, fecha: $('#fa-fecha').value });
     $('#fa-out').innerHTML = `<div class="ac-docs"><b>✓ Hecho</b>${r.hechos.map(h => h.facturas.map(f => `<br>${escH(f.nombre)} · ${escH(f.cliente)} · ${eur(f.total)} ${f.estado === 'draft' ? '(borrador)' : ''}
-      <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${f.id}">abrir</a>`).join('')).join('')}</div>`;
+      <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${f.id}">abrir</a>`).join('') + (h.errores || []).map(e => `<br>⚠️ ${escH(e)}`).join('')).join('')}
+      ${modo === 'directo' ? '<br>Ya puedes enviarlas por email abajo, en "Facturas sin enviar".' : ''}</div>`;
     const out = $('#fa-out').innerHTML; await faCargar(); $('#fa-out').innerHTML = out;
   } catch (e) { $('#fa-out').innerHTML = `<p class="err">${escH(e.message)}</p>`; }
 }

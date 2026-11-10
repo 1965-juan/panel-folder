@@ -84,8 +84,14 @@
       <div class="recu-top"><b>Albaranes servidos sin facturar</b><span class="muted">Cada cliente lleva marcada la empresa de su última factura. Cámbiala si hace falta, marca y factura.</span>
         <input id="fa-q" type="search" placeholder="Buscar cliente o albarán…"></div>
       <div id="fa-l"></div>
-      <div class="fa-bar"><span id="fa-res"></span><button class="btn" id="fa-bor">Crear borradores</button><button class="ac-go" id="fa-dir">Facturar directamente</button></div>
+      <div class="fa-bar fa-fix"><span id="fa-res"></span>
+        <label>Empresa de los marcados <select id="fa-emp"><option value="">la de cada cliente</option></select></label>
+        <label>Fecha de factura <input type="date" id="fa-fecha"></label>
+        <button class="btn" id="fa-bor">Crear borradores</button><button class="ac-go" id="fa-dir">Facturar directamente</button></div>
       <div id="fa-out"></div>
+      <details id="fa-env" open><summary>Facturas sin enviar por email (<span id="fe-n">0</span>)</summary>
+        <div class="fa-bar"><label><input type="checkbox" id="fe-all"> marcar todas</label><button class="ac-go" id="fe-go">✉ Enviar las marcadas por email</button><span id="fe-res" class="muted"></span></div>
+        <div id="fe-l"></div></details>
     </div>
     <div id="co-ent" class="co-pane" hidden>
       <div class="recu-top"><button id="en-prev">◀</button><b id="en-mes"></b><button id="en-next">▶</button>

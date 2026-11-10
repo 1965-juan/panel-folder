@@ -306,3 +306,4 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .fa-g{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:8px 0}.fa-h{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .fa-h select{padding:4px 8px;border-radius:6px;border:1.5px solid #cfc9bd;font-weight:600}.fa-a{display:block;font-size:13px;margin:3px 0 3px 22px}
 .fa-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}.en-k{min-width:280px}
+.fa-fix{position:sticky;bottom:0;background:#faf8f4;border-top:1px solid var(--line);padding:8px 0;z-index:3}.fa-fix label{font-size:13px;display:flex;gap:6px;align-items:center}.fa-fix input,.fa-fix select{padding:5px 8px;border:1.5px solid #cfc9bd;border-radius:6px;font:inherit}

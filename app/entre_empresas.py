@@ -138,7 +138,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
     async def facturar(request: Request):
         u, cids = ctx(request)
         b = await request.json()
-        modo = "action_create_and_post" if b.get("modo") == "directo" else "action_create_draft"
+        directo = b.get("modo") == "directo"
+        fecha = b.get("fecha") or ""
+        if fecha:
+            try:
+                dt.date.fromisoformat(fecha)
+            except ValueError:
+                raise HTTPException(400, "Fecha no válida")
         por_emp = {}
         for g in b.get("grupos") or []:
             if int(g["empresa"]) not in cids:
@@ -154,12 +160,70 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 ctx_w = {"active_model": "stock.picking", "active_ids": ids, "allowed_company_ids": [emp] + [c for c in TODAS if c != emp]}
                 wid = odoo.call("stock.picking.invoice.wizard", "create", TODAS, vals_list=[{"picking_ids": [[6, 0, ids]], "company_id": emp, "journal_id": jr[0]["id"]}], context=ctx_w)
                 wid = wid[0] if isinstance(wid, list) else wid
-                res = odoo.call("stock.picking.invoice.wizard", modo, TODAS, ids=[wid], context=ctx_w) or {}
+                # siempre en borrador primero, para poder poner la fecha elegida; luego se contabiliza si se pidió "directo"
+                res = odoo.call("stock.picking.invoice.wizard", "action_create_draft", TODAS, ids=[wid], context=ctx_w) or {}
                 inv = [res["res_id"]] if res.get("res_id") else next((d[2] for d in res.get("domain") or [] if isinstance(d, (list, tuple)) and d[0] == "id"), [])
-                fs = odoo.search_read("account.move", [("id", "in", inv)], ["name", "amount_total", "partner_id", "state"], company_ids=TODAS) if inv else []
-                hechos.append({"empresa": emp, "albaranes": len(ids), "facturas": [{"id": f["id"], "nombre": f["name"] or "borrador", "cliente": f["partner_id"][1],
-                                                                                   "total": f["amount_total"], "estado": f["state"]} for f in fs]})
+                errores = []
+                if inv and fecha:
+                    odoo.call("account.move", "write", TODAS, ids=inv, vals={"invoice_date": fecha, "date": fecha})
+                if inv and directo:
+                    for i in inv:
+                        try:
+                            odoo.call("account.move", "action_post", TODAS, ids=[i])
+                        except Exception as e:
+                            errores.append(str(e)[:200])
+                fs = odoo.search_read("account.move", [("id", "in", inv)], ["name", "amount_total", "partner_id", "state", "invoice_date"], company_ids=TODAS) if inv else []
+                hechos.append({"empresa": emp, "albaranes": len(ids), "errores": errores,
+                               "facturas": [{"id": f["id"], "nombre": f["name"] if f["state"] == "posted" else "borrador", "cliente": f["partner_id"][1],
+                                             "total": f["amount_total"], "estado": f["state"], "fecha": f.get("invoice_date")} for f in fs]})
             return {"hechos": hechos}
+        return guard(run)
+
+    @app.get("/api/facturar/sin_enviar")
+    def sin_enviar(request: Request, dias: int = 60):
+        """Facturas de cliente contabilizadas que todavía no se han enviado por email."""
+        u, cids = ctx(request)
+
+        def run():
+            desde = (dt.date.today() - dt.timedelta(days=dias)).isoformat()
+            fs = odoo.search_read("account.move", [("move_type", "in", ["out_invoice", "out_refund"]), ("state", "=", "posted"), ("is_move_sent", "=", False),
+                                                   ("invoice_date", ">=", desde), ("journal_id.name", "not ilike", "TPV"), ("pos_order_ids", "=", False)],
+                                  ["name", "partner_id", "invoice_date", "amount_total", "company_id", "move_type"], company_ids=cids, order="invoice_date desc, id desc", limit=300)
+            pids = list({f["partner_id"][0] for f in fs})
+            em = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", pids)], ["email"], company_ids=cids)} if pids else {}
+            return [{"id": f["id"], "nombre": f["name"], "cliente": f["partner_id"][1], "email": em.get(f["partner_id"][0], ""), "fecha": f["invoice_date"],
+                     "total": f["amount_total"], "empresa": f["company_id"][1].split()[0], "abono": f["move_type"] == "out_refund"} for f in fs]
+        return guard(run)
+
+    @app.post("/api/facturar/enviar")
+    async def enviar(request: Request):
+        """Envía por email cada factura a su cliente con la plantilla de factura de Odoo (con el PDF) y la marca como enviada."""
+        u, cids = ctx(request)
+        b = await request.json()
+        ids = [int(i) for i in b.get("ids") or []]
+        if not ids:
+            raise HTTPException(400, "No hay facturas marcadas")
+
+        def run():
+            tpl = odoo.search_read("mail.template", [("model", "=", "account.move"), "|", ("name", "ilike", "factura"), ("name", "ilike", "invoice")],
+                                   ["name"], company_ids=cids, order="id", limit=5)
+            if not tpl:
+                raise HTTPException(400, "No encuentro la plantilla de email de facturas en Odoo")
+            tid = next((t["id"] for t in tpl if "envío" in t["name"].lower() or "sending" in t["name"].lower()), tpl[0]["id"])
+            fs = odoo.search_read("account.move", [("id", "in", ids), ("state", "=", "posted")], ["name", "partner_id", "company_id"], company_ids=TODAS)
+            ok, mal = [], []
+            for f in fs:
+                p = odoo.search_read("res.partner", [("id", "=", f["partner_id"][0])], ["email"], company_ids=TODAS)
+                if not p or not p[0].get("email"):
+                    mal.append(f"{f['name']}: el cliente no tiene email"); continue
+                try:
+                    c = f["company_id"][0]
+                    odoo.call("mail.template", "send_mail", [c] + [x for x in TODAS if x != c], ids=[tid], res_id=f["id"], force_send=True)
+                    odoo.call("account.move", "write", [c] + [x for x in TODAS if x != c], ids=[f["id"]], vals={"is_move_sent": True})
+                    ok.append(f["name"])
+                except Exception as e:
+                    mal.append(f"{f['name']}: {str(e)[:150]}")
+            return {"enviadas": ok, "errores": mal}
         return guard(run)
 
     # ---------------- Cuentas entre empresas ----------------
