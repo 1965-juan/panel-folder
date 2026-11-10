@@ -126,7 +126,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 g["total"] += imp.get(p["id"], 0)
             for cp, g in grupos.items():
                 u_f = ultimas.get(cp)
-                g["empresa"] = u_f["company_id"][0] if u_f else g["albaranes"][0]["empresa_albaran"]
+                ea = g["albaranes"][0]["empresa_albaran"]
+                # albaranes del almacén central: Distriplus o Logipaper según la última factura; los de otra empresa (Ingraf) se facturan por ella
+                g["empresa"] = u_f["company_id"][0] if (u_f and ea == DISTRI and u_f["company_id"][0] in (DISTRI, LOGI)) else ea
                 g["ultima"] = f"{u_f['name']} ({u_f['company_id'][1].split()[0]}, {u_f['invoice_date']})" if u_f else ""
                 g["total"] = round(g["total"], 2)
             return {"empresas": [{"id": k, "nombre": v} for k, v in emp.items()], "grupos": sorted(grupos.values(), key=lambda g: g["cliente"].lower())}
