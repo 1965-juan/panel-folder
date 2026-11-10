@@ -869,7 +869,18 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     pick.setdefault(pk["purchase_id"][0], []).append(pk)
             # facturas en Odoo
             mids = [d["odoo_id"] for d in ds if d["odoo_model"] == "account.move" and d["odoo_id"]]
-            mv = {m["id"]: m for m in odoo.search_read("account.move", [("id", "in", mids)], ["state", "name", "partner_id", "ref", "amount_total", "amount_untaxed", "invoice_date", "invoice_origin"], company_ids=cids)} if mids else {}
+            FM = ["state", "name", "partner_id", "ref", "amount_total", "amount_untaxed", "invoice_date", "invoice_origin", "move_type"]
+            mv = {m["id"]: m for m in odoo.search_read("account.move", [("id", "in", mids)], FM, company_ids=cids)} if mids else {}
+            # factura borrada y rehecha en Odoo: volver a enlazarla por su nº
+            for d in ds:
+                if d["odoo_model"] == "account.move" and d["odoo_id"] and d["odoo_id"] not in mv and (d["lectura"] or {}).get("numero"):
+                    otra = odoo.search_read("account.move", [("ref", "=ilike", d["lectura"]["numero"].strip()), ("move_type", "in", ["in_invoice", "in_refund"]),
+                                                             ("state", "!=", "cancel")], FM, company_ids=cids, limit=1)
+                    if otra:
+                        mv[otra[0]["id"]] = otra[0]
+                        d["odoo_id"] = otra[0]["id"]; mids.append(otra[0]["id"])
+                        with lock, con() as c:
+                            c.execute("UPDATE docs SET odoo_id=? WHERE id=?", (otra[0]["id"], d["id"]))
             ln = odoo.search_read("account.move.line", [("move_id", "in", mids), ("display_type", "=", "product")], ["move_id", "quantity", "purchase_line_id"], company_ids=cids) if mids else []
             pls = [l["purchase_line_id"][0] for l in ln if l.get("purchase_line_id")]
             pol = {p["id"]: p for p in odoo.search_read("purchase.order.line", [("id", "in", pls)], ["qty_received", "order_id"], company_ids=cids)} if pls else {}
@@ -921,6 +932,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                             e.update(paso="espera", texto=f"Cuadrada con {', '.join(pedidos)}. Falta que almacén reciba el material", acciones=["recibido"])
                         else:
                             e.update(paso="ok", texto=f"Cuadrada con {', '.join(pedidos)} y material recibido. Lista para el OK de Mayte", acciones=["ok"])
+                        if _num(lec.get("total")) < 0 and m.get("move_type") == "in_invoice":
+                            e["texto"] += " · ⚠️ El PDF es un ABONO (importe negativo) pero en Odoo está como factura: hay que pasarla a factura rectificativa"
                         if not m.get("invoice_date") or not m.get("partner_id"):
                             e["texto"] += " · en Odoo falta " + ", ".join(x for x, v in (("proveedor", m.get("partner_id")), ("fecha", m.get("invoice_date"))) if not v)
                     if m:
