@@ -36,11 +36,14 @@ def allowed_users():
     return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion"]
 
 
 def modulos_de(u):
-    return extra_users().get(u, {}).get("modulos") or TODOS_MODULOS
+    mods = list(extra_users().get(u, {}).get("modulos") or TODOS_MODULOS)
+    if "compras" in mods and "facturacion" not in mods:  # usuarios creados antes de separar Facturación (Mayte)
+        mods.append("facturacion")
+    return mods
 DEMO = os.environ.get("PANEL_DEMO") == "1"
 odoo = DemoOdoo() if DEMO else Odoo()
 ODOO_URL = os.environ.get("ODOO_URL", "").rstrip("/")

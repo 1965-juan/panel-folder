@@ -16,6 +16,7 @@
     <a href="/presupuestos" data-m="presupuestos">Presupuestos</a>
     <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
     <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
+    <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
     <a class="off" title="Próximamente">Inventarios</a>
@@ -52,7 +53,7 @@
   </section>
 
   <section id="v-co" hidden>
-    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button><button data-t="alb">🧾 Facturar albaranes</button><button data-t="ent">↔ Entre empresas</button></div>
+    <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button></div>
     <div id="co-subir" class="co-pane">
       <div class="co-drops">
         <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra para recibir el material</small></label>
@@ -80,7 +81,16 @@
       <div id="bn-prev"></div>
       <h3>Sin conciliar <a class="lnk" id="bn-odoo" target="_blank" rel="noopener">Conciliar en Odoo</a></h3><div id="bn-pend"></div>
     </div>
-    <div id="co-alb" class="co-pane" hidden>
+    <div id="co-recu" class="co-pane" hidden>
+      <div class="recu-top"><button id="rc-prev">◀</button><b id="rc-mes"></b><button id="rc-next">▶</button>
+        <div class="recu-bar"><div id="rc-bar"></div></div><span id="rc-txt"></span><button id="rc-add" class="btn">+ Añadir recurrente</button></div>
+      <div class="co-two"><div><h3>Faltan por llegar</h3><div id="rc-faltan"></div></div><div><h3>Ya han llegado</h3><div id="rc-ok"></div></div></div>
+    </div>
+  </section>
+
+  <section id="v-fa" hidden>
+    <div class="wa-tabs fa-tabs"><button data-t="alb" class="on">🧾 Facturar albaranes</button><button data-t="env">✉ Enviar facturas</button><button data-t="ent">↔ Entre empresas</button></div>
+    <div id="co-alb" class="co-pane">
       <div class="recu-top"><b>Albaranes servidos sin facturar</b><span class="muted">Cada cliente lleva marcada la empresa de su última factura. Cámbiala si hace falta, marca y factura.</span>
         <input id="fa-q" type="search" placeholder="Buscar cliente o albarán…"></div>
       <div id="fa-l"></div>
@@ -89,20 +99,15 @@
         <label>Fecha de factura <input type="date" id="fa-fecha"></label>
         <button class="btn" id="fa-bor">Crear borradores</button><button class="ac-go" id="fa-dir">Facturar directamente</button></div>
       <div id="fa-out"></div>
-      <details id="fa-env" open><summary>Facturas sin enviar por email (<span id="fe-n">0</span>)</summary>
-        <div class="fa-bar"><label><input type="checkbox" id="fe-all"> marcar todas</label><button class="ac-go" id="fe-go">✉ Enviar las marcadas por email</button><span id="fe-res" class="muted"></span></div>
-        <div id="fe-l"></div></details>
     </div>
     <div id="co-ent" class="co-pane" hidden>
       <div class="recu-top"><button id="en-prev">◀</button><b id="en-mes"></b><button id="en-next">▶</button>
         <span class="muted">Material del almacén central entre Distriplus y Logipaper · última compra + 5 %</span></div>
       <div id="en-box"></div>
     </div>
-    <div id="co-recu" class="co-pane" hidden>
-      <div class="recu-top"><button id="rc-prev">◀</button><b id="rc-mes"></b><button id="rc-next">▶</button>
-        <div class="recu-bar"><div id="rc-bar"></div></div><span id="rc-txt"></span><button id="rc-add" class="btn">+ Añadir recurrente</button></div>
-      <div class="co-two"><div><h3>Faltan por llegar</h3><div id="rc-faltan"></div></div><div><h3>Ya han llegado</h3><div id="rc-ok"></div></div></div>
-    </div>
+      <div id="co-env" class="co-pane" hidden><h3>Facturas sin enviar por email (<span id="fe-n">0</span>)</h3>
+        <div class="fa-bar"><label><input type="checkbox" id="fe-all"> marcar todas</label><button class="ac-go" id="fe-go">✉ Enviar las marcadas por email</button><span id="fe-res" class="muted"></span></div>
+        <div id="fe-l"></div></div>
   </section>
 
   <section id="v-ac" hidden>

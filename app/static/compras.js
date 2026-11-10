@@ -9,8 +9,8 @@ async function coBadge() {
 function coTab(t) {
   CO_TAB = t;
   document.querySelectorAll('.co-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  ['subir', 'rec', 'fac', 'recu', 'ban', 'alb', 'ent'].forEach(k => $('#co-' + k).hidden = k !== t);
-  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend, alb: faCargar, ent: enCargar })[t]();
+  ['subir', 'rec', 'fac', 'recu', 'ban'].forEach(k => $('#co-' + k).hidden = k !== t);
+  ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend })[t]();
 }
 document.querySelectorAll('.co-tabs button').forEach(b => b.onclick = () => coTab(b.dataset.t));
 function coOpen() {
@@ -374,8 +374,17 @@ async function faCargar() {
   FA.grupos.forEach(g => g.albaranes.forEach(a => a.marcado = false));
   $('#fa-emp').innerHTML = '<option value="">la de cada cliente</option>' + FA.empresas.map(e => `<option value="${e.id}">${escH(e.nombre.split(' ')[0])}</option>`).join('');
   if (!$('#fa-fecha').value) $('#fa-fecha').value = new Date().toISOString().slice(0, 10);
-  faPinta(); feCargar();
+  faPinta();
 }
+let FA_TAB = 'alb';
+function faTab(t) {
+  FA_TAB = t;
+  document.querySelectorAll('.fa-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  ['alb', 'env', 'ent'].forEach(k => $('#co-' + k).hidden = k !== t);
+  ({ alb: faCargar, env: feCargar, ent: enCargar })[t]();
+}
+document.querySelectorAll('.fa-tabs button').forEach(b => b.onclick = () => faTab(b.dataset.t));
+function faOpen() { faTab(FA_TAB); }
 $('#fa-emp').onchange = () => { const v = +$('#fa-emp').value; if (!v) return; FA.grupos.forEach(g => { if (g.albaranes.some(a => a.marcado)) g.empresa = v; }); $('#fa-emp').value = ''; faPinta(); };
 let FE = [];
 async function feCargar() {
@@ -431,7 +440,7 @@ async function faFacturar(modo) {
     const r = await jpost('/api/facturar/albaranes', { grupos, modo, fecha: $('#fa-fecha').value });
     $('#fa-out').innerHTML = `<div class="ac-docs"><b>✓ Hecho</b>${r.hechos.map(h => h.facturas.map(f => `<br>${escH(f.nombre)} · ${escH(f.cliente)} · ${eur(f.total)} ${f.estado === 'draft' ? '(borrador)' : ''}
       <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${f.id}">abrir</a>`).join('') + (h.errores || []).map(e => `<br>⚠️ ${escH(e)}`).join('')).join('')}
-      ${modo === 'directo' ? '<br>Ya puedes enviarlas por email abajo, en "Facturas sin enviar".' : ''}</div>`;
+      ${modo === 'directo' ? '<br>Ya puedes enviarlas por email en la pestaña "✉ Enviar facturas".' : ''}</div>`;
     const out = $('#fa-out').innerHTML; await faCargar(); $('#fa-out').innerHTML = out;
   } catch (e) { $('#fa-out').innerHTML = `<p class="err">${escH(e.message)}</p>`; }
 }
@@ -517,7 +526,7 @@ function coRecForm(x) {
 /* --- usuarios (solo Juan) --- */
 $('#usr-btn').onclick = async () => {
   const l = await api('/api/usuarios'), emps = [...$('#company').options].filter(o => o.value !== 'all').map(o => o.textContent);
-  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Compras' };
+  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación' };
   $('#co-db').innerHTML = `<h3>Usuarios del panel</h3><table class="co-t"><thead><tr><th>Usuario</th><th>Empresas</th><th>Apartados</th><th>Contraseña</th></tr></thead><tbody>
     ${l.map(u => `<tr><td><b>${escH(u.usuario)}</b></td><td>${escH(u.empresas.join(', '))}</td><td>${u.modulos.map(m => MOD_N[m]).join(', ')}</td><td>${u.tiene_clave ? 'puesta' : '<i>la elige al entrar</i>'}</td></tr>`).join('')}</tbody></table>
     <h4>Añadir o cambiar usuario</h4>
