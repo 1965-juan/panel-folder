@@ -17,6 +17,7 @@
     <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
     <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
     <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
+    <a href="#correo" data-v="correo" data-m="correo">Correo <span class="nb" id="nb-ma" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
     <a class="off" title="Próximamente">Inventarios</a>
@@ -108,6 +109,14 @@
       <div id="co-env" class="co-pane" hidden><h3>Facturas sin enviar por email (<span id="fe-n">0</span>)</h3>
         <div class="fa-bar"><label><input type="checkbox" id="fe-all"> marcar todas</label><button class="ac-go" id="fe-go">✉ Enviar las marcadas por email</button><span id="fe-res" class="muted"></span></div>
         <div id="fe-l"></div></div>
+  </section>
+
+  <section id="v-ma" hidden>
+    <div class="ma">
+      <div class="ma-l"><div class="wa-tabs ma-tabs"><button data-e="pendientes" class="on">Por hacer</button><button data-e="hechos">Hechos</button></div>
+        <input id="ma-q" type="search" placeholder="Buscar remitente, asunto…"><div id="ma-list"></div></div>
+      <div class="ma-c" id="ma-c"><p class="empty">Elige un correo de la lista</p></div>
+    </div>
   </section>
 
   <section id="v-ac" hidden>
@@ -210,5 +219,6 @@
 <script src="/static/app.js"></script>
 <script src="/static/ac.js"></script>
 <script src="/static/compras.js"></script>
+<script src="/static/correo.js"></script>
 </body>
 </html>

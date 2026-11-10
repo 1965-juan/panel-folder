@@ -131,14 +131,14 @@ async function loadWeb(badgeOnly) {
   } catch (e) { showErr(e.message); }
 }
 function route() {
-  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion' })[location.hash] || 'ventas';
+  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo' })[location.hash] || 'ventas';
   if (!location.hash && MODS.includes('compras') && !MODS.includes('ac')) v = 'compras';
   if (MODS.length && !MODS.includes(v)) v = MODS.includes('compras') ? 'compras' : MODS[0];
   document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
-  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion';
-  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación' })[v] || 'Ventas';
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion'; $('#v-ma').hidden = v !== 'correo';
+  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo' })[v] || 'Ventas';
   $('#q').hidden = v !== 'ventas'; $('#company').hidden = !['ventas', 'ac', 'compras'].includes(v);
-  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else load();
+  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else if (v === 'correo') maOpen(); else load();
 }
 window.addEventListener('hashchange', route);
 setInterval(() => loadWeb(true), 5 * 60 * 1000);
@@ -300,7 +300,17 @@ $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhoo
     const t = document.querySelector('section:not([hidden]) .wa-tabs button.on, section:not([hidden]) .ac-tabs button.on');
     return v.replace(/\d+/g, '').trim() + (t ? ' › ' + t.textContent.trim() : '');
   };
-  const md = t => escH(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^[·\-•] (.*)$/gm, '<span class="as-li">• $1</span>').replace(/\n/g, '<br>');
+  const inl = t => escH(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  const md = t => {
+    const out = []; let tabla = [];
+    const cierra = () => { if (!tabla.length) return; const filas = tabla.filter(f => !/^\|?\s*:?-{2,}/.test(f.replace(/\|/g, '|').trim().replace(/^\|/, '')));
+      out.push('<table class="as-t">' + filas.map((f, i) => '<tr>' + f.trim().replace(/^\||\|$/g, '').split('|').map(c => `<${i ? 'td' : 'th'}>${inl(c.trim())}</${i ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table>'); tabla = []; };
+    t.split('\n').forEach(l => { if (/^\s*\|/.test(l)) { tabla.push(l); return; } cierra();
+      if (/^\s*[·\-•] /.test(l)) out.push(`<span class="as-li">• ${inl(l.replace(/^\s*[·\-•] /, ''))}</span>`);
+      else if (/^#{1,4} /.test(l)) out.push(`<b class="as-h4">${inl(l.replace(/^#+ /, ''))}</b>`);
+      else out.push(inl(l) + '<br>'); });
+    cierra(); return out.join('').replace(/(<br>){3,}/g, '<br><br>');
+  };
   const grafico = g => {
     const v = (g.valores || []).map(Number), max = Math.max(...v, 1), et = g.etiquetas || [];
     return `<div class="as-g"><b>${escH(g.titulo || '')}</b>${v.map((x, i) => `<div class="as-gb"><span title="${escH(String(et[i]))}">${escH(String(et[i] ?? '')).slice(0, 26)}</span>

@@ -198,6 +198,17 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         with lock, con() as c:
             c.execute("UPDATE docs SET empresa=?, estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (cid, mid, did))
 
+    def alta_doc(nombre, datos, tipo, empresa, usuario):
+        """Da de alta un PDF en la bandeja de Compras (lo usa también el correo) y lo manda a leer."""
+        did = secrets.token_hex(8)
+        (carpeta / f"{did}.pdf").write_bytes(datos)
+        with lock, con() as c:
+            c.execute("INSERT INTO docs (id, tipo, nombre, fichero, empresa, subido, usuario, estado, odoo_model, odoo_id, nota) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      (did, tipo, nombre, f"{did}.pdf", empresa, time.time(), usuario, "pendiente", None, None, None))
+        leer_en_segundo_plano(did)
+        return did
+    app.state.compras_alta = alta_doc
+
     @app.post("/api/compras/subir")
     async def subir(request: Request, tipo: str = Form(...), company: str = Form("all"), archivos: list[UploadFile] = File(...)):
         u, cid, cids = una_empresa(request, company)

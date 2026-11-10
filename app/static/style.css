@@ -316,3 +316,15 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .as-gb i{display:block;height:12px;border-radius:4px;background:linear-gradient(90deg,#5B2E9E,#F39A2B)}.as-gb em{font-style:normal;color:#444}
 .as-sug{display:flex;flex-wrap:wrap;gap:6px;align-self:flex-start}.as-sug button{border:1px solid #d9cdf5;background:#fff;color:#3A1F73;border-radius:14px;padding:4px 10px;font-size:12.5px;cursor:pointer}
 .as-sug button:hover{background:#efe8fb}
+.as-t{border-collapse:collapse;margin:6px 0;font-size:12.5px;width:100%}.as-t th,.as-t td{border-bottom:1px solid #e9e4f3;padding:3px 6px;text-align:left}.as-t th{background:#f1ecfa}.as-h4{display:block;margin:6px 0 2px}
+.ma{display:grid;grid-template-columns:340px 1fr;gap:14px;min-height:70vh}.ma-l{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;overflow:auto;max-height:80vh}
+.ma-l input{width:100%;padding:7px 9px;border:1.5px solid #cfc9bd;border-radius:8px;margin:8px 0;font:inherit}
+.ma-i{border-left:4px solid #ddd;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}.ma-i:hover,.ma-i.on{background:#f5f1fb}.ma-i.u-alta{border-left-color:#d9534f}
+.ma-i1{display:flex;justify-content:space-between;gap:6px}.ma-i1 b{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ma-i2{font-size:13px;color:#333;margin:2px 0}.ma-i3{display:flex;gap:4px;flex-wrap:wrap}
+.ma-c{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;overflow:auto;max-height:80vh}.ma-h h3{margin:0 0 4px}
+.ma-r{background:#faf8fd;border:1px solid #e4def2;border-radius:10px;padding:10px 12px;margin:10px 0}.ma-r p{margin:6px 0}.ma-adj a{margin-right:10px}
+.ma-txt{font-size:14px;line-height:1.5;padding:8px 0;border-top:1px solid var(--line)}
+.ma-pp{border:2px solid #7c4dbe;border-radius:12px;padding:12px 14px;margin-top:12px;background:#fdfcff}.mp-l{border-bottom:1px solid var(--line);padding:8px 0}
+.mp-p input{width:70px;padding:3px 6px}.mp-ops{display:flex;flex-direction:column;gap:3px;margin:6px 0 0 10px}.mp-o{display:flex;gap:8px;align-items:flex-start;padding:4px 8px;border-radius:8px;cursor:pointer}
+.mp-o.on{background:#efe8fb}.mp-o small{display:block;color:#666}.mp-o span{display:block}
+@media (max-width:900px){.ma{grid-template-columns:1fr}}

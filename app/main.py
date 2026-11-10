@@ -36,7 +36,7 @@ def allowed_users():
     return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo"]
 
 
 def modulos_de(u):
@@ -474,3 +474,8 @@ _fichas.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=sc
 from . import entre_empresas as _entre  # noqa: E402
 
 _entre.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- correo integrado ----------
+from . import correo as _correo  # noqa: E402
+
+_correo.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
