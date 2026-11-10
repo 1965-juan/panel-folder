@@ -290,22 +290,49 @@ async function waBotLoad() {
 $('#b-save').onclick = async () => { await jpost('/api/wa/ajustes', { bot_activo: $('#b-act').checked ? 'si' : 'no', bot_precios: $('#b-pre').checked ? 'si' : 'no', bot_info: $('#b-info').value, llamadas_auto: $('#l-auto').checked ? 'si' : 'no', llamadas_plantilla: $('#l-pl').value.trim(), aviso_texto: $('#l-txt').value }, 'PUT'); alertBox('Guardado'); waBadge(); };
 $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhook', { url_publica: $('#b-url').value.trim() }); alertBox('Conectado: WhatsApp ya enviará los mensajes al panel'); } catch (e) { alertBox(e.message); } };
 
-/* ---------- asistente general ---------- */
+/* ---------- asistente general (en todas las pantallas) ---------- */
 (function () {
-  const H = [], log = $('#as-log');
-  const msg = (t, c) => { const d = document.createElement('div'); d.className = 'as-m ' + c; d.textContent = t; log.appendChild(d); log.scrollTop = 1e9; return d; };
+  const log = $('#as-log'), KEY = 'as_conv_v1';
+  let H = []; try { H = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { H = []; }
+  const guarda = () => { try { localStorage.setItem(KEY, JSON.stringify(H.slice(-30))); } catch (e) {} };
+  const pantalla = () => {
+    const v = (document.querySelector('.side nav a.on') || {}).textContent || 'Ventas';
+    const t = document.querySelector('section:not([hidden]) .wa-tabs button.on, section:not([hidden]) .ac-tabs button.on');
+    return v.replace(/\d+/g, '').trim() + (t ? ' › ' + t.textContent.trim() : '');
+  };
+  const md = t => escH(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^[·\-•] (.*)$/gm, '<span class="as-li">• $1</span>').replace(/\n/g, '<br>');
+  const grafico = g => {
+    const v = (g.valores || []).map(Number), max = Math.max(...v, 1), et = g.etiquetas || [];
+    return `<div class="as-g"><b>${escH(g.titulo || '')}</b>${v.map((x, i) => `<div class="as-gb"><span title="${escH(String(et[i]))}">${escH(String(et[i] ?? '')).slice(0, 26)}</span>
+      <i style="width:${Math.max(2, x / max * 100)}%"></i><em>${x.toLocaleString('es-ES', { maximumFractionDigits: 2 })}</em></div>`).join('')}</div>`;
+  };
+  const pinta = (t, c) => {
+    const d = document.createElement('div'); d.className = 'as-m ' + c;
+    if (c !== 'a') { d.textContent = t; log.appendChild(d); log.scrollTop = 1e9; return d; }
+    let txt = t, sug = [], gs = [];
+    txt = txt.replace(/```sugerencias\s*([\s\S]*?)```/g, (_, j) => { try { sug = JSON.parse(j); } catch (e) {} return ''; });
+    txt = txt.replace(/```grafico\s*([\s\S]*?)```/g, (_, j) => { try { gs.push(JSON.parse(j)); } catch (e) {} return ''; });
+    d.innerHTML = md(txt.trim()) + gs.map(grafico).join('');
+    log.appendChild(d);
+    if (sug.length) { const s = document.createElement('div'); s.className = 'as-sug'; s.innerHTML = sug.map(x => `<button>${escH(x)}</button>`).join('');
+      s.querySelectorAll('button').forEach(b => b.onclick = () => { $('#as-t').value = b.textContent; $('#as-f').requestSubmit(); }); log.appendChild(s); }
+    log.scrollTop = 1e9; return d;
+  };
+  H.forEach(m => pinta(m.content, m.role === 'user' ? 'u' : 'a'));
   $('#as-fab').onclick = () => { $('#as').hidden = false; $('#as-fab').hidden = true; setTimeout(() => $('#as-t').focus(), 50); };
   $('#as-x').onclick = () => { $('#as').hidden = true; $('#as-fab').hidden = false; };
+  $('#as-new').onclick = () => { H = []; guarda(); log.querySelectorAll('.as-m:not(.ini),.as-sug').forEach(x => x.remove()); };
+  $('#as-big').onclick = () => $('#as').classList.toggle('grande');
   $('#as-t').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#as-f').requestSubmit(); } };
   $('#as-f').onsubmit = async e => {
     e.preventDefault(); const t = $('#as-t').value.trim(); if (!t) return;
-    $('#as-t').value = ''; msg(t, 'u'); const w = msg('Mirando en Odoo…', 'w'); const b = $('#as-f button'); b.disabled = true;
+    $('#as-t').value = ''; pinta(t, 'u'); const w = pinta('Mirando en Odoo…', 'w'); const b = $('#as-f button'); b.disabled = true;
     try {
-      const r = await fetch('/api/asistente', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mensaje: t, historial: H }) });
+      const r = await fetch('/api/asistente', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mensaje: t, historial: H, pantalla: pantalla() }) });
       const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText);
-      w.remove(); msg(j.texto || 'Hecho.', 'a'); H.push({ role: 'user', content: t }, { role: 'assistant', content: j.texto || 'Hecho.' });
+      w.remove(); pinta(j.texto || 'Hecho.', 'a'); H.push({ role: 'user', content: t }, { role: 'assistant', content: j.texto || 'Hecho.' }); guarda();
       if (j.cambios) { if (location.hash === '#ac') acLoad(); else route(); }
-    } catch (er) { w.remove(); msg(er.message, 'e'); }
+    } catch (er) { w.remove(); pinta(er.message, 'e'); }
     b.disabled = false; $('#as-t').focus();
   };
 })();

@@ -57,6 +57,82 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
                                                           "confirmado": {"type": "boolean"}}, "required": ["order_id", "product_id", "cantidad", "confirmado"]}},
     ]
 
+    HERR += [
+        {"name": "consulta_odoo", "description": "Consulta de solo lectura en Odoo para cualquier pregunta de negocio. Modelos: sale.order, sale.order.line, account.move "
+         "(facturas: move_type out_invoice/out_refund de cliente, in_invoice/in_refund de proveedor; state posted; payment_state; amount_residual), "
+         "res.partner, product.product, stock.picking, purchase.order, purchase.order.line, pos.order, crm.lead. Dominio en formato Odoo "
+         "(lista de [campo, operador, valor]). Si das 'agrupar' (un campo, p. ej. partner_id, product_id, invoice_date:month, company_id) y 'sumar' "
+         "(campos numéricos) devuelve los totales por grupo ordenados de mayor a menor; si no, devuelve los registros.",
+         "input_schema": {"type": "object", "properties": {"modelo": {"type": "string"}, "dominio": {"type": "array"}, "campos": {"type": "array", "items": {"type": "string"}},
+                                                          "agrupar": {"type": "string"}, "sumar": {"type": "array", "items": {"type": "string"}},
+                                                          "orden": {"type": "string"}, "limite": {"type": "integer"}}, "required": ["modelo"]}},
+        {"name": "historial_cliente", "description": "Lo que ha comprado un cliente (por nombre o id): artículos, veces, cantidad total, último precio y última fecha. Útil para "
+         "saber qué es 'el tóner de siempre' o qué suele pedir.", "input_schema": {"type": "object", "properties": {"cliente": {"type": "string"}, "partner_id": {"type": "integer"},
+                                                                                                                 "texto": {"type": "string"}}}},
+    ]
+    MODELOS_LECTURA = {"sale.order", "sale.order.line", "account.move", "res.partner", "product.product", "stock.picking", "purchase.order",
+                       "purchase.order.line", "pos.order", "crm.lead"}
+    CONTABLES = {"account.move"}
+
+    def _rel(v):
+        return v[1] if isinstance(v, list) and len(v) == 2 else v
+
+    def consulta(a, cids, restringido):
+        m = a.get("modelo", "")
+        if m not in MODELOS_LECTURA or (restringido and m in CONTABLES):
+            return f"Modelo no permitido: {m}"
+        dom = a.get("dominio") or []
+        dom = [tuple(x) if isinstance(x, list) else x for x in dom]
+        if restringido and m not in ("product.product", "res.partner"):
+            dom = dom + [("company_id", "in", cids)]
+        agr, sumar = a.get("agrupar"), a.get("sumar") or []
+        if agr:
+            campo, _, gran = agr.partition(":")
+            rs = odoo.search_read(m, dom, [campo] + sumar, company_ids=cids, limit=20000)
+            g = {}
+            for r in rs:
+                k = r.get(campo)
+                if gran and isinstance(k, str):
+                    k = k[:7] if gran == "month" else k[:4] if gran == "year" else k[:10]
+                k = _rel(k) if k else "(sin dato)"
+                e = g.setdefault(str(k), {"grupo": str(k), "registros": 0, **{c: 0 for c in sumar}})
+                e["registros"] += 1
+                for c in sumar:
+                    e[c] += r.get(c) or 0
+            out = sorted(g.values(), key=lambda e: -(e[sumar[0]] if sumar else e["registros"]))
+            if gran:
+                out.sort(key=lambda e: e["grupo"])
+            return {"grupos": [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in e.items()} for e in out[:60]], "total_grupos": len(out),
+                    "total_registros": len(rs)}
+        campos = a.get("campos") or ["display_name"]
+        rs = odoo.search_read(m, dom, campos, company_ids=cids, limit=min(int(a.get("limite") or 40), 200), order=a.get("orden") or None)
+        return [{k: _rel(v) for k, v in r.items()} for r in rs]
+
+    def historial(a, cids):
+        pid = a.get("partner_id")
+        if not pid:
+            ps = odoo.search_read("res.partner", [("name", "ilike", a.get("cliente") or ""), ("parent_id", "=", False)], ["display_name"], company_ids=cids, limit=5)
+            if not ps:
+                return "No encuentro ese cliente"
+            if len(ps) > 1 and not a.get("cliente", "").strip().lower() == ps[0]["display_name"].lower():
+                pass
+            pid = ps[0]["id"]
+        dom = [("order_id.partner_id", "child_of", pid), ("order_id.state", "in", ["sale", "done"]), ("display_type", "=", False)]
+        if a.get("texto"):
+            dom.append(("name", "ilike", a["texto"]))
+        ls = odoo.search_read("sale.order.line", dom, ["product_id", "product_uom_qty", "price_unit", "discount", "order_id", "create_date"],
+                              company_ids=cids, limit=3000, order="id desc")
+        g = {}
+        for l in ls:
+            if not l.get("product_id"):
+                continue
+            e = g.setdefault(l["product_id"][0], {"product_id": l["product_id"][0], "articulo": l["product_id"][1], "veces": 0, "cantidad": 0,
+                                                  "ultimo_precio": l["price_unit"], "dto": l.get("discount") or 0, "ultima_fecha": (l.get("create_date") or "")[:10],
+                                                  "ultimo_pedido": l["order_id"][1]})
+            e["veces"] += 1
+            e["cantidad"] += l["product_uom_qty"]
+        return sorted(g.values(), key=lambda e: (-e["veces"], e["articulo"]))[:60]
+
     def grupo():
         return [c["name"].split()[0].upper() for c in odoo.search_read("res.company", [], ["name"])]
 
@@ -127,6 +203,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
         return out
 
     def ejecutar(nombre, a, cids, restringido=False):
+        if nombre == "consulta_odoo":
+            return consulta(a, cids, restringido)
+        if nombre == "historial_cliente":
+            return historial(a, cids)
         oculta = grupo() if restringido else []
         if nombre in ESCRITURA and not a.get("confirmado"):
             return "NO HECHO: primero explica al usuario exactamente qué vas a cambiar y espera a que diga que sí."
@@ -273,7 +353,14 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
         while hist and hist[0]["role"] != "user":
             hist.pop(0)
         msgs = hist + [{"role": "user", "content": b.get("mensaje") or ""}]
-        sistema = (f"Eres el asistente del almacén de Folder Castellón (papelería y material de oficina). Hablas con {u.capitalize()}, en español, "
+        pantalla = (b.get("pantalla") or "")[:80]
+        sistema = (f"Eres el asistente del panel de Folder Castellón (papelería y material de oficina; empresas DISTRIPLUS, LOGIPAPER, INGRAF, FERMASA). "
+                   f"Hoy es {__import__('datetime').date.today().isoformat()}. El usuario está ahora en la pantalla: {pantalla or 'inicio'}; si la pregunta es ambigua, "
+                   "entiende que va de esa pantalla. Para preguntas de negocio (ventas, facturación, clientes, cobros, compras, presupuestos) usa consulta_odoo "
+                   "agrupando y sumando en vez de traer muchos registros; importes sin IVA con amount_untaxed / price_subtotal salvo que pidan con IVA. "
+                   "Si una respuesta se entiende mejor con un gráfico, añade al final un bloque ```grafico {\"titulo\": \"...\", \"etiquetas\": [...], \"valores\": [...]}``` "
+                   "(máx. 15 barras). Termina SIEMPRE con un bloque ```sugerencias [\"...\", \"...\"]``` con 2-4 siguientes preguntas útiles y cortas. "
+                   f"Hablas con {u.capitalize()}, en español, "
                    "con frases cortas y claras, como un compañero. Usas las herramientas para consultar Odoo: stock por ubicación "
                    "(AC = Almacén Central, IMPT = imprenta, VP = Logipaper, T1/T2/T3 = tiendas), pedidos de clientes y reposiciones de tiendas "
                    "pendientes, pedidos a proveedor y lo que falta por llegar. No inventes datos: si no lo encuentras, dilo. "
@@ -282,7 +369,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
                    "DEVOLUCIONES DE CLIENTE: busca la entrega con entregas_cliente, confirma qué artículos y cuántos devuelve, pregunta si hay que "
                    "volver a enviárselo (reponer) y si ya estaba facturado si se hace abono; resume y pregunta '¿lo hago?' antes de devolucion_cliente. "
                    "Si te piden algo que no puedes hacer (por ejemplo validar entregas o traspasos), explica cómo hacerlo en el "
-                   "Panel AC o en Odoo y no lo intentes. Cuando des listas, usa viñetas cortas."
+                   "Panel AC o en Odoo y no lo intentes. Cuando des listas, usa viñetas cortas y **negritas** para lo importante."
                    + (" Trabajas solo con DISTRIPLUS: no menciones nunca otras empresas ni ventas entre empresas." if restringido else ""))
         hechos = []
 
@@ -291,7 +378,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, odoo_url):
             for _ in range(10):
                 r = http.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", headers={
                     "x-api-key": clave(), "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                    json={"model": modelo, "max_tokens": 2500, "system": sistema, "tools": HERR, "messages": msgs})
+                    json={"model": modelo, "max_tokens": 4000, "system": sistema, "tools": HERR, "messages": msgs})
                 if r.status_code != 200:
                     raise HTTPException(502, f"Claude respondió {r.status_code}: {r.text[:300]}")
                 res = r.json()
