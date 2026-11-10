@@ -283,3 +283,10 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .bn-l .cc small{color:var(--muted)}.bn-l .sg{display:flex;flex-direction:column;gap:2px;font-size:12.5px}
 #co-ban h3 .lnk{margin-left:8px;font-size:12px}
 @media (max-width:900px){.bn-l{grid-template-columns:1fr 1fr}}
+
+.co-doc .co-pc{margin-left:auto;padding:5px 12px;font-size:13px}
+.pc-prov{margin:8px 0}.pc-prov input,.pc-bus input{width:100%;padding:7px 9px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit;margin-top:4px}
+.pc-opt{display:block;padding:5px 8px;border-bottom:1px solid var(--line)}.pc-opt:hover{background:#f5f1fb}
+.pc-aviso{background:#fff6e5;border:1px solid #f0d49b;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px}
+.pc-t td{vertical-align:top;font-size:12.5px}.pc-t td input{width:64px}
+.pc-ok{color:#1f7a4d;font-weight:600}.pc-new{color:#b5620b;font-weight:700}

@@ -35,6 +35,14 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             partner_id INTEGER, partner_nombre TEXT, concepto TEXT, importe REAL, dia INTEGER, activo INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS recurrentes_marcas (rid INTEGER, mes TEXT, nota TEXT, PRIMARY KEY (rid, mes));
         """)
+        try:
+            c.execute("ALTER TABLE docs ADD COLUMN lectura TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE docs ADD COLUMN compra TEXT")
+        except sqlite3.OperationalError:
+            pass
         return c
 
     def ctx(request, company="all"):
@@ -103,7 +111,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         if estado:
             q += " AND estado=?"; args.append(estado)
         with con() as c:
-            return [dict(r) for r in c.execute(q + " ORDER BY subido DESC LIMIT 200", args).fetchall()]
+            out = []
+            for r in c.execute(q + " ORDER BY subido DESC LIMIT 200", args).fetchall():
+                d = dict(r)
+                d.pop("lectura", None)
+                d["compra"] = json.loads(d["compra"]) if d.get("compra") else None
+                out.append(d)
+            return out
 
     @app.get("/api/compras/pdf/{did}")
     def pdf(did: str, request: Request):
@@ -148,7 +162,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             raise HTTPException(404)
         datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
         with lock, con() as c:
-            c.execute("UPDATE docs SET nota=? WHERE id=?", (json.dumps(datos, ensure_ascii=False)[:20000], did))
+            c.execute("UPDATE docs SET lectura=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), did))
         return datos
 
     @app.post("/api/compras/docs/{did}/a_factura")
@@ -172,6 +186,235 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             with lock, con() as c:
                 c.execute("UPDATE docs SET tipo='factura', estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (oid, did))
             return {"ok": True, "factura_id": oid}
+        return guard(run)
+
+    # ---------- PDF -> pedido de compra (y factura en borrador enlazada) ----------
+    def _doc(did):
+        with con() as c:
+            r = c.execute("SELECT * FROM docs WHERE id=?", (did,)).fetchone()
+        if not r:
+            raise HTTPException(404, "Documento no encontrado")
+        return r
+
+    def _lectura(r, releer=False):
+        if r["lectura"] and not releer:
+            return json.loads(r["lectura"])
+        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
+        if datos.get("error"):
+            raise HTTPException(502, "No he podido leer el PDF: " + str(datos["error"])[:200])
+        with lock, con() as c:
+            c.execute("UPDATE docs SET lectura=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), r["id"]))
+        return datos
+
+    def _num(v):
+        try:
+            return float(str(v).replace(",", ".")) if v not in (None, "") else 0.0
+        except ValueError:
+            return 0.0
+
+    def _buscar_proveedor(lec, cids):
+        nif = re.sub(r"[^A-Z0-9]", "", (lec.get("nif_proveedor") or "").upper())
+        if nif.startswith("ES"):
+            nif = nif[2:]
+        if len(nif) >= 8:
+            ps = odoo.search_read("res.partner", [("vat", "ilike", nif), ("parent_id", "=", False)], ["display_name", "vat"], company_ids=cids, limit=5)
+            if ps:
+                return ps[0]
+        nom = (lec.get("proveedor") or "").strip()
+        palabras = [w for w in re.findall(r"[\wÁÉÍÓÚÑáéíóúñ]{4,}", nom) if w.upper() not in ("S.L.", "SLU", "S.A.", "SOCIEDAD", "LIMITADA")]
+        if palabras:
+            ps = odoo.search_read("res.partner", [("name", "ilike", palabras[0]), ("parent_id", "=", False)], ["display_name", "vat"], company_ids=cids, limit=5)
+            if len(ps) == 1:
+                return ps[0]
+        return None
+
+    def _casar_lineas(lineas, partner_id, cids):
+        out = []
+        for l in lineas:
+            ref, ean, desc = str(l.get("ref") or "").strip(), re.sub(r"\D", "", str(l.get("ean") or "")), (l.get("descripcion") or "").strip()
+            prod, como = None, None
+            if partner_id and ref:
+                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", ref)], ["product_id", "product_tmpl_id"], company_ids=cids, limit=1)
+                if si:
+                    if si[0].get("product_id"):
+                        prod = {"id": si[0]["product_id"][0], "name": si[0]["product_id"][1]}
+                    else:
+                        pp = odoo.search_read("product.product", [("product_tmpl_id", "=", si[0]["product_tmpl_id"][0])], ["display_name"], company_ids=cids, limit=1)
+                        prod = pp and {"id": pp[0]["id"], "name": pp[0]["display_name"]}
+                    como = "ref. proveedor"
+            if not prod and len(ean) >= 8:
+                pp = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=cids, limit=1)
+                if pp:
+                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "EAN"
+            if not prod and ref:
+                pp = odoo.search_read("product.product", [("default_code", "=ilike", ref)], ["display_name"], company_ids=cids, limit=2)
+                if len(pp) == 1:
+                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "referencia"
+            if not prod and len(desc) >= 6:
+                pp = odoo.search_read("product.product", [("name", "=ilike", desc), ("purchase_ok", "=", True)], ["display_name"], company_ids=cids, limit=2)
+                if len(pp) == 1:
+                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "nombre"
+            out.append({"ref": ref, "ean": ean, "descripcion": desc, "cantidad": _num(l.get("cantidad")), "precio": _num(l.get("precio")),
+                        "descuento": _num(l.get("descuento")), "iva": _num(l.get("iva")) or 21.0,
+                        "product_id": prod["id"] if prod else None, "producto": prod["name"] if prod else None, "como": como})
+        return out
+
+    @app.post("/api/compras/docs/{did}/preparar")
+    def doc_preparar(did: str, request: Request, releer: int = 0):
+        """Lee el PDF y propone el pedido de compra: proveedor, líneas casadas con artículos de Odoo y pedidos abiertos del proveedor."""
+        u, cids = ctx(request, "all")
+        r = _doc(did)
+        if r["empresa"] not in cids:
+            raise HTTPException(403, "Documento de otra empresa")
+
+        def run():
+            lec = _lectura(r, bool(releer))
+            prov = _buscar_proveedor(lec, cids)
+            lineas = _casar_lineas(lec.get("lineas") or [], prov and prov["id"], cids)
+            abiertos = []
+            if prov:
+                abiertos = [{"id": p["id"], "name": p["name"], "fecha": (p.get("date_order") or "")[:10], "total": p["amount_untaxed"], "estado": p["receipt_status"]}
+                            for p in odoo.search_read("purchase.order", [("partner_id", "child_of", prov["id"]), ("company_id", "=", r["empresa"]),
+                                                                         ("state", "in", ["draft", "sent", "purchase"]), ("receipt_status", "!=", "full")],
+                                                      ["name", "date_order", "amount_untaxed", "receipt_status"], company_ids=[r["empresa"]], limit=10, order="id desc")]
+            return {"doc": {"id": r["id"], "nombre": r["nombre"], "tipo": r["tipo"], "empresa": r["empresa"], "odoo_id": r["odoo_id"]},
+                    "lectura": {k: lec.get(k) for k in ("tipo", "proveedor", "nif_proveedor", "numero", "fecha", "base", "iva_total", "total", "portes")},
+                    "proveedor": prov, "lineas": lineas, "pedidos_abiertos": abiertos,
+                    "compra": json.loads(r["compra"]) if r["compra"] else None}
+        return guard(run)
+
+    _campos = {}
+
+    def _tiene_campo(model, campo, cid):
+        if model not in _campos:
+            _campos[model] = set(odoo.call(model, "fields_get", [cid], attributes=["type"]).keys())
+        return campo in _campos[model]
+
+    def _impuesto(cid, iva, cache={}):
+        k = (cid, round(iva, 2))
+        if k not in cache:
+            ts = odoo.search_read("account.tax", [("type_tax_use", "=", "purchase"), ("amount", "=", iva), ("company_id", "=", cid), ("amount_type", "=", "percent")],
+                                  ["name"], company_ids=[cid], order="sequence, id")
+            pref = [t for t in ts if re.search(r"\bG\b|bienes", t["name"], re.I)] or [t for t in ts if not re.search(r"servic|invers|intra|import|ISP|exent|recargo", t["name"], re.I)] or ts
+            cache[k] = pref[0]["id"] if pref else None
+        return cache[k]
+
+    @app.post("/api/compras/docs/{did}/a_compras")
+    async def doc_a_compras(did: str, request: Request):
+        """Crea (y confirma) el pedido de compra con las líneas revisadas. La recepción queda para que almacén la compruebe.
+        Si el documento es una factura, rellena la factura en borrador enlazada al pedido para que Mayte le dé el OK."""
+        u, cids = ctx(request, "all")
+        b = await request.json()
+        r = _doc(did)
+        if r["empresa"] not in cids:
+            raise HTTPException(403, "Documento de otra empresa")
+        if r["compra"]:
+            raise HTTPException(400, "Este documento ya se pasó a compras: " + json.loads(r["compra"]).get("pedido", ""))
+        partner_id = int(b.get("partner_id") or 0)
+        lineas = [l for l in (b.get("lineas") or []) if _num(l.get("cantidad")) > 0]
+        if not partner_id:
+            raise HTTPException(400, "Falta el proveedor")
+        if not lineas:
+            raise HTTPException(400, "No hay líneas con cantidad")
+        cid = r["empresa"]
+        c1 = [cid]
+
+        def run():
+            lec = json.loads(r["lectura"]) if r["lectura"] else {}
+            avisos, creados = [], []
+            # 1) artículos nuevos
+            for l in lineas:
+                if l.get("product_id"):
+                    continue
+                if not l.get("crear"):
+                    raise HTTPException(400, f"La línea \"{l.get('descripcion')}\" no tiene artículo: elígelo o marca crearlo")
+                vals = {"name": l.get("descripcion") or l.get("ref") or "Artículo nuevo", "purchase_ok": True, "sale_ok": True,
+                        "standard_price": _num(l.get("precio")), "type": "consu",
+                        "seller_ids": [[0, 0, {"partner_id": partner_id, "product_code": l.get("ref") or False, "price": _num(l.get("precio")), "company_id": cid}]]}
+                if _tiene_campo("product.product", "is_storable", cid):
+                    vals["is_storable"] = True
+                if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], company_ids=cids, limit=1):
+                    vals["default_code"] = l["ref"]
+                ean = re.sub(r"\D", "", str(l.get("ean") or ""))
+                if len(ean) >= 8 and not odoo.search_read("product.product", [("barcode", "=", ean)], ["id"], company_ids=cids, limit=1):
+                    vals["barcode"] = ean
+                pid = odoo.call("product.product", "create", c1, vals_list=[vals])
+                l["product_id"] = pid[0] if isinstance(pid, list) else pid
+                creados.append(vals["name"])
+            # 2) ref. del proveedor en artículos que no la tenían (para casarlos solos la próxima vez)
+            for l in lineas:
+                if l.get("ref") and l.get("como") in ("EAN", "referencia", "nombre", "a mano"):
+                    tm = odoo.search_read("product.product", [("id", "=", int(l["product_id"]))], ["product_tmpl_id"], company_ids=c1)
+                    if tm and not odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_tmpl_id", "=", tm[0]["product_tmpl_id"][0])], ["id"], company_ids=c1, limit=1):
+                        try:
+                            odoo.call("product.supplierinfo", "create", c1, vals_list=[{"partner_id": partner_id, "product_tmpl_id": tm[0]["product_tmpl_id"][0],
+                                                                                        "product_code": l["ref"], "price": _num(l.get("precio")), "company_id": cid}])
+                        except Exception:
+                            pass
+            # 3) pedido de compra
+            ftax = "tax_ids" if _tiene_campo("purchase.order.line", "tax_ids", cid) else "taxes_id"
+            olines = []
+            for l in lineas:
+                t = _impuesto(cid, _num(l.get("iva")) or 21.0)
+                v = {"product_id": int(l["product_id"]), "product_qty": _num(l["cantidad"]), "price_unit": _num(l.get("precio")),
+                     ftax: [[6, 0, [t] if t else []]]}
+                if _num(l.get("descuento")):
+                    v["discount"] = _num(l.get("descuento"))
+                if l.get("descripcion"):
+                    v["name"] = (f"[{l['ref']}] " if l.get("ref") else "") + l["descripcion"]
+                olines.append([0, 0, v])
+            portes = _num(lec.get("portes"))
+            if portes:
+                pp = odoo.search_read("product.product", [("name", "ilike", "portes"), ("purchase_ok", "=", True)], ["id"], company_ids=c1, limit=1)
+                if pp:
+                    olines.append([0, 0, {"product_id": pp[0]["id"], "product_qty": 1, "price_unit": portes, ftax: [[6, 0, [_impuesto(cid, 21.0)]]]}])
+                else:
+                    avisos.append(f"Portes de {portes:.2f} € sin artículo \"Portes\" en Odoo: añádelos a mano en la factura")
+            po_vals = {"partner_id": partner_id, "company_id": cid, "order_line": olines, "partner_ref": lec.get("numero") or r["nombre"]}
+            po = odoo.call("purchase.order", "create", c1, vals_list=[po_vals])
+            po = po[0] if isinstance(po, list) else po
+            odoo.call("purchase.order", "button_confirm", c1, ids=[po])
+            pod = odoo.search_read("purchase.order", [("id", "=", po)], ["name", "picking_ids", "order_line", "amount_untaxed"], company_ids=c1)[0]
+            picks = odoo.search_read("stock.picking", [("id", "in", pod["picking_ids"])], ["name"], company_ids=c1) if pod["picking_ids"] else []
+            odoo.call("ir.attachment", "create", c1, vals_list=[{"name": r["nombre"] or "documento.pdf", "res_model": "purchase.order", "res_id": po,
+                                                                  "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+            # 4) factura en borrador enlazada (solo si el PDF es una factura)
+            factura = None
+            if r["tipo"] == "factura":
+                mid = r["odoo_id"] if r["odoo_model"] == "account.move" else None
+                if mid:
+                    st = odoo.search_read("account.move", [("id", "=", mid)], ["state"], company_ids=c1)
+                    if not st or st[0]["state"] != "draft":
+                        mid = None
+                if not mid:
+                    jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", cid)], ["id"], company_ids=c1, limit=1)
+                    mid = odoo.call("account.move", "create", c1, vals_list=[{"move_type": "in_invoice", "journal_id": jr[0]["id"], "partner_id": partner_id}],
+                                    context={"default_move_type": "in_invoice"})
+                    mid = mid[0] if isinstance(mid, list) else mid
+                    odoo.call("ir.attachment", "create", c1, vals_list=[{"name": r["nombre"] or "factura.pdf", "res_model": "account.move", "res_id": mid,
+                                                                          "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+                pls = odoo.search_read("purchase.order.line", [("order_id", "=", po)], ["product_id", "product_qty", "price_unit", "discount", ftax, "name"], company_ids=c1)
+                ilines = [[5, 0, 0]] + [[0, 0, {"purchase_line_id": pl["id"], "product_id": pl["product_id"][0], "name": pl["name"], "quantity": pl["product_qty"],
+                                                  "price_unit": pl["price_unit"], "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl[ftax]]]}] for pl in pls]
+                vals = {"partner_id": partner_id, "invoice_line_ids": ilines, "invoice_origin": pod["name"]}
+                if lec.get("numero"):
+                    vals["ref"] = lec["numero"]
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", lec.get("fecha") or ""):
+                    vals["invoice_date"] = lec["fecha"]
+                odoo.call("account.move", "write", c1, ids=[mid], vals=vals,
+                          context={"default_move_type": "in_invoice"})
+                fm = odoo.search_read("account.move", [("id", "=", mid)], ["amount_total"], company_ids=c1)
+                factura = {"id": mid, "total": fm[0]["amount_total"] if fm else None}
+                if fm and _num(lec.get("total")) and abs(fm[0]["amount_total"] - _num(lec["total"])) > 0.02:
+                    avisos.append(f"El total de la factura en Odoo ({fm[0]['amount_total']:.2f} €) no cuadra con el PDF ({_num(lec['total']):.2f} €): Mayte que lo revise")
+            res = {"pedido": pod["name"], "pedido_id": po, "recepciones": [p["name"] for p in picks], "factura": factura,
+                   "creados": creados, "avisos": avisos, "por": u, "cuando": time.time()}
+            with lock, con() as c:
+                # el albarán sigue "por recibir" para que almacén lo elija al comprobar la recepción
+                c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(res, ensure_ascii=False), did))
+                if factura:
+                    c.execute("UPDATE docs SET odoo_model='account.move', odoo_id=? WHERE id=?", (factura["id"], did))
+            return res
         return guard(run)
 
     @app.delete("/api/compras/docs/{did}")
