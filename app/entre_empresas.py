@@ -94,12 +94,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         def run():
             F = ["name", "partner_id", "date_done", "origin", "sale_id", "company_id", "location_id", "move_ids", "invoice_state"]
             base = [("picking_type_code", "=", "outgoing"), ("state", "=", "done"), ("sale_id", "!=", False)]
+            desde = (dt.date.today() - dt.timedelta(days=400)).isoformat()
             try:
-                pk = odoo.search_read("stock.picking", base + [("albaran_invoiced", "=", False)], F, company_ids=cids, order="date_done asc", limit=800)
+                pk = odoo.search_read("stock.picking", base + [("albaran_invoiced", "=", False), ("date_done", ">=", desde)], F, company_ids=cids, order="date_done desc", limit=4000)
             except Exception:
-                desde = (dt.date.today() - dt.timedelta(days=180)).isoformat()
-                pk = odoo.search_read("stock.picking", base + [("date_done", ">=", desde)], F, company_ids=cids, order="date_done asc", limit=3000)
-            pk = [p for p in pk if p.get("invoice_state") == "pending"]
+                pk = odoo.search_read("stock.picking", base + [("date_done", ">=", desde)], F, company_ids=cids, order="date_done desc", limit=6000)
+            pk = [p for p in pk if p.get("invoice_state") == "pending"][::-1]
             mids = [m for p in pk for m in p["move_ids"]]
             mv = odoo.search_read("stock.move", [("id", "in", mids), ("state", "=", "done")], ["picking_id", "quantity", "sale_line_id"], company_ids=cids) if mids else []
             slids = [m["sale_line_id"][0] for m in mv if m.get("sale_line_id")]
