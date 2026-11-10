@@ -50,93 +50,103 @@ async function coDocs() {
       $('#co-docs').insertAdjacentHTML('beforeend', `<div class="co-doc"><span class="ic">${d.tipo === 'albaran' ? '📦' : '🧾'}</span>
         <a target="_blank" rel="noopener" href="/api/compras/pdf/${d.id}">${escH(d.nombre)}</a><span class="bdg ${c}">${t}</span>
         <small class="muted">${escH(d.usuario)} · ${hora(d.subido)}</small>
-        ${d.compra ? `<span class="bdg b-ok" title="Recepción ${escH((d.compra.recepciones || []).join(', '))}">🛒 ${escH(d.compra.pedido)}</span>`
-                   : `<button class="ac-go co-pc" data-id="${d.id}">➜ Pasar a compras</button>`}
+        ${d.compra ? `<span class="bdg b-ok" title="Entrada ${escH((d.compra.recepciones || []).join(', '))}">✓ ${escH(d.compra.pedido)}</span>`
+                   : `<button class="ac-go co-pc" data-id="${d.id}">⇄ Cuadrar con pedido</button>`}
         ${d.nota ? `<small class="err-t">${escH(d.nota)}</small>` : ''}</div>`);
     });
     $('#co-docs').querySelectorAll('.co-pc').forEach(b => b.onclick = () => coPasar(b.dataset.id));
   } catch (e) { showErr(e.message); }
 }
-/* --- pasar un PDF a compras: pedido de compra confirmado (+ factura en borrador enlazada) --- */
-const CO_COMO = { 'ref. proveedor': 'ref. proveedor', EAN: 'EAN', referencia: 'referencia', nombre: 'nombre', 'a mano': 'elegido' };
-async function coPasar(did, releer) {
+/* --- cuadrar un albarán/factura con el pedido de compra abierto del proveedor --- */
+async function coPasar(did, opts = {}) {
   const db = $('#co-db');
-  db.innerHTML = `<h3>Pasar a compras</h3><p class="muted">Leyendo el PDF y buscando los artículos en Odoo… (tarda unos segundos)</p>`;
+  db.innerHTML = `<h3>Cuadrar con el pedido</h3><p class="muted">Leyendo el PDF y cruzándolo con los pedidos de compra… (tarda unos segundos)</p>`;
   $('#co-drawer').hidden = false;
   let d;
-  try { d = await jpost(`/api/compras/docs/${did}/preparar${releer ? '?releer=1' : ''}`, {}); }
-  catch (e) { db.innerHTML = `<h3>Pasar a compras</h3><p class="err">${escH(e.message)}</p>`; return; }
-  const L = d.lineas, lec = d.lectura;
-  let prov = d.proveedor;
+  const qs = new URLSearchParams(); if (opts.releer) qs.set('releer', 1); if (opts.pedido) qs.set('pedido', opts.pedido);
+  try { d = await jpost(`/api/compras/docs/${did}/cuadrar?${qs}`, opts.partner_id ? { partner_id: opts.partner_id } : {}); }
+  catch (e) { db.innerHTML = `<h3>Cuadrar con el pedido</h3><p class="err">${escH(e.message)}</p>`; return; }
+  const lec = d.lectura || {};
   const eu = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
+  if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>`; return; }
+  if (d.ya_cuadrado) { db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">El documento ${escH(lec.numero)} ya está en el pedido confirmado <b>${escH(d.ya_cuadrado)}</b>. Recíbelo desde Recepciones.</div>`; return; }
+  const L = d.lineas || [];
+  const cab = `<h3>Cuadrar con el pedido · ${escH(d.doc.nombre)}</h3>
+    <p class="muted">${escH(lec.proveedor || '')} · nº ${escH(lec.numero || '?')} · ${coDate(lec.fecha || '')} · base ${eu(lec.base)} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
+    <iframe class="co-pdf" src="/api/compras/pdf/${d.doc.id}#view=FitH"></iframe>`;
+  const busProv = `<div><input id="pc-qprov" placeholder="Buscar proveedor por nombre o CIF"><div id="pc-lprov"></div></div>`;
+  const bindProv = () => { let tp; const q = $('#pc-qprov'); if (!q) return; q.oninput = e => { clearTimeout(tp); tp = setTimeout(async () => {
+    const r = await api(`/api/compras/proveedores?q=${encodeURIComponent(e.target.value)}`);
+    $('#pc-lprov').innerHTML = r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)} <small>${escH(p.vat || '')}</small></a>`).join('');
+    $('#pc-lprov').querySelectorAll('a').forEach(a => a.onclick = ev => { ev.preventDefault(); coPasar(did, { partner_id: +a.dataset.id }); });
+  }, 300); }; };
+  if (!d.proveedor) { db.innerHTML = cab + `<p class="err-t">No encuentro el proveedor (${escH(lec.proveedor || '?')} ${escH(lec.nif_proveedor || '')}). Búscalo:</p>` + busProv; bindProv();
+    $('#pc-rel').onclick = e => { e.preventDefault(); coPasar(did, { releer: 1 }); }; return; }
+  const prov = d.proveedor, po = d.pedido;
+  const ESTADO = l => {
+    if (l.saltar) return ['⏭ No se mete', 'pc-skip'];
+    if (!l.product_id) return ['? Sin identificar', 'pc-que'];
+    if (!l.po_line) return ['＋ Se añade al pedido', 'pc-new'];
+    const dq = +l.cantidad !== +l.pedido_cant, dp = Math.abs(+l.precio - +l.pedido_precio) > 0.0005 || (+l.descuento || 0) !== (+l.pedido_dto || 0);
+    return dq || dp ? ['≠ Se ajusta ' + [dq ? `cant. ${l.pedido_cant}→${l.cantidad}` : '', dp ? `precio ${l.pedido_precio}→${l.precio}` : ''].filter(Boolean).join(', '), 'pc-adj'] : ['✓ Cuadra', 'pc-ok'];
+  };
   const pinta = () => {
-    const nuevos = L.filter(l => !l.product_id && l.crear).length, faltan = L.filter(l => !l.product_id && !l.crear && +l.cantidad > 0).length;
-    const base = L.reduce((a, l) => a + (+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100), 0);
-    db.innerHTML = `<h3>Pasar a compras · ${escH(d.doc.nombre)}</h3>
-      <p class="muted">${(lec.tipo || d.doc.tipo) === 'factura' ? '🧾 Factura' : (lec.tipo === 'pedido' ? '📋 Confirmación de pedido' : '📦 Albarán')} ${escH(lec.numero || '')} · ${coDate(lec.fecha || '')} · <a href="#" id="pc-rel">volver a leer el PDF</a></p>
-      <iframe class="co-pdf" src="/api/compras/pdf/${d.doc.id}#view=FitH"></iframe>
-      <div class="pc-prov"><b>Proveedor:</b> ${prov ? `${escH(prov.display_name)} <small class="muted">${escH(prov.vat || '')}</small> <a href="#" id="pc-cprov">cambiar</a>`
-        : `<span class="err-t">No lo encuentro (${escH(lec.proveedor || '?')} ${escH(lec.nif_proveedor || '')}).</span>`}
-        <div id="pc-bprov" ${prov ? 'hidden' : ''}><input id="pc-qprov" placeholder="Buscar proveedor por nombre o CIF"><div id="pc-lprov"></div></div></div>
-      ${d.pedidos_abiertos.length ? `<div class="pc-aviso">⚠️ Este proveedor ya tiene pedidos abiertos: ${d.pedidos_abiertos.map(p => `<b>${escH(p.name)}</b> (${coDate(p.fecha)}, ${eu(p.total)})`).join(', ')}.
-        Si este documento es de uno de ellos, no lo pases otra vez: recíbelo desde Recepciones.</div>` : ''}
-      <table class="co-t pc-t"><thead><tr><th>Ref.</th><th>Descripción</th><th>Cant.</th><th>Precio</th><th>Dto</th><th>Artículo en Odoo</th></tr></thead><tbody>
-      ${L.map((l, i) => `<tr><td>${escH(l.ref)}</td><td>${escH(l.descripcion)}</td>
+    const faltan = L.filter(l => !l.product_id && !l.saltar).length;
+    const base = L.filter(l => l.product_id && !l.saltar).reduce((a, l) => a + Math.round((+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100) * 100) / 100, 0);
+    db.innerHTML = cab + `
+      <div class="pc-prov"><b>Proveedor:</b> ${escH(prov.display_name)} <small class="muted">${escH(prov.vat || '')}</small> <a href="#" id="pc-cprov">cambiar</a><div id="pc-bprov" hidden>${busProv}</div></div>
+      <div class="pc-prov"><b>Pedido:</b> ${po ? `<b>${escH(po.name)}</b> <small class="muted">${escH(po.origen)}</small>` : '<span class="pc-new">no hay pedido abierto: se crea uno nuevo con lo identificado</span>'}
+        ${d.pedidos_abiertos.length > 1 ? `<select id="pc-po">${d.pedidos_abiertos.map(p => `<option value="${p.id}" ${po && p.id === po.id ? 'selected' : ''}>${escH(p.name)} · ${coDate(p.fecha)} · ${eu(p.base)} ${escH(p.origen)}</option>`).join('')}</select>` : ''}</div>
+      ${d.confirmados && d.confirmados.length ? `<div class="pc-aviso">Este proveedor también tiene pedidos ya confirmados esperando mercancía: <b>${d.confirmados.map(escH).join(', ')}</b>. Si el documento es de uno de ellos, no lo cuadres aquí: recíbelo en Recepciones.</div>` : ''}
+      <table class="co-t pc-t"><thead><tr><th>Ref. / EAN</th><th>Documento</th><th>Cant.</th><th>Precio</th><th>Dto</th><th>Artículo en Odoo</th><th>Qué pasa</th></tr></thead><tbody>
+      ${L.map((l, i) => { const [et, ec] = ESTADO(l); return `<tr class="${l.saltar ? 'pc-off' : ''}"><td>${escH(l.ref)}<br><small class="muted">${escH(l.ean)}</small></td><td>${escH(l.descripcion)}</td>
         <td><input type="number" step="any" min="0" data-i="${i}" data-k="cantidad" value="${l.cantidad}"></td>
         <td><input type="number" step="any" min="0" data-i="${i}" data-k="precio" value="${l.precio}"></td>
         <td>${l.descuento ? l.descuento + '%' : ''}</td>
-        <td>${l.product_id ? `<span class="pc-ok">✓ ${escH(l.producto)}</span> <small class="muted">${CO_COMO[l.como] || ''}</small> <a href="#" data-cam="${i}">cambiar</a>`
-          : l.crear ? `<span class="pc-new">＋ Se crea nuevo</span> <a href="#" data-cam="${i}">buscar en Odoo</a>`
-          : `<span class="pc-que">¿Cuál es?</span> ${(l.sugerencias || []).map(sg => `<a href="#" class="pc-sug" data-i="${i}" data-id="${sg.id}">${escH(sg.name)}</a>`).join('')}
-             <a href="#" data-cam="${i}">🔎 buscar otro</a> · <a href="#" class="pc-crea" data-i="${i}">＋ es nuevo, crearlo</a>`}
-          <div class="pc-bus" data-b="${i}" hidden><input placeholder="Nombre, ref. o EAN"><div></div></div></td></tr>`).join('')}
+        <td>${l.product_id ? `${escH(l.producto)} <small class="muted">(${escH(l.como || '')})</small>` : ''} <a href="#" data-cam="${i}">${l.product_id ? 'cambiar' : '🔎 buscar'}</a>
+          ${!l.product_id && !l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">no meter</a>` : ''}${l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">meter</a>` : ''}
+          <div class="pc-bus" data-b="${i}" hidden><input placeholder="Nombre, ref. o EAN"><div></div></div></td>
+        <td class="${ec}">${et}</td></tr>`; }).join('')}
       </tbody></table>
-      <p class="muted">Base según líneas: <b>${eu(base)}</b>${lec.base ? ` · base del PDF: <b>${eu(lec.base)}</b>` : ''}${lec.total ? ` · total PDF: ${eu(lec.total)}` : ''}${lec.portes ? ` · portes: ${eu(lec.portes)}` : ''}</p>
-      ${nuevos ? `<p class="pc-aviso">Se crearán <b>${nuevos}</b> artículos nuevos con su ref. y EAN del proveedor y el coste. Luego revisad el precio de venta y la foto.</p>` : ''}
-      <p class="muted">Se crea el pedido de compra confirmado. La recepción queda en <b>Recepciones</b> para que almacén compruebe lo que llega${d.doc.tipo === 'factura' || lec.tipo === 'factura' ? ', y la factura queda en borrador enlazada al pedido para que Mayte le dé el OK' : ''}.</p>
-      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas por decidir: elige el artículo de Odoo o márcalo como nuevo.</p>` : ''}
-      <button class="ac-go" id="pc-go" ${prov && !faltan ? '' : 'disabled'}>🛒 Crear pedido de compra</button><div id="pc-res"></div>`;
-    db.querySelectorAll('.pc-sug').forEach(a => a.onclick = e => { e.preventDefault(); const l = L[a.dataset.i]; l.product_id = +a.dataset.id; l.producto = a.textContent; l.como = 'a mano'; pinta(); });
-    db.querySelectorAll('.pc-crea').forEach(a => a.onclick = e => { e.preventDefault(); L[a.dataset.i].crear = true; pinta(); });
-    $('#pc-rel').onclick = e => { e.preventDefault(); coPasar(did, true); };
-    const cp = $('#pc-cprov'); if (cp) cp.onclick = e => { e.preventDefault(); $('#pc-bprov').hidden = false; $('#pc-qprov').focus(); };
-    let tp; $('#pc-qprov').oninput = e => { clearTimeout(tp); tp = setTimeout(async () => {
-      const r = await api(`/api/compras/proveedores?q=${encodeURIComponent(e.target.value)}&company=${d.doc.empresa}`);
-      $('#pc-lprov').innerHTML = r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)} <small>${escH(p.vat || '')}</small></a>`).join('');
-      $('#pc-lprov').querySelectorAll('a').forEach(a => a.onclick = ev => { ev.preventDefault(); prov = r.find(x => x.id == a.dataset.id); pinta(); });
-    }, 300); };
-    db.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { L[inp.dataset.i][inp.dataset.k] = parseFloat(inp.value) || 0; });
+      ${d.no_vienen && d.no_vienen.length ? `<h4>En el pedido pero no vienen en el documento (${d.no_vienen.length})</h4>
+        <p class="muted">Se pasan a un pedido nuevo en borrador "Pendiente de ${escH(po.name)}" y se quitan de ${escH(po.name)}.</p>
+        <table class="co-t pc-t"><tbody>${d.no_vienen.map(x => `<tr><td>${escH(x.producto)}</td><td>${x.cantidad}</td><td>${x.precio}</td></tr>`).join('')}</tbody></table>` : ''}
+      <p>Base con lo identificado: <b>${eu(base)}</b> · base del documento: <b>${eu((+lec.base || 0) - (+lec.portes || 0))}</b>${Math.abs(base - ((+lec.base || 0) - (+lec.portes || 0))) > 0.03 ? ' <span class="err-t" style="display:inline">no cuadra todavía</span>' : ' ✓'}</p>
+      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo o marca "no meter" (no se crean artículos nuevos desde aquí).</p>` : ''}
+      <p class="muted">Al cuadrar: el pedido queda igual que el documento (cantidades, precios y descuentos), se pone el nº ${escH(lec.numero || '')} como referencia del proveedor, se confirma y la entrada queda en <b>Recepciones</b> para que almacén compruebe lo que llega. También se actualizan las líneas de proveedor de las fichas y el coste si estaba a 0.</p>
+      <button class="ac-go" id="pc-go" ${faltan ? 'disabled' : ''}>✓ Cuadrar y confirmar pedido</button><div id="pc-res"></div>`;
+    bindProv();
+    $('#pc-rel').onclick = e => { e.preventDefault(); coPasar(did, { releer: 1 }); };
+    $('#pc-cprov').onclick = e => { e.preventDefault(); $('#pc-bprov').hidden = false; $('#pc-qprov').focus(); };
+    const sel = $('#pc-po'); if (sel) sel.onchange = () => coPasar(did, { pedido: +sel.value, partner_id: prov.id });
+    db.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { L[inp.dataset.i][inp.dataset.k] = parseFloat(inp.value) || 0; pinta(); });
+    db.querySelectorAll('.pc-sal').forEach(a => a.onclick = e => { e.preventDefault(); const l = L[a.dataset.i]; l.saltar = !l.saltar; pinta(); });
     db.querySelectorAll('[data-cam]').forEach(a => a.onclick = e => {
       e.preventDefault(); const i = a.dataset.cam, box = db.querySelector(`[data-b="${i}"]`); box.hidden = false;
-      const inp = box.querySelector('input'), out = box.querySelector('div'); inp.focus(); let t;
-      out.innerHTML = `<a href="#" class="pc-opt" data-nuevo="1">＋ No es ninguno: crear artículo nuevo</a>`;
-      const bindNuevo = () => { const n = out.querySelector('[data-nuevo]'); if (n) n.onclick = ev => { ev.preventDefault(); L[i].product_id = null; L[i].producto = null; L[i].como = null; L[i].crear = true; pinta(); }; };
-      bindNuevo();
-      inp.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
-        const r = await api(`/api/ac/productos?q=${encodeURIComponent(inp.value)}&company=${d.doc.empresa}`);
-        out.innerHTML = r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)}</a>`).join('') + `<a href="#" class="pc-opt" data-nuevo="1">＋ Crear artículo nuevo</a>`;
-        out.querySelectorAll('[data-id]').forEach(o => o.onclick = ev => { ev.preventDefault(); const p = r.find(x => x.id == o.dataset.id); L[i].product_id = p.id; L[i].producto = p.display_name; L[i].como = 'a mano'; L[i].crear = false; pinta(); });
-        bindNuevo();
-      }, 300); };
+      const inp = box.querySelector('input'), out = box.querySelector('div'); inp.value = L[i].ref || ''; inp.focus(); let t;
+      const busca = async () => {
+        const r = await api(`/api/ac/productos?q=${encodeURIComponent(inp.value)}`);
+        out.innerHTML = r.length ? r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)}</a>`).join('') : '<small class="muted">Nada. Prueba con el EAN o parte del nombre.</small>';
+        out.querySelectorAll('[data-id]').forEach(o => o.onclick = ev => { ev.preventDefault(); const p = r.find(x => x.id == o.dataset.id);
+          Object.assign(L[i], { product_id: p.id, producto: p.display_name, como: 'elegido', saltar: false });
+          pinta(); });
+      };
+      inp.oninput = () => { clearTimeout(t); t = setTimeout(busca, 300); }; if (inp.value.length >= 2) busca();
     });
     $('#pc-go').onclick = async () => {
-      if (!confirm(`¿Crear y confirmar el pedido de compra a ${prov.display_name}?`)) return;
-      $('#pc-go').disabled = true; $('#pc-go').textContent = 'Creando en Odoo…';
+      if (!confirm(`¿Cuadrar ${po ? po.name : 'un pedido nuevo'} con este documento y confirmarlo?`)) return;
+      $('#pc-go').disabled = true; $('#pc-go').textContent = 'Cuadrando en Odoo…';
       try {
-        const r = await jpost(`/api/compras/docs/${did}/a_compras`, { partner_id: prov.id, lineas: L.map(l => ({ ...l, crear: !l.product_id && !!l.crear, sugerencias: undefined })) });
-        $('#pc-res').innerHTML = `<div class="ac-docs"><b>✓ Pedido ${escH(r.pedido)} confirmado.</b><br>
-          Recepción para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> (en la pestaña Recepciones).
-          ${r.factura ? `<br>Factura en borrador enlazada para Mayte (total ${eu(r.factura.total)}).` : ''}
-          ${r.creados.length ? `<br>Artículos nuevos: ${r.creados.length}. Revisad precio de venta y foto.` : ''}
+        const r = await jpost(`/api/compras/docs/${did}/cuadrar/aplicar`, { partner_id: prov.id, pedido_id: po ? po.id : 0, lineas: L });
+        $('#pc-res').innerHTML = `<div class="ac-docs"><b>✓ ${escH(r.pedido)} cuadrado y confirmado</b> (base ${eu(r.base)}, total ${eu(r.total)}).<br>
+          Entrada para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> → pestaña Recepciones.
+          ${r.pendiente ? `<br>Lo que no ha venido queda en <b>${escH(r.pendiente)}</b> (borrador).` : ''}
+          ${r.anadidas.length ? `<br>Añadidas al pedido: ${r.anadidas.map(escH).join(', ')}.` : ''}
           ${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>`;
-        $('#pc-go').remove(); coDocs(); coBadge();
-      } catch (e) { alertBox(e.message); $('#pc-go').disabled = false; $('#pc-go').textContent = '🛒 Crear pedido de compra'; }
+        $('#pc-go').remove(); coDocs();
+      } catch (e) { alertBox(e.message); $('#pc-go').disabled = false; $('#pc-go').textContent = '✓ Cuadrar y confirmar pedido'; }
     };
   };
-  if (d.compra) {
-    db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">Este documento ya tiene el pedido <b>${escH(d.compra.pedido)}</b> · recepción ${escH((d.compra.recepciones || []).join(', ') || '—')}. No hace falta pasarlo otra vez.</div>`;
-    coDocs(); return;
-  }
   pinta();
 }
 /* --- recepciones --- */
@@ -172,6 +182,7 @@ function coRecRender() {
 }
 $('#co-rq').oninput = coRecRender;
 function coRecibirOpen(r) {
+  if (!CO_ALB && r.doc) CO_ALB = r.doc;
   const db = $('#co-db');
   db.innerHTML = `<h3>${escH(r.ref)} · ${escH(r.proveedor)}</h3><p class="muted">${escH(r.pedido || r.origen)} · ${escH(r.empresa)}${CO_ALB ? ` · albarán: <a target="_blank" rel="noopener" href="/api/compras/pdf/${CO_ALB.id}">${escH(CO_ALB.nombre)}</a>` : ''}</p>
     ${CO_ALB ? `<iframe class="co-pdf" src="/api/compras/pdf/${CO_ALB.id}#view=FitH"></iframe>` : '<p class="hint">Consejo: elige primero el PDF en "Albaranes subidos sin recibir" y quedará adjunto a la recepción en Odoo.</p>'}

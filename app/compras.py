@@ -228,107 +228,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 return ps[0]
         return None
 
-    VACIAS = {"de", "del", "la", "el", "con", "para", "por", "y", "en", "unidad", "unidades", "pack", "caja", "color", "colores",
-              "rotulador", "boligrafo", "bolígrafo", "cartucho", "toner", "tóner", "tinta", "original", "compatible", "generico", "genérico",
-              "negro", "azul", "rojo", "verde", "amarillo", "cyan", "magenta", "permanente", "marcador", "punta", "redonda", "biselada"}
-
-    def _sugerencias(ref, desc, cids):
-        """Artículos parecidos para que el usuario elija (no se casan solos para no equivocarse)."""
-        vistos, out = set(), []
-
-        def add(rs):
-            for p in rs:
-                if p["id"] not in vistos and len(out) < 6:
-                    vistos.add(p["id"]); out.append({"id": p["id"], "name": p["display_name"]})
-        palabras = [w for w in re.findall(r"[\w/\-\.]+", desc.lower()) if w not in VACIAS and len(w) >= 2]
-        nums = [w for w in palabras if re.search(r"\d", w)]
-        txt = [w for w in palabras if not re.search(r"\d", w)]
-        # marca + modelo (p. ej. "edding" + "500", "stabilo" "boss" "70")
-        claves = (txt[:1] + nums[:1]) if nums else txt[:2]
-        for intento in (txt[:2] + nums[:1], claves):
-            if len(intento) >= 2 and len(out) < 6:
-                dom = [("purchase_ok", "=", True)] + [("name", "ilike", w) for w in intento]
-                add(odoo.search_read("product.product", dom, ["display_name"], company_ids=cids, limit=6))
-        if ref and len(ref) >= 4 and len(out) < 6:
-            add(odoo.search_read("product.product", ["|", ("default_code", "ilike", ref), ("name", "ilike", ref)], ["display_name"], company_ids=cids, limit=4))
-        return out
-
-    def _casar_lineas(lineas, partner_id, cids):
-        out = []
-        for l in lineas:
-            ref, ean, desc = str(l.get("ref") or "").strip(), re.sub(r"\D", "", str(l.get("ean") or "")), (l.get("descripcion") or "").strip()
-            prod, como = None, None
-            if partner_id and ref:
-                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", ref)], ["product_id", "product_tmpl_id"], company_ids=cids, limit=1)
-                if si:
-                    if si[0].get("product_id"):
-                        prod = {"id": si[0]["product_id"][0], "name": si[0]["product_id"][1]}
-                    else:
-                        pp = odoo.search_read("product.product", [("product_tmpl_id", "=", si[0]["product_tmpl_id"][0])], ["display_name"], company_ids=cids, limit=1)
-                        prod = pp and {"id": pp[0]["id"], "name": pp[0]["display_name"]}
-                    como = "ref. proveedor"
-            if not prod and len(ean) >= 8:
-                pp = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=cids, limit=1)
-                if pp:
-                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "EAN"
-            if not prod and ref:
-                pp = odoo.search_read("product.product", [("default_code", "=ilike", ref)], ["display_name"], company_ids=cids, limit=2)
-                if len(pp) == 1:
-                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "referencia"
-            if not prod and len(desc) >= 6:
-                pp = odoo.search_read("product.product", [("name", "=ilike", desc), ("purchase_ok", "=", True)], ["display_name"], company_ids=cids, limit=2)
-                if len(pp) == 1:
-                    prod, como = {"id": pp[0]["id"], "name": pp[0]["display_name"]}, "nombre"
-            sug = []
-            if not prod:
-                sug = _sugerencias(ref, desc, cids)
-            out.append({"ref": ref, "ean": ean, "descripcion": desc, "cantidad": _num(l.get("cantidad")), "precio": _num(l.get("precio")),
-                        "descuento": _num(l.get("descuento")), "iva": _num(l.get("iva")) or 21.0,
-                        "product_id": prod["id"] if prod else None, "producto": prod["name"] if prod else None, "como": como,
-                        "sugerencias": sug})
-        return out
-
-    @app.post("/api/compras/docs/{did}/preparar")
-    def doc_preparar(did: str, request: Request, releer: int = 0):
-        """Lee el PDF y propone el pedido de compra: proveedor, líneas casadas con artículos de Odoo y pedidos abiertos del proveedor."""
-        u, cids = ctx(request, "all")
-        r = _doc(did)
-        if r["empresa"] not in cids:
-            raise HTTPException(403, "Documento de otra empresa")
-
-        def run():
-            lec = _lectura(r, bool(releer))
-            # ¿ya está en compras? (pedido con la misma ref. del proveedor, o factura con ese número enlazada a un pedido)
-            num = (lec.get("numero") or "").strip()
-            if num and not r["compra"]:
-                ya = odoo.search_read("purchase.order", [("company_id", "=", r["empresa"]), ("partner_ref", "=ilike", num), ("state", "!=", "cancel")],
-                                      ["name", "picking_ids"], company_ids=[r["empresa"]], limit=1)
-                if not ya:
-                    fx = odoo.search_read("account.move", [("company_id", "=", r["empresa"]), ("move_type", "=", "in_invoice"), ("ref", "=ilike", num)],
-                                          ["invoice_origin"], company_ids=[r["empresa"]], limit=1)
-                    if fx and fx[0].get("invoice_origin"):
-                        ya = odoo.search_read("purchase.order", [("company_id", "=", r["empresa"]), ("name", "=", fx[0]["invoice_origin"].split(",")[0].strip())],
-                                              ["name", "picking_ids"], company_ids=[r["empresa"]], limit=1)
-                if ya:
-                    pk = odoo.search_read("stock.picking", [("id", "in", ya[0]["picking_ids"])], ["name"], company_ids=[r["empresa"]]) if ya[0]["picking_ids"] else []
-                    comp = {"pedido": ya[0]["name"], "pedido_id": ya[0]["id"], "recepciones": [x["name"] for x in pk], "ya_estaba": True}
-                    with lock, con() as c:
-                        c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(comp, ensure_ascii=False), r["id"]))
-                    return {"doc": {"id": r["id"], "nombre": r["nombre"], "tipo": r["tipo"]}, "compra": comp}
-            prov = _buscar_proveedor(lec, cids)
-            lineas = _casar_lineas(lec.get("lineas") or [], prov and prov["id"], cids)
-            abiertos = []
-            if prov:
-                abiertos = [{"id": p["id"], "name": p["name"], "fecha": (p.get("date_order") or "")[:10], "total": p["amount_untaxed"], "estado": p["receipt_status"]}
-                            for p in odoo.search_read("purchase.order", [("partner_id", "child_of", prov["id"]), ("company_id", "=", r["empresa"]),
-                                                                         ("state", "in", ["draft", "sent", "purchase"]), ("receipt_status", "!=", "full")],
-                                                      ["name", "date_order", "amount_untaxed", "receipt_status"], company_ids=[r["empresa"]], limit=10, order="id desc")]
-            return {"doc": {"id": r["id"], "nombre": r["nombre"], "tipo": r["tipo"], "empresa": r["empresa"], "odoo_id": r["odoo_id"]},
-                    "lectura": {k: lec.get(k) for k in ("tipo", "proveedor", "nif_proveedor", "numero", "fecha", "base", "iva_total", "total", "portes")},
-                    "proveedor": prov, "lineas": lineas, "pedidos_abiertos": abiertos,
-                    "compra": json.loads(r["compra"]) if r["compra"] else None}
-        return guard(run)
-
+    # ---------- Cuadrar un albarán/factura con el pedido de compra abierto del proveedor ----------
+    # Procedimiento de Juan: identificar cada línea (EAN > ref. interna/código proveedor > nombre), dejar el pedido
+    # exactamente como el documento (cantidad, precio, dto.), añadir lo que falte, pasar lo que no viene a un pedido
+    # "Pendiente de Pxxxxx", poner el nº del documento en la referencia del proveedor y confirmar. La entrada queda
+    # en Recepciones para que almacén la compruebe. No se crean artículos nuevos desde aquí.
     _campos = {}
 
     def _tiene_campo(model, campo, cid):
@@ -345,121 +249,264 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             cache[k] = pref[0]["id"] if pref else None
         return cache[k]
 
-    @app.post("/api/compras/docs/{did}/a_compras")
-    async def doc_a_compras(did: str, request: Request):
-        """Crea (y confirma) el pedido de compra con las líneas revisadas. La recepción queda para que almacén la compruebe.
-        Si el documento es una factura, rellena la factura en borrador enlazada al pedido para que Mayte le dé el OK."""
+    def _ean13(base12):
+        s = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(base12))
+        return base12 + str((10 - s % 10) % 10)
+
+    # reglas de EAN por proveedor (partner_id): Dohe 8421938 + código 5 cifras; Poessa 843017 + código 6 cifras
+    EAN_PROV = {7290: ("8421938", 5), 7140: ("843017", 6)}
+
+    def _tokens(t):
+        return set(w for w in re.findall(r"[a-z0-9]+", (t or "").lower()) if len(w) >= 2)
+
+    def _identificar(l, partner_id, cids, po_lines):
+        """Devuelve (product_id, nombre, como) o (None, None, None)."""
+        ref = str(l.get("ref") or "").strip()
+        ean = re.sub(r"\D", "", str(l.get("ean") or ""))
+        if not ean and partner_id in EAN_PROV and ref.isdigit():
+            pre, n = EAN_PROV[partner_id]
+            if len(ref) <= n:
+                ean = _ean13(pre + ref.zfill(n))
+        if len(ean) >= 8:
+            pp = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=cids, limit=1)
+            if not pp:
+                try:
+                    pb = odoo.search_read("product.barcode", [("name", "=", ean)], ["product_id"], company_ids=cids, limit=1)
+                    if pb and pb[0].get("product_id"):
+                        pp = [{"id": pb[0]["product_id"][0], "display_name": pb[0]["product_id"][1]}]
+                except Exception:
+                    pass
+            if pp:
+                return pp[0]["id"], pp[0]["display_name"], "EAN"
+        if ref:
+            pp = odoo.search_read("product.product", [("default_code", "=ilike", ref)], ["display_name"], company_ids=cids, limit=2)
+            if len(pp) == 1:
+                return pp[0]["id"], pp[0]["display_name"], "referencia"
+            if partner_id:
+                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", ref)], ["product_id", "product_tmpl_id"], company_ids=cids, limit=1)
+                if si:
+                    if si[0].get("product_id"):
+                        return si[0]["product_id"][0], si[0]["product_id"][1], "cód. proveedor"
+                    pp = odoo.search_read("product.product", [("product_tmpl_id", "=", si[0]["product_tmpl_id"][0])], ["display_name"], company_ids=cids, limit=1)
+                    if pp:
+                        return pp[0]["id"], pp[0]["display_name"], "cód. proveedor"
+        # contra las líneas del pedido: que estén todos los números de la descripción y alguna palabra
+        desc = l.get("descripcion") or ""
+        td = _tokens(desc + " " + ref)
+        nums = {w for w in td if re.search(r"\d", w)}
+        mejor, punt = None, 0
+        for pl in po_lines:
+            tp = _tokens(pl["name"] + " " + (pl["product_id"][1] if pl.get("product_id") else ""))
+            if nums and not nums <= tp:
+                continue
+            comunes = len(td & tp)
+            if comunes >= 2 and comunes > punt:
+                mejor, punt = pl, comunes
+        if mejor:
+            return mejor["product_id"][0], mejor["product_id"][1], "nombre (revisar)"
+        if len(desc) >= 6:
+            pp = odoo.search_read("product.product", [("name", "=ilike", desc)], ["display_name"], company_ids=cids, limit=2)
+            if len(pp) == 1:
+                return pp[0]["id"], pp[0]["display_name"], "nombre"
+        return None, None, None
+
+    def _pedidos_abiertos(partner_id, cids):
+        return odoo.search_read("purchase.order", [("partner_id", "child_of", partner_id), ("state", "in", ["draft", "sent", "to approve"])],
+                                ["name", "date_order", "amount_untaxed", "origin", "company_id", "partner_ref"], company_ids=cids, order="id asc")
+
+    def _lineas_pedido(po_id, cids):
+        return odoo.search_read("purchase.order.line", [("order_id", "=", po_id), ("display_type", "=", False)],
+                                ["product_id", "name", "product_qty", "price_unit", "discount", "price_subtotal"], company_ids=cids)
+
+    @app.post("/api/compras/docs/{did}/cuadrar")
+    async def doc_cuadrar(did: str, request: Request, releer: int = 0, pedido: int = 0):
+        """Lee el documento y lo cruza con el pedido abierto del proveedor. Solo consulta, no cambia nada."""
+        u, cids = ctx(request, "all")
+        r = _doc(did)
+        if r["empresa"] not in cids:
+            raise HTTPException(403, "Documento de otra empresa")
+        b = {}
+        try:
+            b = await request.json()
+        except Exception:
+            pass
+
+        def run():
+            lec = _lectura(r, bool(releer))
+            num = (lec.get("numero") or "").strip()
+            info = {"doc": {"id": r["id"], "nombre": r["nombre"]},
+                    "lectura": {k: lec.get(k) for k in ("tipo", "proveedor", "nif_proveedor", "numero", "fecha", "base", "iva_total", "total", "portes")}}
+            if r["compra"]:
+                info["compra"] = json.loads(r["compra"]); return info
+            if num:
+                ya = odoo.search_read("purchase.order", [("partner_ref", "=ilike", num), ("state", "in", ["purchase", "done"])], ["name"], company_ids=cids, limit=1)
+                if ya:
+                    info["ya_cuadrado"] = ya[0]["name"]
+                    return info
+            prov = None
+            if b.get("partner_id"):
+                pp = odoo.search_read("res.partner", [("id", "=", int(b["partner_id"]))], ["display_name", "vat"], company_ids=cids)
+                prov = pp[0] if pp else None
+            prov = prov or _buscar_proveedor(lec, cids)
+            info["proveedor"] = prov
+            if not prov:
+                return info
+            abiertos = _pedidos_abiertos(prov["id"], cids)
+            info["pedidos_abiertos"] = [{"id": p["id"], "name": p["name"], "fecha": (p["date_order"] or "")[:10], "base": p["amount_untaxed"],
+                                         "origen": p.get("origin") or "", "empresa": p["company_id"][1]} for p in abiertos]
+            info["confirmados"] = [p["name"] for p in odoo.search_read("purchase.order", [("partner_id", "child_of", prov["id"]), ("state", "=", "purchase"),
+                                                                                           ("receipt_status", "in", ["pending", "partial"])], ["name"], company_ids=cids, limit=5)]
+            # pedido elegido: el indicado o el que más líneas casa
+            lineas_doc = lec.get("lineas") or []
+            cand = [p for p in abiertos if not pedido or p["id"] == pedido]
+            mejor = None
+            for p in cand:
+                pls = _lineas_pedido(p["id"], cids)
+                ids = {pl["product_id"][0] for pl in pls if pl.get("product_id")}
+                res = []
+                for l in lineas_doc:
+                    pid, nom, como = _identificar(l, prov["id"], cids, pls)
+                    res.append((l, pid, nom, como))
+                score = sum(1 for x in res if x[1] in ids)
+                if mejor is None or score > mejor[0]:
+                    mejor = (score, p, pls, res)
+            if mejor is None:  # sin pedido abierto: identificar igualmente para crear uno con lo identificado
+                res = [(l,) + _identificar(l, prov["id"], cids, []) for l in lineas_doc]
+                mejor = (0, None, [], res)
+            _, po, pls, res = mejor
+            usados, out = set(), []
+            for l, pid, nom, como in res:
+                pl = next((x for x in pls if x.get("product_id") and x["product_id"][0] == pid and x["id"] not in usados), None)
+                if pl:
+                    usados.add(pl["id"])
+                out.append({"ref": str(l.get("ref") or ""), "ean": str(l.get("ean") or ""), "descripcion": l.get("descripcion") or "",
+                            "cantidad": _num(l.get("cantidad")), "precio": _num(l.get("precio")), "descuento": _num(l.get("descuento")),
+                            "iva": _num(l.get("iva")) or 21.0, "product_id": pid, "producto": nom, "como": como,
+                            "po_line": pl["id"] if pl else None, "pedido_cant": pl["product_qty"] if pl else None,
+                            "pedido_precio": pl["price_unit"] if pl else None, "pedido_dto": pl.get("discount") if pl else None})
+            info["pedido"] = {"id": po["id"], "name": po["name"], "origen": po.get("origin") or "", "empresa": po["company_id"][0]} if po else None
+            info["lineas"] = out
+            info["no_vienen"] = [{"id": x["id"], "producto": x["product_id"][1] if x.get("product_id") else x["name"], "cantidad": x["product_qty"],
+                                  "precio": x["price_unit"]} for x in pls if x["id"] not in usados]
+            return info
+        return guard(run)
+
+    @app.post("/api/compras/docs/{did}/cuadrar/aplicar")
+    async def doc_cuadrar_aplicar(did: str, request: Request):
         u, cids = ctx(request, "all")
         b = await request.json()
         r = _doc(did)
         if r["empresa"] not in cids:
             raise HTTPException(403, "Documento de otra empresa")
         if r["compra"]:
-            raise HTTPException(400, "Este documento ya se pasó a compras: " + json.loads(r["compra"]).get("pedido", ""))
+            raise HTTPException(400, "Este documento ya está cuadrado: " + json.loads(r["compra"]).get("pedido", ""))
         partner_id = int(b.get("partner_id") or 0)
-        lineas = [l for l in (b.get("lineas") or []) if _num(l.get("cantidad")) > 0]
-        if not partner_id:
-            raise HTTPException(400, "Falta el proveedor")
-        if not lineas:
-            raise HTTPException(400, "No hay líneas con cantidad")
-        cid = r["empresa"]
-        c1 = [cid]
+        po_id = int(b.get("pedido_id") or 0)
+        lineas = [l for l in (b.get("lineas") or []) if l.get("product_id") and _num(l.get("cantidad")) > 0 and not l.get("saltar")]
+        if not partner_id or not lineas:
+            raise HTTPException(400, "Falta el proveedor o no hay líneas identificadas")
 
         def run():
             lec = json.loads(r["lectura"]) if r["lectura"] else {}
-            avisos, creados = [], []
-            # 1) artículos nuevos
-            for l in lineas:
-                if l.get("product_id"):
-                    continue
-                if not l.get("crear"):
-                    raise HTTPException(400, f"La línea \"{l.get('descripcion')}\" no tiene artículo: elígelo o marca crearlo")
-                vals = {"name": l.get("descripcion") or l.get("ref") or "Artículo nuevo", "purchase_ok": True, "sale_ok": True,
-                        "standard_price": _num(l.get("precio")), "type": "consu",
-                        "seller_ids": [[0, 0, {"partner_id": partner_id, "product_code": l.get("ref") or False, "price": _num(l.get("precio")), "company_id": cid}]]}
-                if _tiene_campo("product.product", "is_storable", cid):
-                    vals["is_storable"] = True
-                if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], company_ids=cids, limit=1):
-                    vals["default_code"] = l["ref"]
-                ean = re.sub(r"\D", "", str(l.get("ean") or ""))
-                if len(ean) >= 8 and not odoo.search_read("product.product", [("barcode", "=", ean)], ["id"], company_ids=cids, limit=1):
-                    vals["barcode"] = ean
-                pid = odoo.call("product.product", "create", c1, vals_list=[vals])
-                l["product_id"] = pid[0] if isinstance(pid, list) else pid
-                creados.append(vals["name"])
-            # 2) ref. del proveedor en artículos que no la tenían (para casarlos solos la próxima vez)
-            for l in lineas:
-                if l.get("ref") and l.get("como") in ("EAN", "referencia", "nombre", "a mano"):
-                    tm = odoo.search_read("product.product", [("id", "=", int(l["product_id"]))], ["product_tmpl_id"], company_ids=c1)
-                    if tm and not odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_tmpl_id", "=", tm[0]["product_tmpl_id"][0])], ["id"], company_ids=c1, limit=1):
-                        try:
-                            odoo.call("product.supplierinfo", "create", c1, vals_list=[{"partner_id": partner_id, "product_tmpl_id": tm[0]["product_tmpl_id"][0],
-                                                                                        "product_code": l["ref"], "price": _num(l.get("precio")), "company_id": cid}])
-                        except Exception:
-                            pass
-            # 3) pedido de compra
+            avisos = []
+            if po_id:
+                po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "state", "company_id", "picking_type_id", "origin"], company_ids=cids)
+                if not po or po[0]["state"] not in ("draft", "sent", "to approve"):
+                    raise HTTPException(400, "El pedido ya no está abierto: vuelve a abrir el documento")
+                po = po[0]
+                cid = po["company_id"][0]
+            else:
+                cid = 1 if 1 in cids else r["empresa"]
+                nuevo = odoo.call("purchase.order", "create", cids, vals_list=[{"partner_id": partner_id, "company_id": cid}])
+                nuevo = nuevo[0] if isinstance(nuevo, list) else nuevo
+                po = odoo.search_read("purchase.order", [("id", "=", nuevo)], ["name", "state", "company_id", "picking_type_id", "origin"], company_ids=cids)[0]
             ftax = "tax_ids" if _tiene_campo("purchase.order.line", "tax_ids", cid) else "taxes_id"
-            olines = []
+            pls = {x["id"]: x for x in odoo.search_read("purchase.order.line", [("order_id", "=", po["id"]), ("display_type", "=", False)],
+                                                         ["product_id", "name", "product_qty", "price_unit", "discount", ftax, "product_uom_id" if _tiene_campo("purchase.order.line", "product_uom_id", cid) else "product_uom"], company_ids=cids)}
+            uom_f = "product_uom_id" if _tiene_campo("purchase.order.line", "product_uom_id", cid) else "product_uom"
+            # artículos elegidos a mano que ya estaban en el pedido: usar esa línea
+            usados = {int(l["po_line"]) for l in lineas if l.get("po_line")}
             for l in lineas:
-                t = _impuesto(cid, _num(l.get("iva")) or 21.0)
-                v = {"product_id": int(l["product_id"]), "product_qty": _num(l["cantidad"]), "price_unit": _num(l.get("precio")),
-                     ftax: [[6, 0, [t] if t else []]]}
-                if _num(l.get("descuento")):
-                    v["discount"] = _num(l.get("descuento"))
-                if l.get("descripcion"):
-                    v["name"] = (f"[{l['ref']}] " if l.get("ref") else "") + l["descripcion"]
-                olines.append([0, 0, v])
-            portes = _num(lec.get("portes"))
-            if portes:
-                pp = odoo.search_read("product.product", [("name", "ilike", "portes"), ("purchase_ok", "=", True)], ["id"], company_ids=c1, limit=1)
-                if pp:
-                    olines.append([0, 0, {"product_id": pp[0]["id"], "product_qty": 1, "price_unit": portes, ftax: [[6, 0, [_impuesto(cid, 21.0)]]]}])
+                if not l.get("po_line"):
+                    x = next((k for k, x in pls.items() if k not in usados and x.get("product_id") and x["product_id"][0] == int(l["product_id"])), None)
+                    if x:
+                        l["po_line"] = x; usados.add(x)
+            # 1) lo que no viene -> pedido "Pendiente de Pxxxxx" (antes de quitarlo del original)
+            sobran = [x for k, x in pls.items() if k not in usados]
+            pendiente = None
+            if sobran:
+                vals = {"partner_id": partner_id, "company_id": cid, "origin": f"Pendiente de {po['name']}",
+                        "order_line": [[0, 0, {"product_id": x["product_id"][0], "name": x["name"], "product_qty": x["product_qty"], "price_unit": x["price_unit"],
+                                               "discount": x.get("discount") or 0, ftax: [[6, 0, x.get(ftax) or []]],
+                                               uom_f: (x.get(uom_f) or [False])[0]}] for x in sobran if x.get("product_id")]}
+                if po.get("picking_type_id"):
+                    vals["picking_type_id"] = po["picking_type_id"][0]
+                pn = odoo.call("purchase.order", "create", cids, vals_list=[vals])
+                pn = pn[0] if isinstance(pn, list) else pn
+                pendiente = odoo.search_read("purchase.order", [("id", "=", pn)], ["name"], company_ids=cids)[0]["name"]
+            # 2) dejar el pedido igual que el documento
+            cmds = [[2, x["id"]] for x in sobran]
+            t = _impuesto(cid, 21.0)
+            nuevas = []
+            for l in lineas:
+                v = {"product_qty": _num(l["cantidad"]), "price_unit": _num(l["precio"]), "discount": _num(l.get("descuento"))}
+                if l.get("po_line") and int(l["po_line"]) in pls:
+                    cmds.append([1, int(l["po_line"]), v])
                 else:
-                    avisos.append(f"Portes de {portes:.2f} € sin artículo \"Portes\" en Odoo: añádelos a mano en la factura")
-            po_vals = {"partner_id": partner_id, "company_id": cid, "order_line": olines, "partner_ref": lec.get("numero") or r["nombre"]}
-            po = odoo.call("purchase.order", "create", c1, vals_list=[po_vals])
-            po = po[0] if isinstance(po, list) else po
-            odoo.call("purchase.order", "button_confirm", c1, ids=[po])
-            pod = odoo.search_read("purchase.order", [("id", "=", po)], ["name", "picking_ids", "order_line", "amount_untaxed"], company_ids=c1)[0]
-            picks = odoo.search_read("stock.picking", [("id", "in", pod["picking_ids"])], ["name"], company_ids=c1) if pod["picking_ids"] else []
-            odoo.call("ir.attachment", "create", c1, vals_list=[{"name": r["nombre"] or "documento.pdf", "res_model": "purchase.order", "res_id": po,
-                                                                  "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
-            # 4) factura en borrador enlazada (solo si el PDF es una factura)
-            factura = None
-            if r["tipo"] == "factura" or (lec.get("tipo") or "").lower() == "factura":
-                mid = r["odoo_id"] if r["odoo_model"] == "account.move" else None
-                if mid:
-                    st = odoo.search_read("account.move", [("id", "=", mid)], ["state"], company_ids=c1)
-                    if not st or st[0]["state"] != "draft":
-                        mid = None
-                if not mid:
-                    jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", cid)], ["id"], company_ids=c1, limit=1)
-                    mid = odoo.call("account.move", "create", c1, vals_list=[{"move_type": "in_invoice", "journal_id": jr[0]["id"], "partner_id": partner_id}],
-                                    context={"default_move_type": "in_invoice"})
-                    mid = mid[0] if isinstance(mid, list) else mid
-                    odoo.call("ir.attachment", "create", c1, vals_list=[{"name": r["nombre"] or "factura.pdf", "res_model": "account.move", "res_id": mid,
-                                                                          "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
-                pls = odoo.search_read("purchase.order.line", [("order_id", "=", po)], ["product_id", "product_qty", "price_unit", "discount", ftax, "name"], company_ids=c1)
-                ilines = [[5, 0, 0]] + [[0, 0, {"purchase_line_id": pl["id"], "product_id": pl["product_id"][0], "name": pl["name"], "quantity": pl["product_qty"],
-                                                  "price_unit": pl["price_unit"], "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl[ftax]]]}] for pl in pls]
-                vals = {"partner_id": partner_id, "invoice_line_ids": ilines, "invoice_origin": pod["name"]}
-                if lec.get("numero"):
-                    vals["ref"] = lec["numero"]
-                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", lec.get("fecha") or ""):
-                    vals["invoice_date"] = lec["fecha"]
-                odoo.call("account.move", "write", c1, ids=[mid], vals=vals,
-                          context={"default_move_type": "in_invoice"})
-                fm = odoo.search_read("account.move", [("id", "=", mid)], ["amount_total"], company_ids=c1)
-                factura = {"id": mid, "total": fm[0]["amount_total"] if fm else None}
-                if fm and _num(lec.get("total")) and abs(fm[0]["amount_total"] - _num(lec["total"])) > 0.02:
-                    avisos.append(f"El total de la factura en Odoo ({fm[0]['amount_total']:.2f} €) no cuadra con el PDF ({_num(lec['total']):.2f} €): Mayte que lo revise")
-            res = {"pedido": pod["name"], "pedido_id": po, "recepciones": [p["name"] for p in picks], "factura": factura,
-                   "creados": creados, "avisos": avisos, "por": u, "cuando": time.time()}
+                    ti = _impuesto(cid, _num(l.get("iva")) or 21.0) or t
+                    v.update({"product_id": int(l["product_id"]), ftax: [[6, 0, [ti] if ti else []]]})
+                    cmds.append([0, 0, v]); nuevas.append(l.get("producto") or l.get("descripcion"))
+            num = (lec.get("numero") or "").strip() or (r["nombre"] or "")
+            odoo.call("purchase.order", "write", cids, ids=[po["id"]], vals={"order_line": cmds, "partner_ref": num})
+            # 3) que la base cuadre al céntimo con el documento (ajuste del 4º decimal del precio)
+            base_doc = _num(lec.get("base")) - _num(lec.get("portes"))
+            pod = odoo.search_read("purchase.order", [("id", "=", po["id"])], ["amount_untaxed", "amount_tax", "amount_total"], company_ids=cids)[0]
+            dif = round(base_doc - pod["amount_untaxed"], 2) if base_doc > 0 else 0
+            if dif and abs(dif) <= 0.03:
+                ls = odoo.search_read("purchase.order.line", [("order_id", "=", po["id"]), ("display_type", "=", False)], ["product_qty", "price_unit", "discount"], company_ids=cids)
+                ls = [x for x in ls if x["product_qty"]]
+                if ls:
+                    x = max(ls, key=lambda x: x["product_qty"])
+                    f = x["product_qty"] * (1 - (x.get("discount") or 0) / 100)
+                    odoo.call("purchase.order.line", "write", cids, ids=[x["id"]], vals={"price_unit": round(x["price_unit"] + dif / f, 4)})
+                    pod = odoo.search_read("purchase.order", [("id", "=", po["id"])], ["amount_untaxed", "amount_tax", "amount_total"], company_ids=cids)[0]
+            if base_doc > 0 and abs(pod["amount_untaxed"] - base_doc) > 0.005:
+                avisos.append(f"La base del pedido ({pod['amount_untaxed']:.2f} €) no cuadra con la del documento ({base_doc:.2f} €)")
+            if _num(lec.get("iva_total")) and abs(pod["amount_tax"] - _num(lec["iva_total"])) > 0.005:
+                avisos.append(f"IVA: Odoo {pod['amount_tax']:.2f} € / documento {_num(lec['iva_total']):.2f} €")
+            if _num(lec.get("portes")):
+                avisos.append(f"El documento lleva {_num(lec['portes']):.2f} € de portes: no se han metido en el pedido")
+            # 4) confirmar: crea la entrada para almacén
+            odoo.call("purchase.order", "button_confirm", cids, ids=[po["id"]])
+            pod = odoo.search_read("purchase.order", [("id", "=", po["id"])], ["name", "state", "picking_ids", "amount_untaxed", "amount_total"], company_ids=cids)[0]
+            picks = odoo.search_read("stock.picking", [("id", "in", pod["picking_ids"]), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=cids) if pod["picking_ids"] else []
+            odoo.call("ir.attachment", "create", cids, vals_list=[{"name": r["nombre"] or "documento.pdf", "res_model": "purchase.order", "res_id": po["id"],
+                                                                    "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+            # 5) fichas: línea de proveedor con precio, dto. y código; coste si está a 0
+            for l in lineas:
+                try:
+                    tm = odoo.search_read("product.product", [("id", "=", int(l["product_id"]))], ["product_tmpl_id"], company_ids=cids)[0]["product_tmpl_id"][0]
+                    sv = {"price": _num(l["precio"]), "discount": _num(l.get("descuento"))}
+                    if l.get("ref"):
+                        sv["product_code"] = l["ref"]
+                    si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_tmpl_id", "=", tm), ("company_id", "in", [cid, False])], ["id"], company_ids=cids, limit=1)
+                    if si:
+                        odoo.call("product.supplierinfo", "write", cids, ids=[si[0]["id"]], vals=sv)
+                    else:
+                        odoo.call("product.supplierinfo", "create", cids, vals_list=[dict(sv, partner_id=partner_id, product_tmpl_id=tm, company_id=cid)])
+                    neto = round(_num(l["precio"]) * (1 - _num(l.get("descuento")) / 100), 4)
+                    for c in (1, 4, 5):
+                        if c in cids:
+                            cp = odoo.search_read("product.product", [("id", "=", int(l["product_id"]))], ["standard_price"], company_ids=[c])
+                            if cp and not cp[0]["standard_price"]:
+                                odoo.call("product.product", "write", [c], ids=[int(l["product_id"])], vals={"standard_price": neto})
+                except Exception as e:
+                    avisos.append(f"Ficha de {l.get('producto')}: {str(e)[:120]}")
+            res = {"pedido": pod["name"], "pedido_id": po["id"], "estado": pod["state"], "recepciones": [p["name"] for p in picks],
+                   "pendiente": pendiente, "base": pod["amount_untaxed"], "total": pod["amount_total"], "anadidas": nuevas,
+                   "avisos": avisos, "por": u, "cuando": time.time()}
             with lock, con() as c:
-                # el albarán sigue "por recibir" para que almacén lo elija al comprobar la recepción
                 c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(res, ensure_ascii=False), did))
-                if factura:
-                    c.execute("UPDATE docs SET odoo_model='account.move', odoo_id=? WHERE id=?", (factura["id"], did))
             return res
         return guard(run)
 
@@ -487,6 +534,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 lines.setdefault(m["picking_id"][0], []).append({"move_id": m["id"], "producto": m["product_id"][1], "product_id": m["product_id"][0],
                                                                  "pedido": m["product_uom_qty"]})
             hoy = dt.date.today()
+            docs_po = {}
+            with con() as c:
+                for d in c.execute("SELECT id, nombre, compra FROM docs WHERE compra IS NOT NULL").fetchall():
+                    try:
+                        docs_po[json.loads(d["compra"]).get("pedido_id")] = {"id": d["id"], "nombre": d["nombre"]}
+                    except Exception:
+                        pass
             out = []
             for p in pk:
                 fecha = (p.get("scheduled_date") or "")[:10]
@@ -495,7 +549,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                             "partner_id": (p.get("partner_id") or [0])[0], "origen": p.get("origin") or "",
                             "pedido": (p.get("purchase_id") or [0, ""])[1], "fecha": fecha, "dias": dias,
                             "pendiente_de": (p.get("backorder_id") or [0, ""])[1], "empresa": p["company_id"][1],
-                            "lineas": lines.get(p["id"], [])})
+                            "lineas": lines.get(p["id"], []), "doc": docs_po.get((p.get("purchase_id") or [0])[0])})
             return out
         return guard(run)
 
