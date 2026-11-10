@@ -9,6 +9,8 @@ async function maOpen() {
   clearTimeout(MA_T);
   try { MA_L = await api('/api/correo?estado=' + MA_E); } catch (e) { $('#ma-list').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
   maLista();
+  api('/api/correo/cuentas').then(cs => { $('#ma-cts').innerHTML = cs.length ? cs.map(c => `<span title="${escH(c.error || '')}">${c.ok === false ? '🔴' : c.ok ? '🟢' : '⏳'} ${escH(c.cuenta)}</span>`).join(' · ')
+    : 'Sin cuentas de correo: rellena el archivo <b>correo_cuentas.txt</b> en la carpeta de datos del panel en el NAS.'; }).catch(() => {});
   const nb = $('#nb-ma'); if (nb && MA_E === 'pendientes') { const n = MA_L.filter(m => m.clase === 'pedido' || m.urgencia === 'alta').length; nb.textContent = n; nb.hidden = !n; }
   if (MA_L.some(m => m.estado === 'clasificando') && !$('#v-ma').hidden) MA_T = setTimeout(maOpen, 8000);
 }

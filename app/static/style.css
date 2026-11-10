@@ -328,3 +328,4 @@ td:nth-child(n+2),th:nth-child(n+2){text-align:right;white-space:nowrap}
 .mp-p input{width:70px;padding:3px 6px}.mp-ops{display:flex;flex-direction:column;gap:3px;margin:6px 0 0 10px}.mp-o{display:flex;gap:8px;align-items:flex-start;padding:4px 8px;border-radius:8px;cursor:pointer}
 .mp-o.on{background:#efe8fb}.mp-o small{display:block;color:#666}.mp-o span{display:block}
 @media (max-width:900px){.ma{grid-template-columns:1fr}}
+#ma-cts{font-size:12px;margin:0 0 6px}

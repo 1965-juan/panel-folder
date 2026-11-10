@@ -132,6 +132,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                     adjuntos.append((a.get("nombre") or "adjunto", a.get("mime") or "", base64.b64decode(a.get("base64") or a.get("data") or "")))
                 except Exception:
                     pass
+        return guardar(campos, adjuntos)
+
+    def guardar(campos, adjuntos):
         msgid = (campos.get("message_id") or campos.get("messageId") or "").strip()
         if msgid:
             with con() as c:
@@ -158,6 +161,121 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                        campos.get("fecha") or campos.get("date") or "", texto[:60000], json.dumps(adj, ensure_ascii=False), "clasificando", time.time()))
         threading.Thread(target=clasificar, args=(mid,), daemon=True).start()
         return {"ok": True, "id": mid}
+
+    # ---------- lectura directa de las cuentas (IMAP), sin n8n ----------
+    cuentas_f = data_dir / "correo_cuentas.txt"
+    if not cuentas_f.exists():
+        cuentas_f.write_text(
+            "# Cuentas de correo que lee el Panel Folder (una por línea). Formato:\n"
+            "# correo;contraseña;servidor IMAP\n"
+            "# Ejemplos de servidor: imap.ionos.es (IONOS) · imap.nominalia.com (Nominalia)\n"
+            "# Quita la # del principio de cada línea que rellenes. El panel no marca los correos como leídos.\n"
+            "#info@foldercastellon.es;CONTRASEÑA;imap.ionos.es\n", encoding="utf-8")
+    ESTADO_IMAP = {}
+
+    def leer_cuentas():
+        out = []
+        for l in cuentas_f.read_text(encoding="utf-8", errors="ignore").splitlines():
+            l = l.strip()
+            if not l or l.startswith("#"):
+                continue
+            p = [x.strip() for x in l.split(";")]
+            if len(p) >= 3:
+                out.append({"usuario": p[0], "clave": p[1], "servidor": p[2], "puerto": int(p[3]) if len(p) > 3 and p[3].isdigit() else 993})
+        return out
+
+    def dec(v):
+        from email.header import decode_header, make_header
+        try:
+            return str(make_header(decode_header(v or "")))
+        except Exception:
+            return v or ""
+
+    def revisar_cuenta(cta):
+        import imaplib
+        import email
+        from email.utils import parsedate_to_datetime
+        with con() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS imap_estado (cuenta TEXT PRIMARY KEY, uidvalidity TEXT, ultimo INTEGER)")
+            st = c.execute("SELECT * FROM imap_estado WHERE cuenta=?", (cta["usuario"],)).fetchone()
+        M = imaplib.IMAP4_SSL(cta["servidor"], cta["puerto"], timeout=60)
+        try:
+            M.login(cta["usuario"], cta["clave"])
+            typ, d = M.select("INBOX", readonly=True)
+            uv = ""
+            try:
+                uv = M.response("UIDVALIDITY")[1][0].decode()
+            except Exception:
+                pass
+            if st and st["uidvalidity"] == uv:
+                typ, d = M.uid("search", None, f"UID {int(st['ultimo']) + 1}:*")
+            else:  # primera vez: solo los dos últimos días
+                desde = time.strftime("%d-%b-%Y", time.gmtime(time.time() - 2 * 86400))
+                typ, d = M.uid("search", None, f"SINCE {desde}")
+            uids = [int(x) for x in (d[0] or b"").split()]
+            if st and st["uidvalidity"] == uv:
+                uids = [u for u in uids if u > int(st["ultimo"])]
+            nuevos = 0
+            for uid in sorted(uids)[:200]:
+                typ, data = M.uid("fetch", str(uid), "(BODY.PEEK[])")
+                raw = next((x[1] for x in data if isinstance(x, tuple)), None)
+                if not raw:
+                    continue
+                msg = email.message_from_bytes(raw)
+                texto, html, adj = "", "", []
+                for part in msg.walk():
+                    if part.is_multipart():
+                        continue
+                    fn = part.get_filename()
+                    ct = part.get_content_type()
+                    payload = part.get_payload(decode=True) or b""
+                    if fn or part.get_content_disposition() == "attachment":
+                        adj.append((dec(fn) or "adjunto", ct, payload))
+                    elif ct == "text/plain" and not texto:
+                        texto = payload.decode(part.get_content_charset() or "utf-8", "replace")
+                    elif ct == "text/html" and not html:
+                        html = payload.decode(part.get_content_charset() or "utf-8", "replace")
+                try:
+                    fecha = parsedate_to_datetime(msg.get("Date")).strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    fecha = msg.get("Date") or ""
+                r = guardar({"de": dec(msg.get("From")), "cuenta": cta["usuario"], "asunto": dec(msg.get("Subject")), "fecha": fecha,
+                             "texto": texto, "html": html, "message_id": (msg.get("Message-ID") or "").strip()}, adj)
+                nuevos += 0 if r.get("repetido") else 1
+                with lock, con() as c:
+                    c.execute("INSERT OR REPLACE INTO imap_estado VALUES (?,?,?)", (cta["usuario"], uv, uid))
+            if not uids:
+                with lock, con() as c:
+                    if not st or st["uidvalidity"] != uv:
+                        typ, d = M.uid("search", None, "ALL")
+                        todos = [int(x) for x in (d[0] or b"").split()]
+                        c.execute("INSERT OR REPLACE INTO imap_estado VALUES (?,?,?)", (cta["usuario"], uv, max(todos) if todos else 0))
+            return nuevos
+        finally:
+            try:
+                M.logout()
+            except Exception:
+                pass
+
+    def bucle_imap():
+        while True:
+            try:
+                for cta in leer_cuentas():
+                    try:
+                        n = revisar_cuenta(cta)
+                        ESTADO_IMAP[cta["usuario"]] = {"ok": True, "ultima": time.time(), "nuevos": n}
+                    except Exception as e:
+                        ESTADO_IMAP[cta["usuario"]] = {"ok": False, "ultima": time.time(), "error": str(e)[:200]}
+            except Exception:
+                pass
+            time.sleep(120)
+    threading.Thread(target=bucle_imap, daemon=True).start()
+
+    @app.get("/api/correo/cuentas")
+    def cuentas(request: Request):
+        current_user(request)
+        cs = leer_cuentas()
+        return [{"cuenta": c["usuario"], "servidor": c["servidor"], **ESTADO_IMAP.get(c["usuario"], {"ok": None})} for c in cs]
 
     @app.get("/api/correo")
     def lista(request: Request, estado: str = "pendientes"):
