@@ -189,6 +189,15 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             return
         cid = empresa_del_pdf(lec, r["empresa"])
         prov = _buscar_proveedor(lec, TODAS)
+        # ¿ya existe esa factura del proveedor en Odoo? (mismo proveedor y nº) -> no se duplica, se enlaza
+        if prov and (lec.get("numero") or "").strip():
+            ya = odoo.search_read("account.move", [("partner_id", "child_of", prov["id"]), ("ref", "=ilike", lec["numero"].strip()),
+                                                   ("move_type", "in", ["in_invoice", "in_refund"]), ("state", "!=", "cancel")], ["name", "company_id"], company_ids=TODAS, limit=1)
+            if ya:
+                with lock, con() as c:
+                    c.execute("UPDATE docs SET empresa=?, estado='en_odoo', odoo_model='account.move', odoo_id=?, nota=? WHERE id=?",
+                              (ya[0]["company_id"][0], ya[0]["id"], f"Esta factura ya estaba en Odoo ({ya[0]['name'] or 'borrador'}): no se ha duplicado", did))
+                return
         abono = _num(lec.get("total")) < 0
         tax_cache = {}
 
@@ -225,6 +234,21 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         with lock, con() as c:
             c.execute("UPDATE docs SET empresa=?, estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (cid, mid, did))
 
+    def ya_subido(datos):
+        """Mismo PDF ya en la bandeja (no descartado): se compara el contenido, no el nombre."""
+        import hashlib
+        h = hashlib.sha1(datos).hexdigest()
+        with con() as c:
+            rs = c.execute("SELECT id, nombre, fichero, subido FROM docs WHERE estado != 'descartado' AND subido > ?", (time.time() - 120 * 86400,)).fetchall()
+        for r in rs:
+            f = carpeta / r["fichero"]
+            try:
+                if f.exists() and f.stat().st_size == len(datos) and hashlib.sha1(f.read_bytes()).hexdigest() == h:
+                    return dict(r)
+            except Exception:
+                pass
+        return None
+
     def alta_doc(nombre, datos, tipo, empresa, usuario):
         """Da de alta un PDF en la bandeja de Compras (lo usa también el correo) y lo manda a leer."""
         did = secrets.token_hex(8)
@@ -248,6 +272,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 continue
             if not (f.filename or "").lower().endswith(".pdf") and not datos.startswith(b"%PDF"):
                 out.append({"nombre": f.filename, "error": "No es un PDF"})
+                continue
+            igual = ya_subido(datos)
+            if igual:
+                out.append({"nombre": f.filename, "error": f"Este PDF ya está subido ({igual['nombre']}, {time.strftime('%d/%m %H:%M', time.localtime(igual['subido']))}). No lo subo otra vez."})
                 continue
             did = secrets.token_hex(8)
             fich = carpeta / f"{did}.pdf"

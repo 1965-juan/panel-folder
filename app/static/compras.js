@@ -28,7 +28,9 @@ async function coSubir(files, tipo) {
     const r = await fetch('/api/compras/subir', { method: 'POST', body: fd, credentials: 'same-origin' });
     const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText);
     const err = j.filter(x => x.error);
-    alertBox(err.length ? err.map(x => `${x.nombre}: ${x.error}`).join(' · ') : (tipo === 'factura' ? `Subidas ${j.length}: Odoo las está leyendo. Pasan a Facturas.` : `Subidos ${j.length}: ve a Recepciones para recibirlos.`));
+    const ok = j.length - err.length;
+    alertBox((ok ? `✓ ${ok} subido(s). Se están leyendo: en unos segundos aparecen abajo en la Bandeja con lo que falta hacer. No hace falta volver a subirlos.` : '')
+      + (err.length ? (ok ? ' · ' : '') + err.map(x => `${x.nombre}: ${x.error}`).join(' · ') : ''));
   } catch (e) { alertBox(e.message); }
   coDocs(); coBadge();
 }
