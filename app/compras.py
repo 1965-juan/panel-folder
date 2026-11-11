@@ -940,7 +940,6 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
     async def factura_enlazar(mid: int, request: Request):
         """Cuadra la factura con un pedido: las líneas de la factura pasan a ser las del pedido (lo pedido que falte por facturar).
         Si el pedido es de otra empresa (compras en Distriplus, factura en Logipaper) no se tocan las líneas: se apunta el cruce."""
-        _u, cids = ctx(request, "all")
         _u, _cids = ctx(request, "all")
         b = await request.json()
         po_id = int(b.get("pedido_id") or 0)
