@@ -44,7 +44,7 @@ document.querySelectorAll('.drop').forEach(d => {
 const CO_EST = { pendiente: ['Por recibir', 'b-warn'], recibido: ['Recibido', 'b-ok'], en_odoo: ['En Odoo (borrador)', 'b-prov'], contabilizada: ['Contabilizada', 'b-ok'], error: ['Error', 'b-bad'], descartado: ['Descartado', ''] };
 let CO_BJ_T = null;
 const BJ_PASO = { leyendo: ['⏳ Leyendo', 'b-warn'], pendiente: ['Falta hacer algo', 'b-bad'], espera: ['Esperando almacén', 'b-warn'],
-  ok: ['Lista para el OK', 'b-ok'], terminado: ['✓ Terminado', 'b-ok'], error: ['Error', 'b-bad'] };
+  ok: ['En borrador para Mayte', 'b-ok'], terminado: ['✓ Terminado', 'b-ok'], error: ['Error', 'b-bad'] };
 async function coDocs() {
   $('#co-emp-n').textContent = company === 'all' ? 'elige empresa arriba' : coEmpNombre();
   clearTimeout(CO_BJ_T);
@@ -67,7 +67,7 @@ async function coDocs() {
       <div class="bj-2">${x.numero ? 'Nº ' + escH(x.numero) : ''} ${x.fecha ? '· ' + coDate(x.fecha) : ''} ${x.total ? '· <b>' + eu2(x.total) + '</b>' : ''}
         ${x.tipo_leido && x.tipo_leido !== (x.tipo === 'albaran' ? 'albaran' : 'factura') ? `<small class="muted">(el PDF parece ${escH(x.tipo_leido)})</small>` : ''}
         · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
-      <div class="bj-3">${escH(x.texto || '')}</div>
+      <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
       <div class="bj-4">${(x.acciones || []).map(a => btn[a] || '').join(' ')}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
   };
