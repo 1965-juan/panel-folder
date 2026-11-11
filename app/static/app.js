@@ -131,14 +131,14 @@ async function loadWeb(badgeOnly) {
   } catch (e) { showErr(e.message); }
 }
 function route() {
-  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo' })[location.hash] || 'ventas';
+  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo', '#vencimientos': 'vencimientos' })[location.hash] || 'ventas';
   if (!location.hash && MODS.includes('compras') && !MODS.includes('ac')) v = 'compras';
   if (MODS.length && !MODS.includes(v)) v = MODS.includes('compras') ? 'compras' : MODS[0];
   document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
-  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion'; $('#v-ma').hidden = v !== 'correo';
-  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo' })[v] || 'Ventas';
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion'; $('#v-ma').hidden = v !== 'correo'; $('#v-ve').hidden = v !== 'vencimientos';
+  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo', vencimientos: 'Vencimientos' })[v] || 'Ventas';
   $('#q').hidden = v !== 'ventas'; $('#company').hidden = !['ventas', 'ac', 'compras'].includes(v);
-  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else if (v === 'correo') maOpen(); else load();
+  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else if (v === 'correo') maOpen(); else if (v === 'vencimientos') veOpen(); else load();
 }
 window.addEventListener('hashchange', route);
 setInterval(() => loadWeb(true), 5 * 60 * 1000);

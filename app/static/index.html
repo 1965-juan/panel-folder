@@ -17,6 +17,7 @@
     <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
     <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
     <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
+    <a href="#vencimientos" data-v="vencimientos" data-m="vencimientos">Vencimientos</a>
     <a href="#correo" data-v="correo" data-m="correo">Correo <span class="nb" id="nb-ma" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
@@ -117,6 +118,16 @@
         <input id="ma-q" type="search" placeholder="Buscar remitente, asunto…"><div id="ma-cts" class="muted"></div><div id="ma-list"></div></div>
       <div class="ma-c" id="ma-c"><p class="empty">Elige un correo de la lista</p></div>
     </div>
+  </section>
+
+  <section id="v-ve" hidden>
+    <div class="wa-tabs ve-tabs"><button data-t="pagos" class="on">💸 Pagos</button><button data-t="cobros">💰 Cobros</button>
+      <select id="ve-hasta"><option value="30">próximos 30 días</option><option value="60">próximos 60 días</option><option value="120" selected>próximos 4 meses</option><option value="365">próximo año</option></select>
+      <label class="muted"><input type="checkbox" id="ve-pag"> ver pagados a mano</label>
+      <button class="ac-go" id="ve-add">＋ Añadir vencimiento</button></div>
+    <section class="kpis" id="ve-k"></section>
+    <div id="ve-form" hidden></div>
+    <div id="ve-l"></div>
   </section>
 
   <section id="v-ac" hidden>
@@ -221,5 +232,6 @@
 <script src="/static/ac.js"></script>
 <script src="/static/compras.js"></script>
 <script src="/static/correo.js"></script>
+<script src="/static/vencimientos.js"></script>
 </body>
 </html>

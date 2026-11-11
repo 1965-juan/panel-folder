@@ -36,13 +36,15 @@ def allowed_users():
     return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos"]
 
 
 def modulos_de(u):
     mods = list(extra_users().get(u, {}).get("modulos") or TODOS_MODULOS)
     if "compras" in mods and "facturacion" not in mods:  # usuarios creados antes de separar Facturación (Mayte)
         mods.append("facturacion")
+    if "compras" in mods and "vencimientos" not in mods:
+        mods.append("vencimientos")
     return mods
 DEMO = os.environ.get("PANEL_DEMO") == "1"
 odoo = DemoOdoo() if DEMO else Odoo()
@@ -479,3 +481,8 @@ _entre.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=sco
 from . import correo as _correo  # noqa: E402
 
 _correo.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- vencimientos ----------
+from . import vencimientos as _venc  # noqa: E402
+
+_venc.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)

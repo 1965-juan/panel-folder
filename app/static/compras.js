@@ -531,7 +531,7 @@ function coRecForm(x) {
 /* --- usuarios (solo Juan) --- */
 $('#usr-btn').onclick = async () => {
   const l = await api('/api/usuarios'), emps = [...$('#company').options].filter(o => o.value !== 'all').map(o => o.textContent);
-  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo' };
+  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo', vencimientos: 'Vencimientos' };
   $('#co-db').innerHTML = `<h3>Usuarios del panel</h3><table class="co-t"><thead><tr><th>Usuario</th><th>Empresas</th><th>Apartados</th><th>Contraseña</th></tr></thead><tbody>
     ${l.map(u => `<tr><td><b>${escH(u.usuario)}</b></td><td>${escH(u.empresas.join(', '))}</td><td>${u.modulos.map(m => MOD_N[m]).join(', ')}</td><td>${u.tiene_clave ? 'puesta' : '<i>la elige al entrar</i>'}</td></tr>`).join('')}</tbody></table>
     <h4>Añadir o cambiar usuario</h4>
