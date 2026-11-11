@@ -426,14 +426,24 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         nif = re.sub(r"[^A-Z0-9]", "", (lec.get("nif_proveedor") or "").upper())
         if nif.startswith("ES"):
             nif = nif[2:]
+        nucleo = re.sub(r"\D", "", nif)  # sin la letra: a veces el PDF pone A y Odoo B (o al revés)
+        F = ["display_name", "vat", "supplier_rank"]
         if len(nif) >= 8:
-            ps = odoo.search_read("res.partner", [("vat", "ilike", nif), ("parent_id", "=", False)], ["display_name", "vat"], company_ids=cids, limit=5)
+            ps = odoo.search_read("res.partner", [("vat", "ilike", nif), ("parent_id", "=", False)], F, company_ids=cids, limit=5)
+            if not ps and len(nucleo) >= 7:
+                ps = odoo.search_read("res.partner", [("vat", "ilike", nucleo), ("parent_id", "=", False)], F, company_ids=cids, limit=5)
             if ps:
-                return ps[0]
+                return sorted(ps, key=lambda p: -(p.get("supplier_rank") or 0))[0]
         nom = (lec.get("proveedor") or "").strip()
         palabras = [w for w in re.findall(r"[\wÁÉÍÓÚÑáéíóúñ]{4,}", nom) if w.upper() not in ("S.L.", "SLU", "S.A.", "SOCIEDAD", "LIMITADA")]
         if palabras:
-            ps = odoo.search_read("res.partner", [("name", "ilike", palabras[0]), ("parent_id", "=", False)], ["display_name", "vat"], company_ids=cids, limit=5)
+            ps = odoo.search_read("res.partner", [("name", "ilike", palabras[0]), ("parent_id", "=", False)], F, company_ids=cids, limit=8)
+            if len(ps) > 1 and len(palabras) > 1:  # afinar con la segunda palabra del nombre
+                fino = [p for p in ps if palabras[1].lower() in p["display_name"].lower()]
+                ps = fino or ps
+            if len(ps) > 1:  # el que tenga CIF / sea proveedor
+                fino = [p for p in ps if p.get("vat")] or [p for p in ps if p.get("supplier_rank")]
+                ps = fino if len(fino) == 1 else ps
             if len(ps) == 1:
                 return ps[0]
         return None

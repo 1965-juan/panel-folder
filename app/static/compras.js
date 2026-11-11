@@ -68,7 +68,7 @@ async function coDocs() {
         ${x.tipo_leido && x.tipo_leido !== (x.tipo === 'albaran' ? 'albaran' : 'factura') ? `<small class="muted">(el PDF parece ${escH(x.tipo_leido)})</small>` : ''}
         · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
       <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
-      <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Crear el proveedor con los datos del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
+      <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Buscar o crear el proveedor del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
   };
   $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
