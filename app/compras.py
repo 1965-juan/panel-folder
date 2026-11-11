@@ -583,13 +583,37 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             raise HTTPException(400, "Este documento ya está cuadrado: " + json.loads(r["compra"]).get("pedido", ""))
         partner_id = int(b.get("partner_id") or 0)
         po_id = int(b.get("pedido_id") or 0)
-        lineas = [l for l in (b.get("lineas") or []) if l.get("product_id") and _num(l.get("cantidad")) > 0 and not l.get("saltar")]
+        lineas = [l for l in (b.get("lineas") or []) if (l.get("product_id") or l.get("crear")) and _num(l.get("cantidad")) > 0 and not l.get("saltar")]
         if not partner_id or not lineas:
             raise HTTPException(400, "Falta el proveedor o no hay líneas identificadas")
 
         def run():
             lec = json.loads(r["lectura"]) if r["lectura"] else {}
             avisos = []
+            # artículos nuevos: solo si traen EAN y ese EAN no existe en Odoo (así no se duplica nada)
+            creados = []
+            for l in lineas:
+                if l.get("product_id") or not l.get("crear"):
+                    continue
+                ean = re.sub(r"\D", "", str(l.get("ean") or ""))
+                if len(ean) < 8:
+                    raise HTTPException(400, f"«{l.get('descripcion')}» no trae código de barras: búscalo en Odoo o márcalo como no meter")
+                ya = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=TODAS, limit=1)
+                if ya:
+                    l["product_id"], l["producto"] = ya[0]["id"], ya[0]["display_name"]
+                    continue
+                vals = {"name": (l.get("descripcion") or l.get("ref") or "Artículo nuevo")[:120], "barcode": ean, "purchase_ok": True, "sale_ok": True,
+                        "type": "consu", "standard_price": round(_num(l.get("precio")) * (1 - _num(l.get("descuento")) / 100), 4),
+                        "seller_ids": [[0, 0, {"partner_id": partner_id, "product_code": l.get("ref") or False, "price": _num(l.get("precio")),
+                                               "discount": _num(l.get("descuento")), "company_id": 1}]]}
+                if _tiene_campo("product.product", "is_storable", 1):
+                    vals["is_storable"] = True
+                if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], company_ids=TODAS, limit=1):
+                    vals["default_code"] = l["ref"]
+                pid = odoo.call("product.product", "create", [1], vals_list=[vals])
+                l["product_id"] = pid[0] if isinstance(pid, list) else pid
+                l["producto"] = vals["name"]
+                creados.append(vals["name"])
             if po_id:
                 po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "state", "company_id", "picking_type_id", "origin"], company_ids=cids)
                 if not po or po[0]["state"] not in ("draft", "sent", "to approve"):
@@ -682,7 +706,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                                 odoo.call("product.product", "write", [c], ids=[int(l["product_id"])], vals={"standard_price": neto})
                 except Exception as e:
                     avisos.append(f"Ficha de {l.get('producto')}: {str(e)[:120]}")
-            res = {"pedido": pod["name"], "pedido_id": po["id"], "estado": pod["state"], "recepciones": [p["name"] for p in picks],
+            if creados:
+                avisos.append(f"{len(creados)} artículos nuevos creados: revisad su precio de venta y completad las fichas (botón 📷 Fichas)")
+            res = {"pedido": pod["name"], "pedido_id": po["id"], "estado": pod["state"], "recepciones": [p["name"] for p in picks], "creados": creados,
                    "pendiente": pendiente, "base": pod["amount_untaxed"], "total": pod["amount_total"], "anadidas": nuevas,
                    "avisos": avisos, "por": u, "cuando": time.time()}
             if r["odoo_model"] == "account.move" and r["odoo_id"]:

@@ -115,14 +115,15 @@ async function coPasar(did, opts = {}) {
   const prov = d.proveedor, po = d.pedido;
   const ESTADO = l => {
     if (l.saltar) return ['⏭ No se mete', 'pc-skip'];
+    if (!l.product_id && l.crear) return ['＋ Artículo nuevo (se crea con su EAN)', 'pc-new'];
     if (!l.product_id) return ['? Sin identificar', 'pc-que'];
     if (!l.po_line) return ['＋ Se añade al pedido', 'pc-new'];
     const dq = +l.cantidad !== +l.pedido_cant, dp = Math.abs(+l.precio - +l.pedido_precio) > 0.0005 || (+l.descuento || 0) !== (+l.pedido_dto || 0);
     return dq || dp ? ['≠ Se ajusta ' + [dq ? `cant. ${l.pedido_cant}→${l.cantidad}` : '', dp ? `precio ${l.pedido_precio}→${l.precio}` : ''].filter(Boolean).join(', '), 'pc-adj'] : ['✓ Cuadra', 'pc-ok'];
   };
   const pinta = () => {
-    const faltan = L.filter(l => !l.product_id && !l.saltar).length;
-    const base = L.filter(l => l.product_id && !l.saltar).reduce((a, l) => a + Math.round((+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100) * 100) / 100, 0);
+    const faltan = L.filter(l => !l.product_id && !l.saltar && !l.crear).length;
+    const base = L.filter(l => (l.product_id || l.crear) && !l.saltar).reduce((a, l) => a + Math.round((+l.cantidad || 0) * (+l.precio || 0) * (1 - (+l.descuento || 0) / 100) * 100) / 100, 0);
     db.innerHTML = cab + `
       <div class="pc-prov"><b>Proveedor:</b> ${escH(prov.display_name)} <small class="muted">${escH(prov.vat || '')}</small> <a href="#" id="pc-cprov">cambiar</a><div id="pc-bprov" hidden>${busProv}</div></div>
       <div class="pc-prov"><b>Pedido:</b> ${po ? `<b>${escH(po.name)}</b> <small class="muted">${escH(po.origen)}</small>` : '<span class="pc-new">no hay pedido abierto: se crea uno nuevo con lo identificado</span>'}
@@ -134,7 +135,8 @@ async function coPasar(did, opts = {}) {
         <td><input type="number" step="any" min="0" data-i="${i}" data-k="precio" value="${l.precio}"></td>
         <td>${l.descuento ? l.descuento + '%' : ''}</td>
         <td>${l.product_id ? `${escH(l.producto)} <small class="muted">(${escH(l.como || '')})</small>` : ''} <a href="#" data-cam="${i}">${l.product_id ? 'cambiar' : '🔎 buscar'}</a>
-          ${!l.product_id && !l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">no meter</a>` : ''}${l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">meter</a>` : ''}
+          ${!l.product_id && !l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">no meter</a>` : ''}
+          ${!l.product_id && !l.saltar && /\d{8,}/.test(l.ean || '') ? ` · <a href="#" class="pc-crea2" data-i="${i}">${l.crear ? 'no crear' : '＋ es nuevo, crearlo'}</a>` : ''}${l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">meter</a>` : ''}
           <div class="pc-bus" data-b="${i}" hidden><input placeholder="Nombre, ref. o EAN"><div></div></div></td>
         <td class="${ec}">${et}</td></tr>`; }).join('')}
       </tbody></table>
@@ -142,7 +144,7 @@ async function coPasar(did, opts = {}) {
         <p class="muted">Se pasan a un pedido nuevo en borrador "Pendiente de ${escH(po.name)}" y se quitan de ${escH(po.name)}.</p>
         <table class="co-t pc-t"><tbody>${d.no_vienen.map(x => `<tr><td>${escH(x.producto)}</td><td>${x.cantidad}</td><td>${x.precio}</td></tr>`).join('')}</tbody></table>` : ''}
       <p>Base con lo identificado: <b>${eu(base)}</b> · base del documento: <b>${eu((+lec.base || 0) - (+lec.portes || 0))}</b>${Math.abs(base - ((+lec.base || 0) - (+lec.portes || 0))) > 0.03 ? ' <span class="err-t" style="display:inline">no cuadra todavía</span>' : ' ✓'}</p>
-      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo o marca "no meter" (no se crean artículos nuevos desde aquí).</p>` : ''}
+      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo, márcalas como nuevas (solo si traen código de barras que no existe en Odoo) o "no meter".</p>` : ''}
       <p class="muted">Al cuadrar: el pedido queda igual que el documento (cantidades, precios y descuentos), se pone el nº ${escH(lec.numero || '')} como referencia del proveedor, se confirma y la entrada queda en <b>Recepciones</b> para que almacén compruebe lo que llega. También se actualizan las líneas de proveedor de las fichas y el coste si estaba a 0.</p>
       <button class="ac-go" id="pc-go" ${faltan ? 'disabled' : ''}>✓ Cuadrar y confirmar pedido</button><div id="pc-res"></div>`;
     bindProv();
@@ -151,6 +153,7 @@ async function coPasar(did, opts = {}) {
     const sel = $('#pc-po'); if (sel) sel.onchange = () => coPasar(did, { pedido: +sel.value, partner_id: prov.id });
     db.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { L[inp.dataset.i][inp.dataset.k] = parseFloat(inp.value) || 0; pinta(); });
     db.querySelectorAll('.pc-sal').forEach(a => a.onclick = e => { e.preventDefault(); const l = L[a.dataset.i]; l.saltar = !l.saltar; pinta(); });
+    db.querySelectorAll('.pc-crea2').forEach(a => a.onclick = e => { e.preventDefault(); const l = L[a.dataset.i]; l.crear = !l.crear; pinta(); });
     db.querySelectorAll('[data-cam]').forEach(a => a.onclick = e => {
       e.preventDefault(); const i = a.dataset.cam, box = db.querySelector(`[data-b="${i}"]`); box.hidden = false;
       const inp = box.querySelector('input'), out = box.querySelector('div'); inp.value = L[i].ref || ''; inp.focus(); let t;
