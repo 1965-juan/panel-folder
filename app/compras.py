@@ -685,6 +685,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             res = {"pedido": pod["name"], "pedido_id": po["id"], "estado": pod["state"], "recepciones": [p["name"] for p in picks],
                    "pendiente": pendiente, "base": pod["amount_untaxed"], "total": pod["amount_total"], "anadidas": nuevas,
                    "avisos": avisos, "por": u, "cuando": time.time()}
+            if r["odoo_model"] == "account.move" and r["odoo_id"]:
+                try:
+                    en = enlazar_factura(r["odoo_id"], po["id"], u)
+                    res["factura"] = f"Factura enlazada con {en['pedido']}"
+                except Exception as e:
+                    res["avisos"].append(f"No se pudo enlazar la factura con el pedido: {str(e)[:150]}")
             with lock, con() as c:
                 c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(res, ensure_ascii=False), did))
             return res
@@ -935,11 +941,15 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         """Cuadra la factura con un pedido: las líneas de la factura pasan a ser las del pedido (lo pedido que falte por facturar).
         Si el pedido es de otra empresa (compras en Distriplus, factura en Logipaper) no se tocan las líneas: se apunta el cruce."""
         _u, cids = ctx(request, "all")
-        cids = TODAS
+        _u, _cids = ctx(request, "all")
         b = await request.json()
         po_id = int(b.get("pedido_id") or 0)
 
-        def run():
+        return guard(lambda: enlazar_factura(mid, po_id, _u))
+
+    def enlazar_factura(mid, po_id, _u):
+        cids = TODAS
+        if True:
             m = odoo.search_read("account.move", [("id", "=", mid), ("state", "=", "draft")], ["company_id"], company_ids=cids)
             if not m:
                 raise HTTPException(404, "La factura ya no está en borrador")
@@ -967,7 +977,6 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                       context={"default_move_type": "in_invoice"})
             t = odoo.search_read("account.move", [("id", "=", mid)], ["amount_untaxed", "amount_total"], company_ids=cids)[0]
             return {"ok": True, "pedido": po["name"], "base": t["amount_untaxed"], "total": t["amount_total"]}
-        return guard(run)
 
     @app.get("/api/compras/bandeja")
     def bandeja(request: Request, company: str = "all", dias: int = 45):
@@ -1078,7 +1087,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                             e.update(paso="ok", texto=("Gasto sin entrada de material" if marca["tipo"] == "gasto" else "Material marcado como recibido") + f" ({marca['usuario']}). Lista para el OK de Mayte",
                                      acciones=["ok", "quitar_marca"])
                         elif not con_po:
-                            e.update(paso="pendiente", texto="Sin cuadrar: elige su pedido o márcala como gasto / material recibido", acciones=["cuadrar_factura", "gasto", "recibido"])
+                            e.update(paso="pendiente", texto="Sin pedido de compra: cuádrala desde el PDF (crea el pedido y la entrada para almacén), enlázala con un pedido que ya exista, o márcala como gasto / material recibido",
+                                     acciones=["cuadrar", "cuadrar_factura", "gasto", "recibido"])
                         elif any(l["quantity"] > pol.get(l["purchase_line_id"][0], {}).get("qty_received", 0) + 1e-6 for l in con_po):
                             e.update(paso="espera", texto=f"Cuadrada con {', '.join(pedidos)}. Falta que almacén reciba el material", acciones=["recibido"])
                         else:

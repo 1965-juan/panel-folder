@@ -55,7 +55,7 @@ async function coDocs() {
   const card = x => {
     const [pt, pc] = BJ_PASO[x.paso] || [x.paso, ''];
     const tipo = x.tipo === 'albaran' ? '📦 Albarán' : '🧾 Factura';
-    const btn = { cuadrar: `<button class="ac-go" data-a="cuadrar">⇄ Cuadrar con pedido</button>`, cuadrar_factura: `<button class="ac-go" data-a="cuadrar_factura">⇄ Cuadrar con pedido</button>`,
+    const btn = { cuadrar: `<button class="ac-go" data-a="cuadrar">⇄ ${x.tipo === 'factura' ? 'Cuadrar / crear pedido desde el PDF' : 'Cuadrar con pedido'}</button>`, cuadrar_factura: `<button class="lnk" data-a="cuadrar_factura">🔗 Enlazar con pedido existente</button>`,
       gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
       ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
       fichas: `<button class="lnk" data-a="fichas">📷 Fichas</button>`, releer: `<button class="lnk" data-a="releer">volver a leer</button>`,
@@ -172,7 +172,7 @@ async function coPasar(did, opts = {}) {
           Entrada para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> → pestaña Recepciones.
           ${r.pendiente ? `<br>Lo que no ha venido queda en <b>${escH(r.pendiente)}</b> (borrador).` : ''}
           ${r.anadidas.length ? `<br>Añadidas al pedido: ${r.anadidas.map(escH).join(', ')}.` : ''}
-          ${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>
+          ${r.factura ? '<br>' + escH(r.factura) : ''}${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>
           <button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`;
         $('#pc-fi').onclick = () => coFichas({ pedido_id: r.pedido_id });
         $('#pc-go').remove(); coDocs();
