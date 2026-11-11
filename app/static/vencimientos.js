@@ -76,3 +76,14 @@ function veForm(v) {
   f.scrollIntoView({ behavior: 'smooth' });
 }
 $('#ve-add').onclick = () => veForm(null);
+
+$('#ve-csv').onclick = () => {
+  if (!VE) return;
+  const n = x => String(x).replace('.', ',');
+  const filas = [['Fecha', 'Vence', 'Empresa', VE_T === 'pagos' ? 'Proveedor' : 'Cliente', 'Concepto', 'Importe', 'Origen', 'Pagado', 'Nota']]
+    .concat(VE.vencimientos.map(v => [v.fecha, v.vence, v.empresa_n, v.tercero, v.concepto, n(v.importe), v.origen === 'manual' ? 'a mano' : 'Odoo', v.pagado ? 'sí' : '', v.nota]));
+  const csv = '\ufeff' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `vencimientos_${VE_T}_${VE.hoy}.csv`; a.click();
+};
+$('#ve-imp').onclick = () => window.print();
