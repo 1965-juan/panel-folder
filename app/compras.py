@@ -797,6 +797,44 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         except Exception as e:
             nota(f"No se pudo cuadrar solo: {str(e)[:200]}. Pulsa Cuadrar")
 
+    @app.post("/api/compras/docs/{did}/proveedor_nuevo")
+    def proveedor_nuevo(did: str, request: Request):
+        """El proveedor del PDF no existe en Odoo: se crea con su nombre y CIF, se pone en la factura y se vuelve a cuadrar."""
+        u, cids = ctx(request, "all")
+        r = _doc(did)
+        lec = json.loads(r["lectura"] or "{}")
+        nombre = (lec.get("proveedor") or "").strip()
+        if not nombre:
+            raise HTTPException(400, "El PDF no trae el nombre del proveedor")
+
+        def run():
+            nif = re.sub(r"[^A-Z0-9]", "", (lec.get("nif_proveedor") or "").upper())
+            if nif and not nif[:2].isalpha():
+                nif = "ES" + nif
+            ya = _buscar_proveedor(lec, TODAS)
+            if ya:
+                pid = ya["id"]
+            else:
+                vals = {"name": nombre, "is_company": True, "supplier_rank": 1}
+                if nif:
+                    vals["vat"] = nif
+                try:
+                    pid = odoo.call("res.partner", "create", TODAS, vals_list=[vals])
+                except Exception:
+                    vals.pop("vat", None)
+                    vals["comment"] = f"CIF según factura: {lec.get('nif_proveedor')}"
+                    pid = odoo.call("res.partner", "create", TODAS, vals_list=[vals])
+                pid = pid[0] if isinstance(pid, list) else pid
+            if r["odoo_model"] == "account.move" and r["odoo_id"]:
+                st = odoo.search_read("account.move", [("id", "=", r["odoo_id"])], ["state"], company_ids=TODAS)
+                if st and st[0]["state"] == "draft":
+                    odoo.call("account.move", "write", TODAS, ids=[r["odoo_id"]], vals={"partner_id": pid})
+            with lock, con() as c:
+                c.execute("UPDATE docs SET nota=NULL WHERE id=?", (did,))
+            threading.Thread(target=auto_cuadrar, args=(did,), daemon=True).start()
+            return {"ok": True, "partner_id": pid, "nombre": nombre}
+        return guard(run)
+
     @app.post("/api/compras/docs/{did}/cuadrar")
     async def doc_cuadrar(did: str, request: Request, releer: int = 0, pedido: int = 0):
         """Lee el documento y lo cruza con el pedido abierto del proveedor. Solo consulta, no cambia nada."""
@@ -1198,6 +1236,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                                      acciones=["fichas"])
                 else:
                     m = mv.get(d["odoo_id"])
+                    if not m and d["odoo_id"]:  # puede ser de una empresa que no está en el filtro: se mira en todas
+                        otra = odoo.search_read("account.move", [("id", "=", d["odoo_id"])], FM, company_ids=TODAS)
+                        m = otra[0] if otra else None
                     if not m or m["state"] == "cancel":
                         e.update(paso="error", texto="La factura ya no está en Odoo (borrada o cancelada)", acciones=["descartar"])
                     elif m["state"] == "posted":

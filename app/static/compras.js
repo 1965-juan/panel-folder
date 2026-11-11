@@ -68,7 +68,7 @@ async function coDocs() {
         ${x.tipo_leido && x.tipo_leido !== (x.tipo === 'albaran' ? 'albaran' : 'factura') ? `<small class="muted">(el PDF parece ${escH(x.tipo_leido)})</small>` : ''}
         · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
       <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
-      <div class="bj-4">${(x.acciones || []).map(a => btn[a] || '').join(' ')}
+      <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Crear el proveedor con los datos del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
   };
   $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
@@ -77,6 +77,7 @@ async function coDocs() {
     const x = l.find(y => y.id === b.closest('.bj-card').dataset.id), a = b.dataset.a;
     try {
       if (a === 'cuadrar') return coPasar(x.id);
+      if (a === 'prov') { if (!confirm(`¿Crear en Odoo el proveedor «${x.proveedor}» con el CIF de la factura?`)) return; const r = await jpost(`/api/compras/docs/${x.id}/proveedor_nuevo`, {}); alertBox(`Proveedor ${r.nombre} listo. Vuelvo a cuadrar el documento…`); setTimeout(coDocs, 8000); return coDocs(); }
       if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
       if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
       if (a === 'releer') { await jpost(`/api/compras/docs/${x.id}/releer`, {}); return coDocs(); }
