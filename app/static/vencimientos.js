@@ -1,7 +1,7 @@
 /* ---------- Vencimientos: pagos y cobros por empresa ---------- */
 let VE_T = 'pagos', VE = null;
 document.querySelectorAll('.ve-tabs button[data-t]').forEach(b => b.onclick = () => { VE_T = b.dataset.t; document.querySelectorAll('.ve-tabs button[data-t]').forEach(x => x.classList.toggle('on', x === b)); veOpen(); });
-$('#ve-hasta').onchange = () => veOpen(); $('#ve-pag').onchange = () => veOpen();
+$('#ve-hasta').onchange = () => veOpen(); $('#ve-pag').onchange = () => veOpen(); $('#ve-sue').onchange = () => vePinta();
 const veFecha = d => { const x = new Date(); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
 async function veOpen() {
   $('#ve-l').innerHTML = '<p class="muted">Cargando vencimientos…</p>';
@@ -10,13 +10,15 @@ async function veOpen() {
   vePinta();
 }
 function vePinta() {
-  const L = VE.vencimientos, hoy = VE.hoy, s7 = veFecha(7), s30 = veFecha(30);
+  const sueltos = VE.vencimientos.filter(v => v.origen === 'odoo' && !/invoice|refund/.test(v.tipo_doc || ''));
+  const L = $('#ve-sue').checked ? VE.vencimientos : VE.vencimientos.filter(v => !sueltos.includes(v)), hoy = VE.hoy, s7 = veFecha(7), s30 = veFecha(30);
   const sum = f => L.filter(f).reduce((a, v) => a + (v.pagado ? 0 : v.importe), 0);
   const ven = sum(v => v.fecha < hoy), d7 = sum(v => v.fecha >= hoy && v.fecha <= s7), d30 = sum(v => v.fecha >= hoy && v.fecha <= s30), tot = sum(() => true);
   const pal = VE_T === 'pagos' ? 'a pagar' : 'a cobrar';
   $('#ve-k').innerHTML = `<div class="kpi ${ven ? 'mal' : ''}"><span>Vencido sin ${VE_T === 'pagos' ? 'pagar' : 'cobrar'}</span><b>${eur(ven)}</b></div>
     <div class="kpi"><span>Próximos 7 días</span><b>${eur(d7)}</b></div><div class="kpi"><span>Próximos 30 días</span><b>${eur(d30)}</b></div>
-    <div class="kpi"><span>Total ${pal} en la lista</span><b>${eur(tot)}</b></div>`;
+    <div class="kpi"><span>Total ${pal} en la lista</span><b>${eur(tot)}</b></div>
+    ${sueltos.length && !$('#ve-sue').checked ? `<p class="muted ve-nota">No se cuentan ${sueltos.length} apuntes sueltos de Odoo (asiento de apertura, pagos o cobros sin conciliar con su factura): ${eur(sueltos.reduce((a, v) => a + v.importe, 0))}. Márcalo arriba para verlos.</p>` : ''}`;
   // agrupar: vencido, y luego por semanas
   const lunes = f => { const d = new Date(f + 'T00:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
   const grupos = new Map();
