@@ -128,6 +128,34 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         threading.Thread(target=run, daemon=True).start()
 
     TODAS = [1, 2, 3, 4, 5]
+    REPARADAS = set()
+
+    def poner_pdf(model, rid, nombre, datos, cids):
+        """Adjunta el PDF al registro de Odoo de forma que se VEA: mensaje en el historial con el PDF y PDF principal
+        (el que Odoo enseña al lado de la factura)."""
+        att = odoo.call("ir.attachment", "create", cids, vals_list=[{"name": nombre or "documento.pdf", "res_model": model, "res_id": rid,
+                                                                     "mimetype": "application/pdf", "datas": base64.b64encode(datos).decode()}])
+        att = att[0] if isinstance(att, list) else att
+        try:
+            odoo.call(model, "message_post", cids, ids=[rid], body=f"Documento subido desde el Panel Folder: {nombre}", attachment_ids=[att])
+        except Exception:
+            pass
+        try:
+            odoo.call(model, "write", cids, ids=[rid], vals={"message_main_attachment_id": att})
+        except Exception:
+            pass
+        return att
+
+    def arreglar_pdf_principal(model, rid, cids):
+        """Facturas a las que se adjuntó el PDF pero Odoo no lo enseña: se marca como PDF principal."""
+        m = odoo.search_read(model, [("id", "=", rid)], ["message_main_attachment_id"], company_ids=cids)
+        if not m or m[0].get("message_main_attachment_id"):
+            return False
+        at = odoo.search_read("ir.attachment", [("res_model", "=", model), ("res_id", "=", rid), ("mimetype", "=", "application/pdf")], ["id"], company_ids=cids, limit=1, order="id")
+        if not at:
+            return False
+        odoo.call(model, "write", cids, ids=[rid], vals={"message_main_attachment_id": at[0]["id"]})
+        return True
 
     def pedido_de_marca(marca):
         """Para marcas 'pedido' (factura de una empresa con pedido de otra): (nombre, recibido_entero)."""
@@ -193,8 +221,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             vals["invoice_date"] = lec["fecha"]
         mid = odoo.call("account.move", "create", [cid], vals_list=[vals], context={"default_move_type": vals["move_type"]})
         mid = mid[0] if isinstance(mid, list) else mid
-        odoo.call("ir.attachment", "create", [cid], vals_list=[{"name": r["nombre"] or "factura.pdf", "res_model": "account.move", "res_id": mid,
-                                                              "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+        poner_pdf("account.move", mid, r["nombre"] or "factura.pdf", (carpeta / r["fichero"]).read_bytes(), [cid])
         with lock, con() as c:
             c.execute("UPDATE docs SET empresa=?, estado='en_odoo', odoo_model='account.move', odoo_id=? WHERE id=?", (cid, mid, did))
 
@@ -634,8 +661,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             odoo.call("purchase.order", "button_confirm", cids, ids=[po["id"]])
             pod = odoo.search_read("purchase.order", [("id", "=", po["id"])], ["name", "state", "picking_ids", "amount_untaxed", "amount_total"], company_ids=cids)[0]
             picks = odoo.search_read("stock.picking", [("id", "in", pod["picking_ids"]), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=cids) if pod["picking_ids"] else []
-            odoo.call("ir.attachment", "create", cids, vals_list=[{"name": r["nombre"] or "documento.pdf", "res_model": "purchase.order", "res_id": po["id"],
-                                                                    "mimetype": "application/pdf", "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+            poner_pdf("purchase.order", po["id"], r["nombre"] or "documento.pdf", (carpeta / r["fichero"]).read_bytes(), cids)
             # 5) fichas: línea de proveedor con precio, dto. y código; coste si está a 0
             for l in lineas:
                 try:
@@ -742,9 +768,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 with con() as c:
                     r = c.execute("SELECT fichero, nombre FROM docs WHERE id=?", (b["doc_id"],)).fetchone()
                 if r:
-                    odoo.call("ir.attachment", "create", c1, vals_list=[{
-                        "name": r["nombre"] or "albaran.pdf", "res_model": "stock.picking", "res_id": pid, "mimetype": "application/pdf",
-                        "datas": base64.b64encode((carpeta / r["fichero"]).read_bytes()).decode()}])
+                    poner_pdf("stock.picking", pid, r["nombre"] or "albaran.pdf", (carpeta / r["fichero"]).read_bytes(), c1)
                     with lock, con() as c:
                         c.execute("UPDATE docs SET estado='recibido', odoo_model='stock.picking', odoo_id=? WHERE id=?", (pid, b["doc_id"]))
             # qué se puede servir ahora con lo que ha entrado
@@ -998,6 +1022,16 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             por_mv = {}
             for l in ln:
                 por_mv.setdefault(l["move_id"][0], []).append(l)
+            for d in ds:
+                if d["odoo_model"] == "account.move" and d["odoo_id"] in mv and d["odoo_id"] not in REPARADAS:
+                    REPARADAS.add(d["odoo_id"])
+                    try:
+                        if not arreglar_pdf_principal("account.move", d["odoo_id"], TODAS):
+                            m_ = odoo.search_read("account.move", [("id", "=", d["odoo_id"])], ["message_main_attachment_id"], company_ids=TODAS)
+                            if m_ and not m_[0].get("message_main_attachment_id") and d.get("fichero") and (carpeta / d["fichero"]).exists():
+                                poner_pdf("account.move", d["odoo_id"], d["nombre"], (carpeta / d["fichero"]).read_bytes(), TODAS)
+                    except Exception:
+                        pass
             out = []
             for d in ds:
                 lec = d["lectura"] or {}
