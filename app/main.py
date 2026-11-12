@@ -36,7 +36,7 @@ def allowed_users():
     return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas"]
 
 
 def modulos_de(u):
@@ -45,6 +45,8 @@ def modulos_de(u):
         mods.append("facturacion")
     if "compras" in mods and "vencimientos" not in mods:
         mods.append("vencimientos")
+    if ("ac" in mods or "compras" in mods) and "etiquetas" not in mods:
+        mods.append("etiquetas")
     return mods
 DEMO = os.environ.get("PANEL_DEMO") == "1"
 odoo = DemoOdoo() if DEMO else Odoo()
@@ -486,3 +488,8 @@ _correo.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=sc
 from . import vencimientos as _venc  # noqa: E402
 
 _venc.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- etiquetas de tienda ----------
+from . import etiquetas as _etq  # noqa: E402
+
+_etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)

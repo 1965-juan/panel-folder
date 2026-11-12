@@ -18,6 +18,7 @@
     <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
     <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
     <a href="#vencimientos" data-v="vencimientos" data-m="vencimientos">Vencimientos</a>
+    <a href="#etiquetas" data-v="etiquetas" data-m="etiquetas">Etiquetas</a>
     <a href="#correo" data-v="correo" data-m="correo">Correo <span class="nb" id="nb-ma" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
     <a class="off" title="Próximamente">Artículos</a>
@@ -118,6 +119,35 @@
         <input id="ma-q" type="search" placeholder="Buscar remitente, asunto…"><div id="ma-cts" class="muted"></div><div id="ma-list"></div></div>
       <div class="ma-c" id="ma-c"><p class="empty">Elige un correo de la lista</p></div>
     </div>
+  </section>
+
+  <section id="v-et" hidden>
+    <div class="et-pide">
+      <input id="et-q" placeholder="Pídeme las etiquetas: «todo lo que ha entrado de Depesche esta semana», «la recepción AC/IN/00137», «los Edding 1200»…">
+      <button class="ac-go" id="et-go">🏷 Sacar etiquetas</button>
+    </div>
+    <div class="et-barra">
+      <input id="et-bus" type="search" placeholder="Añadir artículo: nombre, referencia o EAN…" autocomplete="off">
+      <span class="et-sep"></span>
+      <label class="muted">Poner todos a <input type="number" id="et-todos" value="1" min="0"></label><button class="btn" id="et-todos-ok">Aplicar</button>
+      <button class="btn" id="et-recib" hidden>= cantidad recibida</button>
+      <button class="btn" id="et-vaciar">Vaciar</button>
+      <button class="btn" id="et-aj-b">⚙️ Ajustes</button>
+      <button class="ac-go" id="et-imp">🖨️ Imprimir / PDF</button>
+      <span class="muted" id="et-info"></span>
+    </div>
+    <div id="et-res" class="et-res" hidden></div>
+    <div class="et-aj" id="et-aj" hidden>
+      <label class="et-chk"><input type="checkbox" id="et-borde"> Borde al imprimir</label>
+      <label class="et-chk"><input type="checkbox" id="et-esc" checked> Escalados</label>
+      <label>Margen superior (mm)<input type="number" id="et-msup" value="13.5" step="0.5"></label>
+      <label>Margen izquierda (mm)<input type="number" id="et-mizq" value="0" step="0.5"></label>
+      <label>Separación horiz. (mm)<input type="number" id="et-hh" value="0" step="0.5"></label>
+      <label>Separación vert. (mm)<input type="number" id="et-hv" value="0" step="0.5"></label>
+      <label>Filas por hoja<input type="number" id="et-filas" value="9" min="1"></label>
+    </div>
+    <div class="et-lista" id="et-lista"></div>
+    <div id="et-zona"></div>
   </section>
 
   <section id="v-ve" hidden>
@@ -235,5 +265,7 @@
 <script src="/static/compras.js"></script>
 <script src="/static/correo.js"></script>
 <script src="/static/vencimientos.js"></script>
+<script src="/static/jsbarcode.min.js"></script>
+<script src="/static/etiquetas.js"></script>
 </body>
 </html>
