@@ -141,6 +141,63 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 w["foto_error"] = str(e)
         return w
 
+    def investigar_linea(linea, proveedor, candidatos):
+        """Línea de un albarán/factura de proveedor que no se ha identificado: Claude mira los candidatos de Odoo y la web del
+        fabricante y dice si es uno de ellos o qué es (EAN, ref. fabricante, nombre, foto) para darlo de alta sin duplicar."""
+        sistema = ("Eres el ayudante de compras de Folder Castellón (papelería). Te paso una línea de un albarán o factura de proveedor que no "
+                   "hemos encontrado en Odoo y una lista de artículos de Odoo que se le parecen (candidatos). Tareas: "
+                   "1) Averigua qué artículo es exactamente: busca en la web del FABRICANTE (o del propio proveedor/distribuidor) por la referencia y la "
+                   "descripción; usa web_search y abrir_web/web_fetch. Saca su EAN-13, la referencia del fabricante, marca, nombre comercial y una foto. "
+                   "2) Mira si alguno de los candidatos de Odoo es EXACTAMENTE ese artículo (mismo modelo, mismo color, mismo formato/unidades; si el "
+                   "candidato tiene EAN y coincide con el que encuentres, es ese). Un color o tamaño distinto NO es el mismo. "
+                   "Responde SOLO con un JSON: {\"odoo_id\": id del candidato o null, \"ean\": \"\", \"ref_fabricante\": \"\", \"marca\": \"\", "
+                   "\"nombre\": \"nombre para la ficha: Marca Modelo Color/Formato\", \"descripcion\": \"máx. 300 caracteres\", \"fotos\": [\"url\"], "
+                   "\"url_ficha\": \"\", \"seguro\": true, \"nota\": \"breve\"}. No inventes datos: lo que no encuentres, vacío; si dudas, seguro=false.")
+        msgs = [{"role": "user", "content": "Proveedor: " + (proveedor or "") + "\nLínea del documento: " + json.dumps(linea, ensure_ascii=False)
+                 + "\nCandidatos de Odoo: " + json.dumps(candidatos, ensure_ascii=False)}]
+        texto = ""
+        for _ in range(10):
+            r = web.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", timeout=180, headers={
+                "x-api-key": clave(), "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": os.environ.get("PANEL_MODEL", "claude-sonnet-5-5"), "max_tokens": 3000, "system": sistema, "tools": HERR, "messages": msgs})
+            if r.status_code != 200:
+                raise RuntimeError(f"Claude respondió {r.status_code}: {r.text[:200]}")
+            res = r.json()
+            bloques = res.get("content", [])
+            texto = "".join(x.get("text", "") for x in bloques if x.get("type") == "text").strip() or texto
+            usos = [x for x in bloques if x.get("type") == "tool_use"]
+            msgs.append({"role": "assistant", "content": bloques})
+            if res.get("stop_reason") == "pause_turn":
+                continue
+            if not usos:
+                break
+            out = []
+            for u in usos:
+                try:
+                    o = abrir_web(u["input"]["url"], u["input"].get("buscar_enlaces") or "")
+                except Exception as e:
+                    o = f"Error: {e}"
+                out.append({"type": "tool_result", "tool_use_id": u["id"], "content": json.dumps(o, ensure_ascii=False)[:15000]})
+            msgs.append({"role": "user", "content": out})
+        m = re.search(r"\{[\s\S]*\}", texto)
+        if not m:
+            return {"error": "sin respuesta", "nota": texto[:200]}
+        try:
+            w = json.loads(m.group(0))
+        except Exception:
+            return {"error": "respuesta no válida", "nota": texto[:200]}
+        w["foto_id"] = None
+        for u in (w.get("fotos") or [])[:4]:
+            try:
+                w["foto_id"] = bajar_foto(u)
+                break
+            except Exception:
+                pass
+        return w
+
+    app.state.investigar_linea = investigar_linea
+    app.state.fichas_fotos = fotos_dir
+
     def leer_productos(pids, cids):
         f = ["display_name", "name", "default_code", "barcode", "image_128", "product_tmpl_id", "description_sale", "seller_ids"]
         extra = [c for c in ("x_studio_proveedor", "available_in_pos") if tiene(c, cids)]

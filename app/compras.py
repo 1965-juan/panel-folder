@@ -117,7 +117,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     except Exception as e:
                         with lock, con() as c:
                             c.execute("UPDATE docs SET estado='error', nota=? WHERE id=?", (f"No se pudo crear la factura en Odoo: {e}"[:300], did))
-                    auto_cuadrar(did)
+                    auto_en_marcha(did)
             except Exception as e:
                 try:
                     with lock, con() as c:
@@ -481,6 +481,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
     def _identificar(l, partner_id, cids, po_lines):
         """Devuelve (product_id, nombre, como) o (None, None, None)."""
+        if l.get("odoo_id"):
+            pp = odoo.search_read("product.product", [("id", "=", int(l["odoo_id"]))], ["display_name"], company_ids=cids, limit=1)
+            if pp:
+                return pp[0]["id"], pp[0]["display_name"], "web (revisar)"
         ref = str(l.get("ref") or "").strip()
         ean = re.sub(r"\D", "", str(l.get("ean") or ""))
         if not ean and partner_id in EAN_PROV and ref.isdigit():
@@ -529,6 +533,70 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             if len(pp) == 1:
                 return pp[0]["id"], pp[0]["display_name"], "nombre"
         return None, None, None
+
+    def _candidatos(l, cids, n=10):
+        """Artículos de Odoo que se parecen a la línea (por números de modelo, referencia y palabras), para que la IA elija."""
+        ref = str(l.get("ref") or "").strip()
+        desc = l.get("descripcion") or ""
+        td = _tokens(desc + " " + ref)
+        claves = sorted({w for w in td if re.search(r"\d", w) and len(w) >= 3}, key=len, reverse=True)[:4]
+        if ref and len(ref) >= 3:
+            claves = [ref] + [c for c in claves if c != ref.lower()]
+        marcas = [w for w in td if not re.search(r"\d", w) and len(w) >= 4][:3]
+        vistos = {}
+        for k in claves[:4]:
+            dom = ["|", "|", ("name", "ilike", k), ("default_code", "ilike", k), ("barcode", "ilike", k)]
+            for p in odoo.search_read("product.product", dom, ["display_name", "default_code", "barcode"], company_ids=cids, limit=25):
+                vistos[p["id"]] = p
+        if not vistos and marcas:
+            dom = [("name", "ilike", marcas[0])] + ([("name", "ilike", marcas[1])] if len(marcas) > 1 else [])
+            for p in odoo.search_read("product.product", dom, ["display_name", "default_code", "barcode"], company_ids=cids, limit=25):
+                vistos[p["id"]] = p
+        pun = sorted(vistos.values(), key=lambda p: -len(td & _tokens(p["display_name"] + " " + (p.get("default_code") or ""))))
+        return [{"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "", "ean": p.get("barcode") or ""} for p in pun[:n]]
+
+    def investigar_faltan(did, info, cids):
+        """Para las líneas sin identificar y sin EAN: candidatos de Odoo + web del fabricante (Claude). Guarda lo averiguado en la lectura
+        (odoo_id si es un artículo que ya teníamos, EAN, nombre, foto) para que el cuadre pueda terminar sin duplicar artículos."""
+        inv = getattr(app.state, "investigar_linea", None)
+        if not inv:
+            return 0
+        r = _doc(did)
+        lec = json.loads(r["lectura"] or "{}")
+        ld = lec.get("lineas") or []
+        L = info.get("lineas") or []
+        tareas = [i for i, l in enumerate(L) if i < len(ld) and not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8 and not ld[i].get("ia")]
+        if not tareas:
+            return 0
+        prov = (info.get("proveedor") or {}).get("display_name") or lec.get("proveedor") or ""
+        from concurrent.futures import ThreadPoolExecutor
+
+        def uno(i):
+            l = L[i]
+            cand = _candidatos(l, cids)
+            try:
+                w = inv({k: l.get(k) for k in ("ref", "ean", "descripcion", "cantidad", "precio")}, prov, cand)
+            except Exception as e:
+                w = {"error": str(e)[:150]}
+            w["candidatos"] = [c["id"] for c in cand]
+            return i, w
+        with ThreadPoolExecutor(3) as ex:
+            res = list(ex.map(uno, tareas))
+        for i, w in res:
+            seguro = bool(w.get("seguro")) and not w.get("error")
+            x = {k: w.get(k) for k in ("ean", "ref_fabricante", "marca", "nombre", "descripcion", "url_ficha", "foto_id", "nota", "error")}
+            x["seguro"] = seguro
+            ld[i]["ia"] = x
+            oid = w.get("odoo_id")
+            if seguro and oid and int(oid) in w["candidatos"]:
+                ld[i]["odoo_id"] = int(oid)
+            ean = re.sub(r"\D", "", str(w.get("ean") or ""))
+            if seguro and len(ean) in (8, 12, 13, 14) and not re.sub(r"\D", "", str(ld[i].get("ean") or "")):
+                ld[i]["ean"] = ean
+        lec["lineas"] = ld
+        with lock, con() as c:
+            c.execute("UPDATE docs SET lectura=? WHERE id=?", (json.dumps(lec, ensure_ascii=False), did))
+        return len(res)
 
     def _pedidos_abiertos(partner_id, cids):
         return odoo.search_read("purchase.order", [("partner_id", "child_of", partner_id), ("state", "in", ["draft", "sent", "to approve"])],
@@ -601,7 +669,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 usados.add(pl["id"])
             out.append({"ref": str(l.get("ref") or ""), "ean": str(l.get("ean") or ""), "descripcion": l.get("descripcion") or "",
                         "cantidad": _num(l.get("cantidad")), "precio": _num(l.get("precio")), "descuento": _num(l.get("descuento")),
-                        "iva": _num(l.get("iva")) or 21.0, "product_id": pid, "producto": nom, "como": como,
+                        "iva": _num(l.get("iva")) or 21.0, "product_id": pid, "producto": nom, "como": como, "ia": l.get("ia"),
                         "po_line": pl["id"] if pl else None, "pedido_cant": pl["product_qty"] if pl else None,
                         "pedido_precio": pl["price_unit"] if pl else None, "pedido_dto": pl.get("discount") if pl else None})
         info["pedido"] = {"id": po["id"], "name": po["name"], "origen": po.get("origin") or "", "empresa": po["company_id"][0]} if po else None
@@ -621,24 +689,44 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             if l.get("product_id") or not l.get("crear"):
                 continue
             ean = re.sub(r"\D", "", str(l.get("ean") or ""))
-            if len(ean) < 8:
-                raise HTTPException(400, f"«{l.get('descripcion')}» no trae código de barras: búscalo en Odoo o márcalo como no meter")
-            ya = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=TODAS, limit=1)
-            if ya:
-                l["product_id"], l["producto"] = ya[0]["id"], ya[0]["display_name"]
-                continue
-            vals = {"name": (l.get("descripcion") or l.get("ref") or "Artículo nuevo")[:120], "barcode": ean, "purchase_ok": True, "sale_ok": True,
+            ia = l.get("ia") or {}
+            if len(ean) >= 8:
+                ya = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=TODAS, limit=1)
+                if ya:
+                    l["product_id"], l["producto"] = ya[0]["id"], ya[0]["display_name"]
+                    continue
+            elif l.get("ref") and partner_id:
+                # sin EAN: que no exista ya con ese código de proveedor (así no se duplica)
+                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", l["ref"])], ["product_tmpl_id"], company_ids=TODAS, limit=1)
+                pp = odoo.search_read("product.product", [("product_tmpl_id", "=", si[0]["product_tmpl_id"][0])], ["display_name"], company_ids=TODAS, limit=1) if si else []
+                if pp:
+                    l["product_id"], l["producto"] = pp[0]["id"], pp[0]["display_name"]
+                    continue
+            nombre = (ia.get("nombre") if ia.get("seguro") and ia.get("nombre") else "") or l.get("descripcion") or l.get("ref") or "Artículo nuevo"
+            vals = {"name": nombre[:120], "purchase_ok": True, "sale_ok": True,
                     "type": "consu", "standard_price": round(_num(l.get("precio")) * (1 - _num(l.get("descuento")) / 100), 4),
                     "seller_ids": [[0, 0, {"partner_id": partner_id, "product_code": l.get("ref") or False, "price": _num(l.get("precio")),
                                            "discount": _num(l.get("descuento")), "company_id": 1}]]}
+            if len(ean) >= 8:
+                vals["barcode"] = ean
             if _tiene_campo("product.product", "is_storable", 1):
                 vals["is_storable"] = True
-            if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], company_ids=TODAS, limit=1):
-                vals["default_code"] = l["ref"]
+            cod = (ia.get("ref_fabricante") if ia.get("seguro") else "") or l.get("ref")
+            if cod and not odoo.search_read("product.product", [("default_code", "=", cod)], ["id"], company_ids=TODAS, limit=1):
+                vals["default_code"] = cod
+            if ia.get("seguro") and ia.get("descripcion"):
+                vals["description_sale"] = ia["descripcion"][:300]
             pid = odoo.call("product.product", "create", [1], vals_list=[vals])
             l["product_id"] = pid[0] if isinstance(pid, list) else pid
             l["producto"] = vals["name"]
-            creados.append(vals["name"])
+            fd = getattr(app.state, "fichas_fotos", None)
+            if ia.get("seguro") and ia.get("foto_id") and fd and (fd / ia["foto_id"]).exists():
+                try:
+                    tm = odoo.search_read("product.product", [("id", "=", l["product_id"])], ["product_tmpl_id"], company_ids=[1])[0]["product_tmpl_id"][0]
+                    odoo.call("product.template", "write", [1], ids=[tm], vals={"image_1920": base64.b64encode((fd / ia["foto_id"]).read_bytes()).decode()})
+                except Exception as e:
+                    avisos.append(f"Foto de {vals['name']}: {str(e)[:80]}")
+            creados.append(vals["name"] + ("" if len(ean) >= 8 else " (sin EAN)"))
         if po_id:
             po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "state", "company_id", "picking_type_id", "origin"], company_ids=cids)
             if not po or po[0]["state"] not in ("draft", "sent", "to approve"):
@@ -787,11 +875,19 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             L = info.get("lineas") or []
             if not L:
                 return nota("No he sacado líneas del PDF: pulsa Cuadrar para revisarlo")
+            if any(not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8 and not l.get("ia") for l in L):
+                nota("Buscando en Odoo y en la web del fabricante los artículos que no conozco…")
+                if investigar_faltan(did, info, TODAS):
+                    info = analizar(_doc(did), TODAS, pedido=(info.get("pedido") or {}).get("id") or 0, partner_id=info["proveedor"]["id"])
+                    L = info.get("lineas") or []
             faltan = []
             for l in L:
                 if not l.get("product_id"):
+                    ia = l.get("ia") or {}
                     if len(re.sub(r"\D", "", l.get("ean") or "")) >= 8:
                         l["crear"] = True
+                    elif ia and not ia.get("error") and (l.get("ref") or l.get("descripcion")):
+                        l["crear"] = True  # no está en Odoo (lo ha comprobado la IA): se da de alta con la ref. del proveedor
                     else:
                         faltan.append(l.get("descripcion") or l.get("ref") or "?")
             if faltan:
@@ -1235,7 +1331,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     e.update(paso="error", texto="No he podido leer el PDF: " + lec["error"][:150], acciones=["releer", "descartar"])
                 elif d["tipo"] == "albaran":
                     if not d["compra"]:
-                        e.update(paso="pendiente", texto="Falta cuadrarlo con su pedido de compra", acciones=["cuadrar", "descartar"])
+                        e.update(paso="pendiente", texto="Falta cuadrarlo con su pedido de compra", acciones=["auto", "cuadrar", "descartar"])
                     else:
                         pk = pick.get(d["compra"].get("pedido_id"), [])
                         abiertas = [x["name"] for x in pk if x["state"] not in ("done", "cancel")]
@@ -1271,7 +1367,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                                      acciones=["quitar_marca"])
                         elif not con_po:
                             e.update(paso="pendiente", texto="Sin pedido de compra: cuádrala desde el PDF (crea el pedido y la entrada para almacén), enlázala con un pedido que ya exista, o márcala como gasto / material recibido",
-                                     acciones=["cuadrar", "cuadrar_factura", "gasto", "recibido"])
+                                     acciones=["auto", "cuadrar", "cuadrar_factura", "gasto", "recibido"])
                         elif any(l["quantity"] > pol.get(l["purchase_line_id"][0], {}).get("qty_received", 0) + 1e-6 for l in con_po):
                             e.update(paso="espera", texto=f"Cuadrada con {', '.join(pedidos)}. Falta que almacén reciba el material", acciones=["recibido"])
                         else:
@@ -1285,9 +1381,31 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                         e["proveedor"] = e["proveedor"] or (m.get("partner_id") or [0, ""])[1]
                 if d.get("nota") and e.get("paso") in ("pendiente", "leyendo", "espera"):
                     e["aviso"] = d["nota"]
+                if d["id"] in TRABAJANDO:
+                    e["trabajando"] = True
+                    e["acciones"] = [x for x in e["acciones"] if x != "auto"]
                 out.append(e)
             return out
         return guard(run)
+
+    TRABAJANDO = set()
+
+    def auto_en_marcha(did):
+        if did in TRABAJANDO:
+            return
+        TRABAJANDO.add(did)
+        try:
+            auto_cuadrar(did)
+        finally:
+            TRABAJANDO.discard(did)
+
+    @app.post("/api/compras/docs/{did}/auto")
+    def doc_auto(did: str, request: Request):
+        """Vuelve a intentar el cuadre automático (buscando en la web del fabricante lo que no se conozca)."""
+        ctx(request, "all")
+        _doc(did)
+        threading.Thread(target=auto_en_marcha, args=(did,), daemon=True).start()
+        return {"ok": True}
 
     @app.post("/api/compras/docs/{did}/releer")
     def doc_releer(did: str, request: Request):

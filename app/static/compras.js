@@ -60,7 +60,7 @@ async function coDocs() {
     const btn = { cuadrar: `<button class="ac-go" data-a="cuadrar">⇄ ${x.tipo === 'factura' ? 'Cuadrar / crear pedido desde el PDF' : 'Cuadrar con pedido'}</button>`, cuadrar_factura: `<button class="lnk" data-a="cuadrar_factura">🔗 Enlazar con pedido existente</button>`,
       gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
       ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
-      fichas: `<button class="lnk" data-a="fichas">📷 Fichas</button>`, releer: `<button class="lnk" data-a="releer">volver a leer</button>`,
+      fichas: `<button class="lnk" data-a="fichas">📷 Fichas</button>`, auto: `<button class="ac-go" data-a="auto">🤖 Terminar automático</button>`, releer: `<button class="lnk" data-a="releer">volver a leer</button>`,
       descartar: `<button class="lnk del" data-a="descartar">descartar</button>` };
     return `<div class="bj-card p-${x.paso}" data-id="${x.id}"><div class="bj-1"><span>${tipo}</span><b>${escH(x.proveedor || x.nombre)}</b>
         <span class="bdg ${pc}">${pt}</span></div>
@@ -77,6 +77,7 @@ async function coDocs() {
     const x = l.find(y => y.id === b.closest('.bj-card').dataset.id), a = b.dataset.a;
     try {
       if (a === 'cuadrar') return coPasar(x.id);
+      if (a === 'auto') { b.disabled = true; b.textContent = 'Buscando y cuadrando…'; await jpost(`/api/compras/docs/${x.id}/auto`, {}); setTimeout(coDocs, 1500); return; }
       if (a === 'prov') { if (!confirm(`¿Crear en Odoo el proveedor «${x.proveedor}» con el CIF de la factura?`)) return; const r = await jpost(`/api/compras/docs/${x.id}/proveedor_nuevo`, {}); alertBox(`Proveedor ${r.nombre} listo. Vuelvo a cuadrar el documento…`); setTimeout(coDocs, 8000); return coDocs(); }
       if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
       if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
@@ -87,7 +88,7 @@ async function coDocs() {
       if (a === 'ok') { b.disabled = true; b.textContent = 'Contabilizando…'; await jpost(`/api/compras/facturas/${x.odoo_id}/ok?company=${company}`, {}); alertBox('Factura contabilizada'); coBadge(); return coDocs(); }
     } catch (e) { alertBox(e.message); coDocs(); }
   });
-  if (pend.some(x => x.paso === 'leyendo') && !$('#co-subir').hidden) CO_BJ_T = setTimeout(coDocs, 6000);
+  if (pend.some(x => x.paso === 'leyendo' || x.trabajando) && !$('#co-subir').hidden) CO_BJ_T = setTimeout(coDocs, 6000);
 }
 /* --- cuadrar un albarán/factura con el pedido de compra abierto del proveedor --- */
 async function coPasar(did, opts = {}) {
@@ -118,7 +119,7 @@ async function coPasar(did, opts = {}) {
   const prov = d.proveedor, po = d.pedido;
   const ESTADO = l => {
     if (l.saltar) return ['⏭ No se mete', 'pc-skip'];
-    if (!l.product_id && l.crear) return ['＋ Artículo nuevo (se crea con su EAN)', 'pc-new'];
+    if (!l.product_id && l.crear) return [/\d{8,}/.test(l.ean || '') ? '＋ Artículo nuevo (se crea con su EAN)' : '＋ Artículo nuevo (se crea con la ref. del proveedor)', 'pc-new'];
     if (!l.product_id) return ['? Sin identificar', 'pc-que'];
     if (!l.po_line) return ['＋ Se añade al pedido', 'pc-new'];
     const dq = +l.cantidad !== +l.pedido_cant, dp = Math.abs(+l.precio - +l.pedido_precio) > 0.0005 || (+l.descuento || 0) !== (+l.pedido_dto || 0);
@@ -139,7 +140,8 @@ async function coPasar(did, opts = {}) {
         <td>${l.descuento ? l.descuento + '%' : ''}</td>
         <td>${l.product_id ? `${escH(l.producto)} <small class="muted">(${escH(l.como || '')})</small>` : ''} <a href="#" data-cam="${i}">${l.product_id ? 'cambiar' : '🔎 buscar'}</a>
           ${!l.product_id && !l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">no meter</a>` : ''}
-          ${!l.product_id && !l.saltar && /\d{8,}/.test(l.ean || '') ? ` · <a href="#" class="pc-crea2" data-i="${i}">${l.crear ? 'no crear' : '＋ es nuevo, crearlo'}</a>` : ''}${l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">meter</a>` : ''}
+          ${!l.product_id && !l.saltar ? ` · <a href="#" class="pc-crea2" data-i="${i}">${l.crear ? 'no crear' : '＋ es nuevo, crearlo'}</a>` : ''}
+          ${l.ia ? `<br><small class="muted">🌐 ${l.ia.error ? 'web: ' + escH(l.ia.error) : escH([l.ia.nombre, l.ia.ean && 'EAN ' + l.ia.ean, l.ia.nota].filter(Boolean).join(' · '))}${l.ia.url_ficha ? ` <a target="_blank" rel="noopener" href="${escH(l.ia.url_ficha)}">ficha</a>` : ''}</small>` : ''}${l.saltar ? ` · <a href="#" class="pc-sal" data-i="${i}">meter</a>` : ''}
           <div class="pc-bus" data-b="${i}" hidden><input placeholder="Nombre, ref. o EAN"><div></div></div></td>
         <td class="${ec}">${et}</td></tr>`; }).join('')}
       </tbody></table>
@@ -147,7 +149,7 @@ async function coPasar(did, opts = {}) {
         <p class="muted">Se pasan a un pedido nuevo en borrador "Pendiente de ${escH(po.name)}" y se quitan de ${escH(po.name)}.</p>
         <table class="co-t pc-t"><tbody>${d.no_vienen.map(x => `<tr><td>${escH(x.producto)}</td><td>${x.cantidad}</td><td>${x.precio}</td></tr>`).join('')}</tbody></table>` : ''}
       <p>Base con lo identificado: <b>${eu(base)}</b> · base del documento: <b>${eu((+lec.base || 0) - (+lec.portes || 0))}</b>${Math.abs(base - ((+lec.base || 0) - (+lec.portes || 0))) > 0.03 ? ' <span class="err-t" style="display:inline">no cuadra todavía</span>' : ' ✓'}</p>
-      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo, márcalas como nuevas (solo si traen código de barras que no existe en Odoo) o "no meter".</p>` : ''}
+      ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo, márcalas como nuevas (solo si de verdad no existen en Odoo) o "no meter". O pulsa «🤖 Terminar automático» en la bandeja para que las busque en la web del fabricante.</p>` : ''}
       <p class="muted">Al cuadrar: el pedido queda igual que el documento (cantidades, precios y descuentos), se pone el nº ${escH(lec.numero || '')} como referencia del proveedor, se confirma y la entrada queda en <b>Recepciones</b> para que almacén compruebe lo que llega. También se actualizan las líneas de proveedor de las fichas y el coste si estaba a 0.</p>
       <button class="ac-go" id="pc-go" ${faltan ? 'disabled' : ''}>✓ Cuadrar y confirmar pedido</button><div id="pc-res"></div>`;
     bindProv();
