@@ -20,7 +20,7 @@ function coOpen() {
 /* --- subir --- */
 async function coSubir(files, tipo) {
   if (!files.length) return;
-  if (company === 'all' && $('#company').options.length > 2) return alertBox('Elige arriba la empresa a la que pertenecen estos documentos');
+  if (company === 'all' && $('#company').options.length > 2) return alertBox('Para subir, elige arriba la empresa (la que sea: luego cada factura va sola a la empresa que pone el PDF)');
   const fd = new FormData(); fd.append('tipo', tipo); fd.append('company', company);
   [...files].forEach(f => fd.append('archivos', f));
   const box = $('#co-docs'); box.insertAdjacentHTML('afterbegin', `<p class="co-up">Subiendo ${files.length} ${tipo === 'albaran' ? 'albarán(es)' : 'factura(s)'}…</p>`);
@@ -39,7 +39,11 @@ document.querySelectorAll('.drop').forEach(d => {
   inp.onchange = () => { coSubir(inp.files, inp.dataset.tipo); inp.value = ''; };
   d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
   d.ondragleave = () => d.classList.remove('over');
-  d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); coSubir([...e.dataTransfer.files].filter(f => /pdf$/i.test(f.name) || f.type === 'application/pdf'), inp.dataset.tipo); };
+  d.ondrop = e => { e.preventDefault(); d.classList.remove('over');
+    const todos = [...e.dataTransfer.files], pdf = todos.filter(f => /pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (todos.length && pdf.length < todos.length) alertBox(`Solo se pueden subir PDF: ${todos.filter(f => !pdf.includes(f)).map(f => f.name).join(', ')} no ${todos.length - pdf.length > 1 ? 'son PDF' : 'es PDF'}. Si es una foto o un correo, guárdalo primero como PDF.`);
+    if (!todos.length) alertBox('No ha llegado ningún archivo. Si lo arrastras desde el correo, guárdalo antes en el ordenador y arrástralo desde la carpeta.');
+    coSubir(pdf, inp.dataset.tipo); };
 });
 const CO_EST = { pendiente: ['Por recibir', 'b-warn'], recibido: ['Recibido', 'b-ok'], en_odoo: ['En Odoo (borrador)', 'b-prov'], contabilizada: ['Contabilizada', 'b-ok'], error: ['Error', 'b-bad'], descartado: ['Descartado', ''] };
 let CO_BJ_T = null;
