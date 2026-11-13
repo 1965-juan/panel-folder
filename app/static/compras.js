@@ -400,12 +400,35 @@ function faOpen() { faTab(FA_TAB); }
 $('#fa-emp').onchange = () => { const v = +$('#fa-emp').value; if (!v) return; FA.grupos.forEach(g => { if (g.albaranes.some(a => a.marcado)) g.empresa = v; }); $('#fa-emp').value = ''; faPinta(); };
 let FE = [];
 async function feCargar() {
-  try { FE = await api('/api/facturar/sin_enviar'); } catch (e) { $('#fe-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
+  const marc = new Set(FE.filter(f => f.marcado).map(f => f.id));
+  try { FE = await api('/api/facturar/sin_enviar'); FE.forEach(f => { if (marc.has(f.id) && f.email) f.marcado = true; }); } catch (e) { $('#fe-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
   $('#fe-n').textContent = FE.length;
   $('#fe-l').innerHTML = FE.length ? `<table class="co-t pc-t"><tbody>${FE.map((f, i) => `<tr><td><input type="checkbox" data-f="${i}" ${f.marcado ? 'checked' : ''} ${f.email ? '' : 'disabled'}></td>
-    <td><b>${escH(f.nombre)}</b>${f.abono ? ' <span class="bdg b-warn">abono</span>' : ''}</td><td>${escH(f.cliente)}</td><td>${f.email ? escH(f.email) : '<span class="err-t" style="display:inline">sin email</span>'}</td>
-    <td>${coDate(f.fecha)}</td><td>${escH(f.empresa)}</td><td>${eur(f.total)}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">Todas las facturas están enviadas</p>';
+    <td><a href="#" class="lnk fe-ver" data-v="${i}"><b>${escH(f.nombre)}</b></a>${f.abono ? ' <span class="bdg b-warn">abono</span>' : ''}</td><td>${escH(f.cliente)}</td><td>${f.email ? escH(f.email) : `<a href="#" class="lnk fe-ver" data-v="${i}"><span class="err-t" style="display:inline">sin email · añadir</span></a>`}</td>
+    <td>${coDate(f.fecha)}</td><td>${escH(f.empresa)}</td><td>${eur(f.total)}</td></tr><tr class="fe-det" id="fe-det-${i}" hidden><td colspan="7"></td></tr>`).join('')}</tbody></table>` : '<p class="empty">Todas las facturas están enviadas</p>';
   $('#fe-l').querySelectorAll('[data-f]').forEach(c => c.onchange = () => FE[c.dataset.f].marcado = c.checked);
+  $('#fe-l').querySelectorAll('.fe-ver').forEach(a => a.onclick = e => { e.preventDefault(); feVer(+a.dataset.v); });
+}
+async function feVer(i) {
+  const tr = $('#fe-det-' + i), td = tr.firstElementChild, f = FE[i];
+  if (!tr.hidden) { tr.hidden = true; return; }
+  tr.hidden = false; td.innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    const d = await api(`/api/facturar/factura/${f.id}`);
+    td.innerHTML = `<div class="det-box"><div class="det-top"><b>${escH(d.nombre)}</b> · ${escH(d.cliente)} · ${coDate(d.fecha)}${d.origen ? ' · ' + escH(d.origen) : ''}
+        <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_out_invoice_type/${d.id}">abrir en Odoo ↗</a></div>
+      <div class="det-mail">✉️ Email del cliente <input type="email" value="${escH(d.email)}" placeholder="facturas@cliente.es"><button class="ac-go">Guardar email</button><span class="muted"></span></div>
+      <table class="co-t"><thead><tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Dto.</th><th class="num">Importe</th></tr></thead><tbody>
+      ${d.lineas.map(l => `<tr><td>${escH(l.articulo)}</td><td class="num">${+l.cantidad}</td><td class="num">${eur(l.precio)}</td><td class="num">${l.dto ? l.dto + '%' : ''}</td><td class="num">${eur(l.importe)}</td></tr>`).join('')}
+      </tbody></table><div class="det-tot">Base ${eur(d.base)} · IVA ${eur(d.iva)} · <b>Total ${eur(d.total)}</b></div></div>`;
+    const inp = td.querySelector('input'), msg = td.querySelector('.det-mail .muted');
+    td.querySelector('.det-mail button').onclick = async () => {
+      try { const r = await jpost('/api/facturar/email', { partner_id: d.partner_id, email: inp.value });
+        FE.filter(x => x.cliente === f.cliente).forEach(x => { x.email = r.email; x.marcado = true; });
+        msg.textContent = '✅ guardado en la ficha del cliente'; setTimeout(() => feCargar(), 900);
+      } catch (e) { msg.textContent = '❌ ' + e.message; }
+    };
+  } catch (e) { td.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
 }
 $('#fe-all').onchange = e => { FE.forEach(f => f.marcado = !!f.email && e.target.checked); feCargar2(); };
 function feCargar2() { $('#fe-l').querySelectorAll('[data-f]').forEach(c => c.checked = !!FE[c.dataset.f].marcado); }
@@ -425,9 +448,11 @@ function faPinta() {
   $('#fa-l').innerHTML = gs.length ? gs.map(g => { const i = FA.grupos.indexOf(g); return `<div class="fa-g">
       <div class="fa-h"><label><input type="checkbox" data-g="${i}" ${g.albaranes.every(a => a.marcado) ? 'checked' : ''}> <b>${escH(g.cliente)}</b></label>
         <span>${eur(g.total)}</span><select data-e="${i}">${opt(g.empresa)}</select><small class="muted">${g.ultima ? 'última: ' + escH(g.ultima) : 'sin facturas anteriores'}</small></div>
-      ${g.albaranes.map((a, k) => `<label class="fa-a"><input type="checkbox" data-g="${i}" data-k="${k}" ${a.marcado ? 'checked' : ''}> ${escH(a.ref)} · ${escH(a.pedido)} · ${coDate(a.fecha)} · ${eur(a.importe)}
-        ${a.almacen.startsWith('AC') ? '' : `<span class="bdg b-warn">sale de ${escH(a.almacen)}</span>`}</label>`).join('')}</div>`; }).join('')
+      ${g.albaranes.map((a, k) => `<div class="fa-arow"><label class="fa-a"><input type="checkbox" data-g="${i}" data-k="${k}" ${a.marcado ? 'checked' : ''}> ${escH(a.ref)} · ${escH(a.pedido)} · ${coDate(a.fecha)} · ${eur(a.importe)}
+        ${a.almacen.startsWith('AC') ? '' : `<span class="bdg b-warn">sale de ${escH(a.almacen)}</span>`}</label> <a href="#" class="lnk fa-ver" data-id="${a.id}">ver qué lleva</a>
+        <div class="fa-det" id="fa-det-${a.id}" hidden></div></div>`).join('')}</div>`; }).join('')
     : '<p class="empty">No hay albaranes pendientes de facturar</p>';
+  $('#fa-l').querySelectorAll('.fa-ver').forEach(x => x.onclick = e => { e.preventDefault(); faVer(+x.dataset.id, x); });
   $('#fa-l').querySelectorAll('select[data-e]').forEach(s => s.onchange = () => { FA.grupos[s.dataset.e].empresa = +s.value; faRes(); });
   $('#fa-l').querySelectorAll('input[data-g]').forEach(c => c.onchange = () => {
     const g = FA.grupos[c.dataset.g];
@@ -435,6 +460,19 @@ function faPinta() {
     faPinta();
   });
   faRes();
+}
+async function faVer(id, enl) {
+  const box = $('#fa-det-' + id);
+  if (!box.hidden) { box.hidden = true; enl.textContent = 'ver qué lleva'; return; }
+  box.hidden = false; enl.textContent = 'ocultar'; box.innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    const d = await api(`/api/facturar/albaran/${id}`);
+    box.innerHTML = `<div class="det-box"><div class="det-top"><b>${escH(d.nombre)}</b> · ${escH(d.pedido)} · ${coDate(d.fecha)} · sale de ${escH(d.almacen)}
+        <a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-stock.action_picking_tree_all/${d.id}">abrir en Odoo ↗</a></div>
+      <table class="co-t"><thead><tr><th>Artículo</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Dto.</th><th class="num">Importe</th></tr></thead><tbody>
+      ${d.lineas.map(l => `<tr><td>${escH(l.articulo)}</td><td class="num">${+l.cantidad} ${escH(l.ud)}</td><td class="num">${l.precio ? eur(l.precio) : '—'}</td><td class="num">${l.dto ? l.dto + '%' : ''}</td><td class="num">${eur(l.importe)}</td></tr>`).join('')}
+      </tbody></table><div class="det-tot"><b>Total sin IVA ${eur(d.total)}</b></div></div>`;
+  } catch (e) { box.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
 }
 function faRes() {
   const por = {};

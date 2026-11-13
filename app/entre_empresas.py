@@ -13,6 +13,7 @@ import base64
 import calendar
 import datetime as dt
 import json
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -193,6 +194,67 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             em = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", pids)], ["email"], company_ids=cids)} if pids else {}
             return [{"id": f["id"], "nombre": f["name"], "cliente": f["partner_id"][1], "email": em.get(f["partner_id"][0], ""), "fecha": f["invoice_date"],
                      "total": f["amount_total"], "empresa": f["company_id"][1].split()[0], "abono": f["move_type"] == "out_refund"} for f in fs]
+        return guard(run)
+
+    @app.get("/api/facturar/albaran/{pid}")
+    def ver_albaran(pid: int, request: Request):
+        """Lo que lleva un albarán de entrega: artículos, cantidades y precio de su pedido."""
+        u, cids = ctx(request)
+
+        def run():
+            pk = odoo.search_read("stock.picking", [("id", "=", pid)], ["name", "partner_id", "date_done", "origin", "sale_id", "location_id", "note"], company_ids=TODAS)
+            if not pk:
+                raise HTTPException(404, "No encuentro el albarán")
+            mv = odoo.search_read("stock.move", [("picking_id", "=", pid), ("state", "=", "done")], ["product_id", "quantity", "product_uom", "sale_line_id"], company_ids=TODAS)
+            slids = [m["sale_line_id"][0] for m in mv if m.get("sale_line_id")]
+            sl = {l["id"]: l for l in odoo.search_read("sale.order.line", [("id", "in", slids)], ["price_unit", "discount"], company_ids=TODAS)} if slids else {}
+            lineas = []
+            for m in mv:
+                l = sl.get((m.get("sale_line_id") or [0])[0]) or {}
+                pr = l.get("price_unit") or 0
+                dto = l.get("discount") or 0
+                lineas.append({"articulo": (m.get("product_id") or [0, "—"])[1], "cantidad": m["quantity"], "ud": (m.get("product_uom") or [0, ""])[1],
+                               "precio": pr, "dto": dto, "importe": round(m["quantity"] * pr * (1 - dto / 100), 2)})
+            p = pk[0]
+            return {"id": pid, "nombre": p["name"], "cliente": (p.get("partner_id") or [0, ""])[1], "fecha": (p.get("date_done") or "")[:10],
+                    "pedido": (p.get("sale_id") or [0, ""])[1], "almacen": (p.get("location_id") or [0, ""])[1], "lineas": lineas,
+                    "total": round(sum(l["importe"] for l in lineas), 2)}
+        return guard(run)
+
+    @app.get("/api/facturar/factura/{mid}")
+    def ver_factura(mid: int, request: Request):
+        """Detalle de una factura de cliente y el email de su cliente (para poder añadirlo si falta)."""
+        u, cids = ctx(request)
+
+        def run():
+            f = odoo.search_read("account.move", [("id", "=", mid)], ["name", "partner_id", "invoice_date", "amount_untaxed", "amount_tax", "amount_total", "invoice_origin", "move_type"],
+                                 company_ids=TODAS)
+            if not f:
+                raise HTTPException(404, "No encuentro la factura")
+            f = f[0]
+            ls = odoo.search_read("account.move.line", [("move_id", "=", mid), ("display_type", "=", "product")], ["name", "quantity", "price_unit", "discount", "price_subtotal"],
+                                  company_ids=TODAS)
+            p = odoo.search_read("res.partner", [("id", "=", f["partner_id"][0])], ["name", "email", "phone", "commercial_partner_id"], company_ids=TODAS)
+            p = p[0] if p else {}
+            return {"id": mid, "nombre": f["name"], "fecha": f["invoice_date"], "origen": f.get("invoice_origin") or "", "base": f["amount_untaxed"], "iva": f["amount_tax"],
+                    "total": f["amount_total"], "partner_id": f["partner_id"][0], "cliente": p.get("name") or f["partner_id"][1], "email": p.get("email") or "",
+                    "telefono": p.get("phone") or "",
+                    "lineas": [{"articulo": l["name"], "cantidad": l["quantity"], "precio": l["price_unit"], "dto": l.get("discount") or 0, "importe": l["price_subtotal"]} for l in ls]}
+        return guard(run)
+
+    @app.post("/api/facturar/email")
+    async def poner_email(request: Request):
+        """Guarda el email de facturación en la ficha del cliente de Odoo."""
+        u, cids = ctx(request)
+        b = await request.json()
+        email = (b.get("email") or "").strip()
+        pid = int(b.get("partner_id") or 0)
+        if not pid or not re.fullmatch(r"[^@\s;,]+@[^@\s;,]+\.[A-Za-z]{2,}", email):
+            raise HTTPException(400, "Ese email no parece válido")
+
+        def run():
+            odoo.call("res.partner", "write", TODAS, ids=[pid], vals={"email": email})
+            return {"ok": True, "email": email}
         return guard(run)
 
     @app.post("/api/facturar/enviar")

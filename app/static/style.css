@@ -357,3 +357,12 @@ main,.main{padding-bottom:80px}
 .et-t{display:flex;gap:10px;align-items:center;padding:7px 10px;border:1px solid #eceef1;border-radius:8px;margin-bottom:6px}
 .et-t b{min-width:150px}.et-t span{min-width:110px}
 #et-res p{font-size:12px;margin:6px 0}
+
+/* detalle de albarán / factura en Facturación */
+.fa-arow{display:block}.fa-arow .fa-a{display:inline}.fa-arow .fa-ver{font-size:12px;margin-left:6px}
+.fa-det{margin:6px 0 10px 26px}
+.det-box{background:#fbfaff;border:1px solid #e4def3;border-radius:10px;padding:10px 12px}
+.det-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}.det-top a{margin-left:auto}
+.det-mail{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
+.det-mail input{min-width:260px;padding:6px 8px;border:1px solid #cfc6e6;border-radius:8px}
+.det-box table{width:100%;font-size:12px}.det-tot{text-align:right;margin-top:6px;font-size:13px}
