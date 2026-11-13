@@ -124,6 +124,62 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             return out
         return guard(run)
 
+    # ---------- por tienda: solo lo que cada tienda tiene en stock, 1 etiqueta por artículo ----------
+    TIENDAS = {"T1": "T1/Stock", "T2": "T2/Stock", "T3": "VP/Stock"}  # la Tienda 3 es el stock VP de Logipaper
+
+    def por_tienda(pids):
+        pids = [int(p) for p in dict.fromkeys(pids) if p]
+        q = odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id.usage", "=", "internal"), ("quantity", ">", 0)],
+                             ["product_id", "location_id", "quantity"], company_ids=[1, 2, 3, 4, 5], limit=20000) if pids else []
+        est = {t: set() for t in TIENDAS}
+        for x in q:
+            for t, loc in TIENDAS.items():
+                if x["location_id"][1] == loc:
+                    est[t].add(x["product_id"][0])
+        datos = {d["id"]: d for d in datos_etiquetas(pids)}
+        con_precio = [d for d in datos.values() if d["precio"] > 0]
+        orden = lambda L: sorted(L, key=lambda d: d["nombre"].lower())
+        out = {t: orden([dict(d, cant=1) for d in con_precio if d["id"] in est[t]]) for t in TIENDAS}
+        return {"tiendas": out, "todos": orden([dict(d, cant=1) for d in con_precio]),
+                "sin_precio": sorted(d["nombre"] for d in datos.values() if d["precio"] <= 0),
+                "sin_stock": sorted(d["nombre"] for d in con_precio if not any(d["id"] in est[t] for t in TIENDAS))}
+
+    @app.post("/api/etiquetas/tiendas")
+    async def tiendas(request: Request):
+        """{productos:[ids]} o {plantillas:[ids]} o {entradas:[picking ids]} -> etiquetas separadas por tienda (según su stock)."""
+        _, cids = ctx(request)
+        b = await request.json()
+
+        def run():
+            pids = [int(x) for x in b.get("productos") or [] if str(x).isdigit()]
+            if b.get("plantillas"):
+                pids += [v["id"] for v in odoo.search_read("product.product", [("product_tmpl_id", "in", [int(t) for t in b["plantillas"]])], ["id"], company_ids=[EMPRESA], limit=3000)]
+            if b.get("entradas"):
+                pids += [m["product_id"][0] for m in odoo.search_read("stock.move", [("picking_id", "in", [int(x) for x in b["entradas"]]), ("state", "=", "done")],
+                                                                      ["product_id"], company_ids=[1, 2, 3, 4, 5], limit=5000) if m.get("product_id")]
+            if b.get("desde"):
+                pids += [a["id"] for a in t_modificados(b["desde"])["articulos"]]
+            return por_tienda(pids)
+        return guard(run)
+
+    @app.get("/api/etiquetas/entradas")
+    def ultimas_entradas(request: Request, dias: int = 15):
+        """Últimas recepciones de proveedor validadas (sin los traspasos entre nuestras empresas)."""
+        _, cids = ctx(request)
+
+        def run():
+            desde = (dt.datetime.now() - dt.timedelta(days=max(1, min(dias, 120)))).strftime("%Y-%m-%d 00:00:00")
+            pk = odoo.search_read("stock.picking", [("picking_type_code", "=", "incoming"), ("state", "=", "done"), ("date_done", ">=", desde)],
+                                  ["name", "partner_id", "date_done", "origin", "company_id", "move_ids"], company_ids=[1, 2, 3, 4, 5], limit=200, order="date_done desc")
+            propias = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=[1, 2, 3, 4, 5])}
+            out = []
+            for p in pk:
+                prov = p.get("partner_id") or [0, "—"]
+                out.append({"id": p["id"], "nombre": p["name"], "proveedor": prov[1], "fecha": p["date_done"], "origen": p.get("origin") or "",
+                            "lineas": len(p.get("move_ids") or []), "entre_empresas": prov[0] in propias})
+            return out
+        return guard(run)
+
     # ---------- pedirlas en lenguaje normal ----------
     def clave():
         f = data_dir / "claude_clave.txt"
