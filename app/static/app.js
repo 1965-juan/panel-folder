@@ -157,7 +157,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     $('#who').textContent = yo.usuario.charAt(0).toUpperCase() + yo.usuario.slice(1);
     ODOO = yo.odoo_url; $('#demo').hidden = !yo.demo;
     $('#ver').textContent = 'versión ' + yo.version;
-    $('#upd').hidden = !yo.puede_actualizar;
+    $('#upd').hidden = !yo.puede_actualizar; $('#clave-cl').hidden = !yo.puede_actualizar;
     ADMIN = !!yo.admin; MODS = yo.modulos || [];
     document.querySelectorAll('.side nav a[data-m]').forEach(a => a.hidden = !MODS.includes(a.dataset.m));
     $('#usr-btn').hidden = !ADMIN;

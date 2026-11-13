@@ -259,6 +259,58 @@ def claude_estado(request: Request):
     return out
 
 
+@app.post("/api/claude/clave")
+async def claude_guardar_clave(request: Request):
+    """Juan pega la clave nueva en el panel: se comprueba con Anthropic y, si vale, se guarda en datos/claude_clave.txt."""
+    u = current_user(request)
+    if not es_admin(u):
+        raise HTTPException(403, "Solo Juan puede cambiar la clave")
+    import httpx as _hx
+    b = await request.json()
+    ks = re.findall(r"sk-ant-[A-Za-z0-9_\-]+", b.get("clave") or "")
+    if not ks:
+        raise HTTPException(400, "Eso no parece una clave de Claude: tiene que empezar por sk-ant-")
+    r = _hx.get(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/models", timeout=20,
+                headers={"x-api-key": ks[0], "anthropic-version": "2023-06-01"})
+    if r.status_code != 200:
+        raise HTTPException(400, f"Anthropic no acepta esa clave ({r.status_code}). Revisa que la has copiado entera. No se ha cambiado nada.")
+    f = DATA / "claude_clave.txt"
+    if f.exists():
+        (DATA / "claude_clave.anterior.txt").write_text(f.read_text(errors="ignore"))
+    f.write_text(ks[0] + "\n")
+    n = 0
+    try:
+        n = request.app.state.releer_fallidos()
+    except Exception:
+        pass
+    return {"ok": True, "releyendo": n}
+
+
+@app.get("/clave-claude", response_class=HTMLResponse)
+def pagina_clave(request: Request):
+    u = current_user(request)
+    if not es_admin(u):
+        raise HTTPException(403)
+    return """<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clave de Claude</title>
+<style>body{font-family:system-ui,Arial;background:#f5f3fa;margin:0;padding:40px 16px;color:#1f2328}.c{max-width:560px;margin:auto;background:#fff;border-radius:14px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+h1{color:#5b3ea8;font-size:20px;margin:0 0 6px}ol{padding-left:20px;line-height:1.6}input{width:100%;box-sizing:border-box;padding:12px;font-size:15px;border:2px solid #cfc6e6;border-radius:10px;margin:8px 0}
+button{background:#5b3ea8;color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:15px;cursor:pointer}#m{margin-top:14px;padding:12px;border-radius:8px;display:none}.ok{background:#e7f6ec;color:#17643a}.mal{background:#fdecec;color:#9b1c1c}a{color:#5b3ea8}</style></head>
+<body><div class="c"><h1>🔑 Clave de Claude del panel</h1><p id="est">Comprobando la clave actual…</p>
+<ol><li>Abre <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com → API Keys</a> y pulsa <b>Create Key</b> (nombre: Panel Folder NAS).</li>
+<li>Copia la clave (empieza por <b>sk-ant-</b>).</li><li>Pégala aquí abajo y pulsa <b>Guardar</b>. El panel la prueba antes de guardarla.</li></ol>
+<input id="k" type="password" placeholder="sk-ant-…" autocomplete="off"><button id="g">Guardar y comprobar</button><div id="m"></div>
+<p style="margin-top:18px"><a href="/">← Volver al panel</a></p></div>
+<script>
+const m=document.getElementById('m');
+fetch('/api/claude/estado').then(r=>r.json()).then(j=>{document.getElementById('est').innerHTML=(j.anthropic===200?'✅ La clave actual funciona.':'❌ La clave actual no funciona'+(j.modificado?' (guardada el '+j.modificado+')':'')+'.')});
+document.getElementById('g').onclick=async()=>{const k=document.getElementById('k').value.trim(); if(!k) return; m.style.display='block'; m.className=''; m.textContent='Comprobando con Anthropic…';
+ const r=await fetch('/api/claude/clave',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clave:k})}); const j=await r.json().catch(()=>({}));
+ document.getElementById('k').value='';
+ if(r.ok){m.className='ok'; m.textContent='✅ Clave guardada y funcionando.'+(j.releyendo?' Estoy volviendo a leer '+j.releyendo+' documento(s) que habían fallado.':''); document.getElementById('est').textContent='✅ La clave actual funciona.';}
+ else {m.className='mal'; m.textContent='❌ '+(j.detail||'No se pudo guardar');}};
+</script></body></html>"""
+
+
 @app.post("/api/actualizar")
 def actualizar(request: Request):
     u = current_user(request)

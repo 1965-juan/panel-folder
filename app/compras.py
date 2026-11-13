@@ -1327,8 +1327,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     e.update(paso="error", texto=d.get("nota") or "No se pudo subir a Odoo", acciones=["descartar"])
                 elif d["lectura"] is None:
                     e.update(paso="leyendo", texto="Leyendo el PDF…")
-                elif lec.get("error") and d["tipo"] == "albaran":
-                    e.update(paso="error", texto="No he podido leer el PDF: " + lec["error"][:150], acciones=["releer", "descartar"])
+                elif lec.get("error") and not d["odoo_id"]:
+                    clave_mal = "401" in lec["error"] or "x-api-key" in lec["error"] or "clave" in lec["error"].lower()
+                    e.update(paso="error", texto=("No se ha podido leer: la clave de Claude del panel no vale. Cámbiala en Ajustes → Clave de Claude y se leerá sola"
+                                                  if clave_mal else "No he podido leer el PDF: " + lec["error"][:150]), acciones=["releer", "descartar"])
                 elif d["tipo"] == "albaran":
                     if not d["compra"]:
                         e.update(paso="pendiente", texto="Falta cuadrarlo con su pedido de compra", acciones=["auto", "cuadrar", "descartar"])
@@ -1387,6 +1389,18 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 out.append(e)
             return out
         return guard(run)
+
+    def releer_fallidos():
+        """Tras cambiar la clave de Claude: vuelve a leer los documentos que fallaron al leerse."""
+        with lock, con() as c:
+            ids = [r["id"] for r in c.execute("SELECT id, lectura, odoo_id FROM docs WHERE lectura LIKE '%\"error\"%' AND (odoo_id IS NULL OR odoo_id=0) AND estado!='descartado'").fetchall()]
+            for i in ids:
+                c.execute("UPDATE docs SET lectura=NULL WHERE id=?", (i,))
+        for i in ids:
+            leer_en_segundo_plano(i)
+        return len(ids)
+
+    app.state.releer_fallidos = releer_fallidos
 
     TRABAJANDO = set()
 
