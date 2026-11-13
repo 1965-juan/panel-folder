@@ -231,6 +231,34 @@ async def api_usuario_nuevo(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/claude/estado")
+def claude_estado(request: Request):
+    """Comprueba la clave de Claude del NAS sin enseñarla: fecha del archivo, si tiene formato de clave y si Anthropic la acepta."""
+    u = current_user(request)
+    if not es_admin(u):
+        raise HTTPException(403)
+    import datetime as _dt
+    import httpx as _hx
+    f = DATA / "claude_clave.txt"
+    if not f.exists():
+        return {"archivo": False, "mensaje": "No existe datos/claude_clave.txt en el NAS"}
+    txt = f.read_text(errors="ignore")
+    ks = re.findall(r"sk-ant-[A-Za-z0-9_\-]+", txt)
+    out = {"archivo": True, "modificado": _dt.datetime.fromtimestamp(f.stat().st_mtime).strftime("%d/%m/%Y %H:%M"),
+           "claves_en_archivo": len(ks), "longitud": len(ks[0]) if ks else 0, "otros_caracteres": len(txt.strip()) - (len(ks[0]) if ks else 0)}
+    if not ks:
+        out["mensaje"] = "El archivo no contiene ninguna clave que empiece por sk-ant-"
+        return out
+    try:
+        r = _hx.get(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/models", timeout=20,
+                    headers={"x-api-key": ks[0], "anthropic-version": "2023-06-01"})
+        out["anthropic"] = r.status_code
+        out["mensaje"] = "La clave funciona" if r.status_code == 200 else f"Anthropic la rechaza ({r.status_code}): {r.text[:150]}"
+    except Exception as e:
+        out["mensaje"] = f"No se pudo comprobar: {e}"
+    return out
+
+
 @app.post("/api/actualizar")
 def actualizar(request: Request):
     u = current_user(request)
