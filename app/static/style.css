@@ -436,3 +436,10 @@ label.tb-ok input{width:18px;height:18px}
 .d-acc{margin:12px 0}.d-acc .d-ok{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #e3d9f0;border-radius:10px;background:#faf7fd;margin-bottom:8px}.d-acc .d-alb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 
 .d-acc .d-mails{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+
+.av-ban{position:fixed;bottom:16px;left:16px;z-index:9998;background:#c0392b;color:#fff;border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}
+.av-mod{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+.av-in{background:var(--card,#fff);color:inherit;border-radius:14px;max-width:760px;width:100%;padding:20px;position:relative}
+.av-in .x{position:absolute;top:10px;right:14px;font-size:22px;background:none;border:0;cursor:pointer;color:inherit}
+.av-c{border:1px solid #e6d3d3;border-left:4px solid #c0392b;border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;flex-direction:column;gap:4px}
+.av-b{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}

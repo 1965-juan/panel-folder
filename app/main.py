@@ -666,6 +666,116 @@ async def api_confirmar(request: Request, oid: int, company: str = "all"):
     return guard(run)
 
 
+# ---------- Aviso al administrador: encargos «recuperados» en el TPV con el albarán ya validado ----------
+AVISOS_FILE = DATA / "avisos_resueltos.json"
+
+
+def _avisos_resueltos():
+    try:
+        return set(json.loads(AVISOS_FILE.read_text())) if AVISOS_FILE.exists() else set()
+    except Exception:
+        return set()
+
+
+def _avisos_guardar(ids):
+    AVISOS_FILE.write_text(json.dumps(sorted(ids)))
+
+
+def _solo_admin(request):
+    if not es_admin(usuario_real(request)):
+        raise HTTPException(403, "Solo para el administrador")
+
+
+def _dobles(dias=30, pos_id=None):
+    T = [1, 2, 3, 4, 5]
+    desde = (dt.date.today() - dt.timedelta(days=dias)).isoformat()
+    dom = [("sale_order_origin_id", "!=", False)] + ([("order_id", "=", pos_id)] if pos_id else [("order_id.date_order", ">=", desde)])
+    pl = odoo.search_read("pos.order.line", dom, ["order_id", "sale_order_origin_id"], T, limit=5000)
+    pares = {}
+    for l in pl:
+        pares.setdefault(l["order_id"][0], set()).add(l["sale_order_origin_id"][0])
+    if not pares:
+        return []
+    so_ids = list({i for v in pares.values() for i in v})
+    pk = odoo.search_read("stock.picking", [("sale_id", "in", so_ids), ("picking_type_code", "=", "outgoing"), ("state", "=", "done")],
+                          ["name", "sale_id", "location_id", "company_id", "date_done"], T, limit=5000)
+    por_so = {}
+    for p in pk:
+        por_so.setdefault(p["sale_id"][0], []).append(p)
+    malos = {po: [so for so in sos if so in por_so] for po, sos in pares.items()}
+    malos = {k: v for k, v in malos.items() if v}
+    if not malos:
+        return []
+    pos = {p["id"]: p for p in odoo.search_read("pos.order", [("id", "in", list(malos))], ["name", "date_order", "config_id", "partner_id", "amount_total", "payment_ids"], T)}
+    pay_ids = [i for p in pos.values() for i in p.get("payment_ids") or []]
+    pays = {x["id"]: x for x in odoo.search_read("pos.payment", [("id", "in", pay_ids)], ["payment_method_id", "amount"], T)} if pay_ids else {}
+    sos = {x["id"]: x for x in odoo.search_read("sale.order", [("id", "in", so_ids)], ["name", "partner_id", "warehouse_id", "user_id"], T)}
+    out = []
+    for po, sids in malos.items():
+        p = pos.get(po)
+        if not p:
+            continue
+        out.append({"pos_id": po, "ticket": p["name"], "fecha": (p.get("date_order") or "")[:16], "tpv": (p.get("config_id") or [0, ""])[1],
+                    "importe": p.get("amount_total") or 0,
+                    "pagos": [{"forma": pays[i]["payment_method_id"][1], "importe": pays[i]["amount"]} for i in p.get("payment_ids") or [] if i in pays],
+                    "pedidos": [{"id": s, "nombre": sos.get(s, {}).get("name", ""), "cliente": (sos.get(s, {}).get("partner_id") or [0, ""])[1],
+                                 "almacen": (sos.get(s, {}).get("warehouse_id") or [0, ""])[1],
+                                 "albaranes": [{"id": x["id"], "nombre": x["name"], "fecha": (x.get("date_done") or "")[:10]} for x in por_so[s]]} for s in sids]})
+    out.sort(key=lambda x: x["fecha"], reverse=True)
+    return out
+
+
+@app.get("/api/avisos/tpv_dobles")
+def avisos_tpv(request: Request, dias: int = 30):
+    _solo_admin(request)
+    res = _avisos_resueltos()
+    return guard(lambda: [a for a in _dobles(dias) if str(a["pos_id"]) not in res])
+
+
+@app.post("/api/avisos/tpv_dobles/resolver")
+async def avisos_tpv_resolver(request: Request):
+    """{pos_id, corregir}: corregir=True devuelve al stock lo que se descontó de más (lo de los albaranes validados); luego deja de avisar."""
+    _solo_admin(request)
+    b = await request.json()
+    pos_id = int(b.get("pos_id") or 0)
+
+    def run():
+        msg = "marcado como revisado"
+        if b.get("corregir"):
+            a = _dobles(pos_id=pos_id)
+            if not a:
+                raise HTTPException(404, "Ya no encuentro ese caso")
+            pk_ids = [al["id"] for pe in a[0]["pedidos"] for al in pe["albaranes"]]
+            pks = odoo.search_read("stock.picking", [("id", "in", pk_ids)], ["location_id", "company_id"], [1, 2, 3, 4, 5])
+            uds = 0
+            for p in pks:
+                c, loc = p["company_id"][0], p["location_id"][0]
+                mv = odoo.search_read("stock.move", [("picking_id", "=", p["id"]), ("state", "=", "done")], ["product_id", "quantity"], [c])
+                tot = {}
+                for m in mv:
+                    tot[m["product_id"][0]] = tot.get(m["product_id"][0], 0) + (m.get("quantity") or 0)
+                alm = {x["id"] for x in odoo.search_read("product.product", [("id", "in", list(tot)), ("is_storable", "=", True)], ["id"], [c])}
+                cur = {}
+                for q in odoo.search_read("stock.quant", [("product_id", "in", list(alm)), ("location_id", "=", loc), ("lot_id", "=", False),
+                                                           ("package_id", "=", False), ("owner_id", "=", False)], ["product_id", "quantity"], [c]):
+                    cur[q["product_id"][0]] = cur.get(q["product_id"][0], 0) + q["quantity"]
+                ids = []
+                for pid in alm:
+                    r = odoo.call("stock.quant", "create", [c], vals_list=[{"product_id": pid, "location_id": loc, "inventory_quantity": cur.get(pid, 0) + tot[pid]}],
+                                  context={"inventory_mode": True})
+                    ids += r if isinstance(r, list) else [r]
+                    uds += tot[pid]
+                if ids:
+                    odoo.call("stock.quant", "action_apply_inventory", [c], ids=list(set(ids)),
+                              context={"inventory_mode": True, "inventory_name": f"Regularización: doble descuento TPV {a[0]['ticket']}"})
+            msg = f"devueltas {uds:g} unidades al stock"
+        r = _avisos_resueltos()
+        r.add(str(pos_id))
+        _avisos_guardar(r)
+        return {"ok": True, "mensaje": msg}
+    return guard(run)
+
+
 @app.get("/api/salud")
 def salud():
     return {"ok": True, "demo": DEMO}

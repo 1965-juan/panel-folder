@@ -211,6 +211,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
             b.innerHTML = `🔄 Hay una actualización del panel (versión ${escH(j.version)}) <button>Actualizar ahora</button>`;
             b.querySelector('button').onclick = () => location.reload(); document.body.appendChild(b); } } catch (_) { } };
       setInterval(mira, 120000); document.addEventListener('visibilitychange', mira); window.addEventListener('focus', mira); })();
+    if (yo.admin && !yo.viendo_como) avisosTpv();
     // los enlaces a Odoo se abren solo con las empresas de este usuario marcadas
     document.addEventListener('click', e => {
       const a = e.target.closest && e.target.closest('a[href]');
@@ -407,3 +408,34 @@ $('#b-hook').onclick = async () => { try { await jpost('/api/wa/registrar-webhoo
     b.disabled = false; $('#as-t').focus();
   };
 })();
+
+/* ---------- Aviso al administrador: encargos recuperados en el TPV con el albarán ya validado ---------- */
+async function avisosTpv() {
+  let L; try { L = await api('/api/avisos/tpv_dobles'); } catch (_) { return; }
+  document.querySelectorAll('.av-ban').forEach(x => x.remove());
+  if (!L || !L.length) return;
+  const b = document.createElement('button'); b.className = 'av-ban';
+  b.innerHTML = `⚠️ ${L.length} encargo${L.length > 1 ? 's' : ''} recuperado${L.length > 1 ? 's' : ''} en el TPV con el albarán ya validado`;
+  b.onclick = () => avisosVer(L); document.body.appendChild(b);
+}
+function avisosVer(L) {
+  let m = document.getElementById('av-mod'); if (m) m.remove();
+  m = document.createElement('div'); m.id = 'av-mod'; m.className = 'av-mod';
+  m.innerHTML = `<div class="av-in"><button class="x" id="av-x">×</button><h3>⚠️ Encargos recuperados en el TPV con el albarán ya validado</h3>
+    <p class="muted">El material salió dos veces del stock (albarán + ticket del TPV). Estos encargos se tenían que cobrar desde el panel (Mi tienda → Cobrar). Revisa también que el dinero haya entrado en la caja de la tienda que toca.</p>
+    ${L.map(a => `<div class="av-c" data-p="${a.pos_id}"><div><b>${escH(a.ticket)}</b> · ${escH(a.tpv)} · ${escH(a.fecha.replace('T', ' '))} · <b>${eur(a.importe)}</b></div>
+      <div class="muted">Cobrado en: ${a.pagos.map(p => `${escH(p.forma)} ${eur(p.importe)}`).join(' + ') || '—'}</div>
+      ${a.pedidos.map(p => `<div>Pedido <b>${escH(p.nombre)}</b> · ${escH(p.cliente)} · almacén ${escH(p.almacen)} · albarán ${p.albaranes.map(x => `${escH(x.nombre)} (${fdate(x.fecha)})`).join(', ')}</div>`).join('')}
+      <div class="av-b"><button class="ac-go" data-c="1">↩︎ Devolver al stock lo descontado de más</button><button class="btn" data-c="0">Ya está bien, quitar aviso</button></div></div>`).join('')}</div>`;
+  document.body.appendChild(m);
+  m.querySelector('#av-x').onclick = () => m.remove();
+  m.onclick = e => { if (e.target === m) m.remove(); };
+  m.querySelectorAll('[data-c]').forEach(x => x.onclick = async () => {
+    const card = x.closest('.av-c'), corr = x.dataset.c === '1';
+    if (corr && !confirm('¿Devolver al stock las unidades de los albaranes validados de este encargo?')) return;
+    card.querySelectorAll('button').forEach(y => y.disabled = true);
+    try { const r = await jpost('/api/avisos/tpv_dobles/resolver', { pos_id: +card.dataset.p, corregir: corr });
+      card.innerHTML = `<div>✅ ${escH(r.mensaje)}</div>`; avisosTpv(); }
+    catch (e) { alertBox(e.message); card.querySelectorAll('button').forEach(y => y.disabled = false); }
+  });
+}
