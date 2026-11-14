@@ -29,9 +29,51 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             for o in d.get("orders", []):
                 e = extra.get(o["order_id"], {})
                 o["ref_cliente"] = e.get("client_order_ref") or ""
+            quitar_pedidos_entre_empresas(d)
             d["odoo_url"] = odoo_url
             return d
         return guard(run)
+
+    TODAS = [1, 2, 3, 4, 5]
+    cache = {}
+
+    def propias():
+        """Partners de nuestras propias empresas (Distriplus, Logipaper, Ingraf, Fermasa…)."""
+        if "propias" not in cache:
+            cache["propias"] = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=TODAS)}
+        return cache["propias"]
+
+    def quitar_pedidos_entre_empresas(d):
+        """Los pedidos de compra de Logipaper a 'proveedor' Distriplus son el espejo de los pedidos que nos hace Logipaper:
+        no son pedidos a proveedor. Se descuentan de 'en pedido' y la línea deja de salir como 'Ped. prov.' para que compras la pida."""
+        lines = [l for o in d.get("orders", []) for l in o.get("lines", [])]
+        pids = list({l["product_id"] for l in lines if l.get("qty_on_order")})
+        if not pids:
+            return
+        pol = odoo.search_read("purchase.order.line", [("product_id", "in", pids), ("order_id.state", "in", ["draft", "sent", "to approve", "purchase"])],
+                               ["product_id", "product_qty", "qty_received", "partner_id"], company_ids=TODAS, limit=20000)
+        real, grupo = {}, {}
+        for x in pol:
+            pend = max(0, (x.get("product_qty") or 0) - (x.get("qty_received") or 0))
+            if not pend:
+                continue
+            dst = grupo if (x.get("partner_id") or [0])[0] in propias() else real
+            dst[x["product_id"][0]] = dst.get(x["product_id"][0], 0) + pend
+        estilo = {}
+        for l in lines:
+            estilo.setdefault(l.get("badge_label"), (l.get("visual_state"), l.get("badge_class")))
+        for l in lines:
+            g = grupo.get(l["product_id"], 0)
+            if not g:
+                continue
+            l["qty_on_order_grupo"] = g
+            l["qty_on_order"] = max(0, round(real.get(l["product_id"], 0), 2))
+            if l["qty_on_order"] <= 0 and l.get("prov_requested"):
+                l["prov_requested"] = False  # solo lo tiene 'pedido' Logipaper a Distriplus: no hay pedido real a proveedor
+            if l.get("badge_label") == "Ped. prov." and l["qty_on_order"] <= 0:
+                nuevo = "Falta stock" if sum((l.get("stock_by_loc") or {}).values()) > 0 else "Sin stock"
+                vs, bc = estilo.get(nuevo) or ("red", "text-bg-danger")
+                l.update(badge_label=nuevo, visual_state=vs, badge_class=bc, pedir_proveedor=True)
 
     async def body(request):
         try:
@@ -130,8 +172,15 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
     @app.get("/api/ac/proveedor/{product_id}")
     def ac_proveedor(product_id: int, request: Request, company: str = "all"):
         _, cids = ctx(request, company)
-        return guard(lambda: {"estado": odoo.call_kw("sale.order", "get_purchase_status", [product_id], company_ids=cids),
-                              "proveedores": odoo.call_kw("sale.order", "get_supplier_info", [product_id], company_ids=cids)})
+        def run():
+            est = odoo.call_kw("sale.order", "get_purchase_status", [product_id], company_ids=cids)
+            if isinstance(est, dict) and isinstance(est.get("po_lines"), list):
+                est["po_lines"] = [x for x in est["po_lines"] if x.get("partner_id") not in propias()]  # fuera los de Logipaper a Distriplus
+            prov = odoo.call_kw("sale.order", "get_supplier_info", [product_id], company_ids=cids)
+            if isinstance(prov, list):
+                prov = [x for x in prov if not (isinstance(x, dict) and x.get("partner_id") in propias())]
+            return {"estado": est, "proveedores": prov}
+        return guard(run)
 
     @app.post("/api/ac/pedir")
     async def ac_pedir(request: Request, company: str = "all"):

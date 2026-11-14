@@ -86,7 +86,7 @@ function acLine(g, l, locs, i) {
     <td class="art"></td>
     <td class="n qe" title="Pulsa para cambiar la cantidad"><b>${acNum(l.qty_ordered)}</b> <span class="ed">✎</span></td>
     <td class="n">${acNum(l.qty_delivered)}</td><td class="n pend">${acNum(l.qty_pending)}</td>
-    <td class="est" title="Ver pedidos a proveedor y pedir"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}</td>
+    <td class="est" title="Ver pedidos a proveedor y pedir"><span class="bdg ${bc}">${bt}</span>${l.qty_on_order ? `<small class="oo">${acNum(l.qty_on_order)} pedidas</small>` : ''}${l.qty_on_order_grupo && !l.qty_on_order && acCat(l) !== 'stock' ? `<small class="oo" title="Logipaper lo tiene en su pedido a Distriplus, pero no está pedido a ningún proveedor">⚠️ sin pedir a proveedor</small>` : ''}</td>
     ${locs.map(x => { const s = l.stock_by_loc[String(x.id)] || 0, max = Math.max(0, Math.min(s, l.qty_pending));
       return `<td class="loc ${x.read_only ? 'ro' : ''}${x.is_central ? ' cen' : ''}">
       <span data-fill="${x.id}" class="stk ${s > 0 ? (x.read_only ? 'vp' : 'si can') : 'no'}" title="Stock en ${escH(x.name)}${s > 0 && !x.read_only ? ' · pulsa para coger' : ''}">${acNum(s)}</span>
