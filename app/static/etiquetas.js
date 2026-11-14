@@ -41,6 +41,7 @@ async function etTiendas(cuerpo, titulo) {
 }
 
 async function etOpen() {
+  if (window.YO && YO.tienda) $('#et-ult').textContent = '📦 Lo último que nos ha llegado del almacén';
   if (!$('#et-desde').value) $('#et-desde').value = etHoy(-7);
   const m = location.hash.match(/[?&](tmpl|prod)=([\d,]+)/);   // lo marcado en Odoo (Acción → 🏷 Etiquetas en el Panel)
   if (m) {
@@ -69,7 +70,7 @@ $('#et-ult').onclick = async () => {
     const L = (await api('/api/etiquetas/entradas?dias=20')).filter(x => !x.entre_empresas);
     $('#et-ent').innerHTML = L.length ? `<div class="et-ent">${L.map((x, i) => `<label><input type="checkbox" value="${x.id}" ${i === 0 ? 'checked' : ''}>
         <b>${escH(x.proveedor)}</b> <span class="muted">${escH(x.nombre)}${x.origen ? ' · ' + escH(x.origen) : ''} · ${coDate(x.fecha.slice(0, 10))} · ${x.lineas} líneas</span></label>`).join('')}</div>
-      <button class="ac-go" id="et-ent-ok">Sacar etiquetas de las marcadas</button>` : '<p class="muted">No hay entradas de proveedor en los últimos 20 días</p>';
+      <button class="ac-go" id="et-ent-ok">Sacar etiquetas de las marcadas</button>` : `<p class="muted">${window.YO && YO.tienda ? 'No os ha llegado nada del almacén' : 'No hay entradas de proveedor'} en los últimos 20 días</p>`;
     const ok = $('#et-ent-ok'); if (ok) ok.onclick = () => {
       const sel = [...$('#et-ent').querySelectorAll('input:checked')];
       if (!sel.length) return alertBox('Marca al menos una entrada');

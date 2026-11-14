@@ -203,11 +203,20 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
 
     @app.get("/api/etiquetas/entradas")
     def ultimas_entradas(request: Request, dias: int = 15):
-        """Últimas recepciones de proveedor validadas (sin los traspasos entre nuestras empresas)."""
-        _, cids = ctx(request)
+        """Últimas recepciones de proveedor validadas (sin los traspasos entre nuestras empresas). Para una tienda: los traslados que le llegan del almacén."""
+        _u, cids = ctx(request)
+
+        t = tienda_de(_u)
 
         def run():
             desde = (dt.datetime.now() - dt.timedelta(days=max(1, min(dias, 120)))).strftime("%Y-%m-%d 00:00:00")
+            if t:   # tienda: lo que le ha llegado del almacén (traslados a su stock)
+                loc = {"T1": "T1/Stock", "T2": "T2/Stock", "T3": "VP/Stock"}[t]
+                pk = odoo.search_read("stock.picking", [("state", "=", "done"), ("date_done", ">=", desde), ("location_dest_id.complete_name", "=", loc),
+                                                        ("picking_type_code", "in", ["internal", "incoming"])],
+                                      ["name", "partner_id", "date_done", "origin", "move_ids", "location_id"], company_ids=TODAS, limit=200, order="date_done desc")
+                return [{"id": p["id"], "nombre": p["name"], "proveedor": "Del almacén" if "AC" in (p.get("location_id") or [0, ""])[1] else (p.get("partner_id") or [0, "Del almacén"])[1],
+                         "fecha": p["date_done"], "origen": p.get("origin") or "", "lineas": len(p.get("move_ids") or []), "entre_empresas": False} for p in pk]
             pk = odoo.search_read("stock.picking", [("picking_type_code", "=", "incoming"), ("state", "=", "done"), ("date_done", ">=", desde)],
                                   ["name", "partner_id", "date_done", "origin", "company_id", "move_ids"], company_ids=[1, 2, 3, 4, 5], limit=200, order="date_done desc")
             propias = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=[1, 2, 3, 4, 5])}
