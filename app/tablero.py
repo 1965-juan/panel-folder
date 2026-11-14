@@ -203,7 +203,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             po = po[0]
             ls = [l for l in leer_lineas(po["order_line"]) if not l.get("display_type") and l.get("product_id")]
             pids = list({l["product_id"][0] for l in ls})
-            pr = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids)], ["default_code", "name", "product_tmpl_id"],
+            pr = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids)], ["default_code", "name", "product_tmpl_id", "x_studio_manufacturer_ref"],
                                                         company_ids=TODAS)} if pids else {}
             part = odoo.search_read("res.partner", [("id", "=", po["partner_id"][0])], ["commercial_partner_id", "email", "phone"], company_ids=TODAS)[0]
             provs = {po["partner_id"][0], part["commercial_partner_id"][0]}
@@ -231,7 +231,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             p = pr.get(l["product_id"][0], {})
             desc = _re.sub(r"^\[[^\]]*\]\s*", "", p.get("name") or l["name"])
             stock = "".join(f'<td class="n s{" sep" if k == 0 else ""}">{n(round(st.get((l["product_id"][0], t), 0), 2))}</td>' for k, (t, _, _) in enumerate(STOCKS))
-            filas.append(f'<tr><td>{e(p.get("default_code"))}</td><td>{e(refp.get((p.get("product_tmpl_id") or [0])[0]))}</td><td>{e(desc)}</td>'
+            filas.append(f'<tr><td>{e(p.get("default_code"))}</td><td>{e(refp.get((p.get("product_tmpl_id") or [0])[0]) or p.get("x_studio_manufacturer_ref"))}</td><td>{e(desc)}</td>'
                          f'<td class="n"><b>{n(l["product_qty"])}</b></td><td>{e((l.get(uom()) or [0, ""])[1])}</td>{stock}</tr>')
         fecha = (po.get("date_approve") or po.get("date_order") or "")[:10]
         fecha = "/".join(reversed(fecha.split("-"))) if fecha else ""
@@ -256,7 +256,7 @@ body.sin .s{{display:none}}
 <div class="top"><div><h1>Pedido de compra {e(po['name'])}</h1><div class="muted">Fecha: {fecha}</div>
 <div style="margin-top:8px"><b>Proveedor:</b> {e(po['partner_id'][1])}<br><span class="muted">{e(part.get('email'))} {e(part.get('phone'))}</span></div></div>
 <div style="text-align:right"><b>{e(emp['name'])}</b><br>{e(emp.get('vat'))}<br>{e(dir_)}<br>{e(emp.get('phone'))} {e(emp.get('email'))}<br><span class="muted">Folder Castellón</span></div></div>
-<table><thead><tr><th>Ref. Folder</th><th>Ref. proveedor</th><th>Descripción</th><th class="n">Cantidad</th><th>Ud.</th>{cab_st.replace('<th class="n s">', '<th class="n s sep">', 1)}</tr></thead>
+<table><thead><tr><th>Ref. Folder</th><th>Ref. fabricante</th><th>Descripción</th><th class="n">Cantidad</th><th>Ud.</th>{cab_st.replace('<th class="n s">', '<th class="n s sep">', 1)}</tr></thead>
 <tbody>{''.join(filas)}</tbody></table>
 <p class="pie">{len(filas)} líneas. Entregar en: {e(emp['name'])}, {e(dir_)}. Por favor, indiquen nuestro nº de pedido <b>{e(po['name'])}</b> en el albarán.</p>
 <p class="pie s muted">Stock a día de hoy (no sale al imprimir para el proveedor).</p>
