@@ -464,7 +464,19 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         so = odoo.search_read("sale.order", cd + cli + [("state", "in", ["draft", "sent", "sale"])],
                               SO_FIELDS, cids, limit=600, order="date_order desc")
         presu, caduc, pedidos, albaranes = [], [], [], []
+        # pedidos ya cobrados en el TPV («recuperar» el pedido en la tienda): están cerrados aunque Odoo los deje como pedido
+        cobrado_tpv = {}
+        vivos = [r["id"] for r in so if r["state"] == "sale" and r.get("invoice_status") != "invoiced"]
+        if vivos:
+            try:
+                for l in odoo.search_read("pos.order.line", [("sale_order_origin_id", "in", vivos)], ["sale_order_origin_id", "price_subtotal_incl"], cids, limit=20000):
+                    k = l["sale_order_origin_id"][0]
+                    cobrado_tpv[k] = cobrado_tpv.get(k, 0) + (l.get("price_subtotal_incl") or 0)
+            except Exception:
+                cobrado_tpv = {}
         for r in so:
+            if r["state"] == "sale" and (r.get("invoice_status") == "invoiced" or cobrado_tpv.get(r["id"], 0) >= (r.get("amount_total") or 0) - 0.05):
+                continue
             if r["state"] in ("draft", "sent"):
                 if r.get("validity_date") and r["validity_date"] < today:
                     caduc.append(so_card(r, "caducado"))
