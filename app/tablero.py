@@ -50,10 +50,13 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
         r = odoo.call("purchase.order", "create", [EMPRESA], vals_list=[{"partner_id": int(partner_id), "company_id": EMPRESA}])
         return r[0] if isinstance(r, list) else r
 
+    def uom():
+        return "product_uom_id" if "product_uom_id" in campos_linea() else "product_uom"
+
     def copiar_linea(l, po_id, qty=None):
         vals = {"order_id": po_id, "product_id": l["product_id"][0], "product_qty": qty if qty is not None else l["product_qty"]}
-        if l.get("product_uom"):
-            vals["product_uom"] = l["product_uom"][0]
+        if l.get(uom()):
+            vals[uom()] = l[uom()][0]
         cs = campos_linea()
         for k in ("sale_line_id", "sale_order_id"):
             if k in cs and l.get(k):
@@ -63,7 +66,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
 
     def leer_lineas(ids):
         cs = campos_linea()
-        F = ["order_id", "product_id", "name", "product_qty", "product_uom", "price_unit", "price_subtotal", "display_type"] + [k for k in ("sale_line_id", "sale_order_id") if k in cs]
+        F = ["order_id", "product_id", "name", "product_qty", uom(), "price_unit", "price_subtotal", "display_type"] + [k for k in ("sale_line_id", "sale_order_id") if k in cs]
         return odoo.search_read("purchase.order.line", [("id", "in", ids)], F, company_ids=[EMPRESA]) if ids else []
 
     def anotar_origen(po_id, origen):
@@ -129,7 +132,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                 alt = por_tmpl.get((pr.get("product_tmpl_id") or [0])[0], {})
                 cols[po_partner[l["order_id"][0]]]["lineas"].append({
                     "id": l["id"], "po_id": l["order_id"][0], "po": l["order_id"][1], "product_id": l["product_id"][0], "articulo": l["product_id"][1],
-                    "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get("product_uom") or [0, ""])[1], "precio": l["price_unit"],
+                    "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get(uom()) or [0, ""])[1], "precio": l["price_unit"],
                     "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0,
                     "para": (l.get("sale_order_id") or [0, ""])[1] if l.get("sale_order_id") else "",
                     "proveedores": sorted(alt.values(), key=lambda x: (x["precio"] or 9e9))})
