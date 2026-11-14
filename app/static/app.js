@@ -28,6 +28,7 @@ function card(c) {
   d.innerHTML = `<div class="c1"><span class="ref"></span>${right}</div>
     <div class="cli"></div><div class="c3"><span class="emp"></span><span>${foot}</span></div>`;
   d.querySelector('.ref').textContent = c.ref;
+  if (c.enviado || c.reclamado) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Enviado${/\d/.test(c.enviado) ? ' ' + fdate(c.enviado) : ''}</span>` : ''}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado ${fdate(c.reclamado)}</span>` : ''}</div>`);
   if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
@@ -101,7 +102,7 @@ async function openDetail(c) {
 function dAcciones(c, d) {
   const A = $('#d-acc'); let h = '';
   if (d.estado === 'draft' || d.estado === 'sent') {
-    h += `<div class="d-ok"><button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
+    h += `<div class="d-ok">${c.enviado || c.reclamado ? `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Presupuesto enviado${/\d/.test(c.enviado) ? ' el ' + fdate(c.enviado) : ''}</span>` : '<span class="mk">Sin enviar</span>'}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado el ${fdate(c.reclamado)}</span>` : ''}</div>` : '<div class="marcas"><span class="mk">Sin enviar ni reclamar</span></div>'}<button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
       <label><input type="checkbox" id="d-avi" ${d.email ? 'checked' : 'disabled'}> Avisar al cliente por email de que estamos preparando su material
       ${d.email ? `<small class="muted">(${escH(d.email)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label>
       <small class="d-ver">👁 Ver cómo quedan: <a target="_blank" href="/ventas/${c.id}/vista?tipo=preparacion&company=${company}">pedido en preparación</a> ·
@@ -120,7 +121,7 @@ function dAcciones(c, d) {
     const txt = m.dataset.m === 'presupuesto' ? `¿Enviar el presupuesto ${c.ref} en PDF a ${d.email}?` : `¿Enviar a ${d.email} el aviso de que no hemos recibido confirmación de ${c.ref}?`;
     if (!confirm(txt)) return;
     const t0 = m.textContent; m.disabled = true; m.textContent = 'Enviando…';
-    try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: m.dataset.m }); m.textContent = '✅ Enviado'; alertBox(`Email enviado a ${d.email}`); }
+    try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: m.dataset.m }); m.textContent = '✅ Enviado'; alertBox(`Email enviado a ${d.email}`); load(); }
     catch (e) { alertBox(e.message); m.disabled = false; m.textContent = t0; }
   });
   const b = $('#d-conf'); if (b) b.onclick = async () => {

@@ -505,6 +505,27 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             "cid": r["company_id"][0] if r.get("company_id") else None,
             "vencida": bool(r.get("invoice_date_due") and r["invoice_date_due"] < today),
         } for r in inv]
+        # marcas de lo hecho con cada presupuesto: enviado al cliente y reclamado (sin confirmar)
+        pids = [c["id"] for c in presu + caduc]
+        if pids:
+            try:
+                msgs = odoo.search_read("mail.message", [("model", "=", "sale.order"), ("res_id", "in", pids), ("message_type", "in", ["email", "comment", "email_outgoing"]),
+                                                         ("subject", "!=", False)], ["res_id", "subject", "date"], cids, limit=5000, order="date asc")
+            except Exception:
+                msgs = []
+            marca = {}
+            for m in msgs:
+                sj = (m.get("subject") or "").lower()
+                d = (m.get("date") or "")[:10]
+                if "seguimos adelante" in sj or "seguimiento de su presupuesto" in sj:
+                    marca.setdefault(m["res_id"], {})["reclamado"] = d
+                elif "presupuesto" in sj or "quotation" in sj or "cotizaci" in sj:
+                    marca.setdefault(m["res_id"], {})["enviado"] = d
+            st = {r["id"]: r["state"] for r in so}
+            for c in presu + caduc:
+                mk = marca.get(c["id"], {})
+                c["enviado"] = mk.get("enviado") or ("sí" if st.get(c["id"]) == "sent" else "")
+                c["reclamado"] = mk.get("reclamado", "")
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
                "albaranes": albaranes, "facturas": facturas}
         out = {k: [c for c in v if c["cid"] in cids] for k, v in out.items()}

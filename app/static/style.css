@@ -443,3 +443,6 @@ label.tb-ok input{width:18px;height:18px}
 .av-in .x{position:absolute;top:10px;right:14px;font-size:22px;background:none;border:0;cursor:pointer;color:inherit}
 .av-c{border:1px solid #e6d3d3;border-left:4px solid #c0392b;border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;flex-direction:column;gap:4px}
 .av-b{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+
+.card .marcas{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 2px}.card .mk{font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px}.mk-env{background:#e7f0fb;color:#1f5a99}.mk-rec{background:#fdf0e1;color:#9a5a0b}
+.d-acc .marcas{display:flex;gap:6px;flex-wrap:wrap}.d-acc .mk{font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:#eee}
