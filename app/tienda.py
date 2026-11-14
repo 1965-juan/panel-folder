@@ -41,7 +41,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de):
             except Exception as e:
                 rep = [{"error": str(e)[:200]}]
             # encargos de clientes hechos en la tienda, hasta que el almacén saca el albarán
-            dom = [("state", "=", "sale"), ("delivery_status", "!=", "full"), ("company_id", "=", T["empresa"])]
+            dom = [("state", "=", "sale"), ("delivery_status", "in", ["pending", "partial"]), ("company_id", "=", T["empresa"])]
             dom += (["|", ("user_id", "=", T["usuario_odoo"]), ("warehouse_id", "=", T["almacen"])] if T["usuario_odoo"] else [("warehouse_id", "=", T["almacen"])])
             so = odoo.search_read("sale.order", dom, ["name", "partner_id", "date_order", "amount_total", "client_order_ref", "order_line"],
                                   company_ids=[T["empresa"]], order="date_order desc", limit=200)
@@ -52,6 +52,8 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de):
             for l in sl:
                 por.setdefault(l["order_id"][0], []).append({"articulo": (l.get("product_id") or [0, l["name"]])[1], "pedido": l["product_uom_qty"],
                                                             "servido": l["qty_delivered"], "pendiente": max(0, l["product_uom_qty"] - l["qty_delivered"])})
+            propias = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=TODAS)}
+            so = [s for s in so if s["partner_id"][0] not in propias]   # fuera los pedidos entre nuestras empresas
             enc = [{"id": s["id"], "ref": s["name"], "cliente": s["partner_id"][1], "fecha": (s.get("date_order") or "")[:10], "total": s["amount_total"],
                     "ref_cliente": s.get("client_order_ref") or "", "lineas": por.get(s["id"], [])} for s in so]
             return {"tienda": t, "nombre": T["nombre"], "fija": bool(tienda_de(u)), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
