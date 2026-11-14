@@ -190,8 +190,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             fs = odoo.search_read("account.move", [("move_type", "in", ["out_invoice", "out_refund"]), ("state", "=", "posted"), ("is_move_sent", "=", False),
                                                    ("invoice_date", ">=", desde), ("journal_id.name", "not ilike", "TPV"), ("pos_order_ids", "=", False)],
                                   ["name", "partner_id", "invoice_date", "amount_total", "company_id", "move_type"], company_ids=cids, order="invoice_date desc, id desc", limit=300)
-            pids = list({f["partner_id"][0] for f in fs})
-            em = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", pids)], ["email"], company_ids=cids)} if pids else {}
+            # fuera las facturas a nuestras propias empresas (Fermasa, Logipaper, Distriplus…): no se envían por email
+            propias = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=TODAS)}
+            ps = odoo.search_read("res.partner", [("id", "in", list({f["partner_id"][0] for f in fs}))], ["email", "commercial_partner_id"], company_ids=TODAS) if fs else []
+            grupo = {p["id"] for p in ps if p["id"] in propias or p["commercial_partner_id"][0] in propias}
+            fs = [f for f in fs if f["partner_id"][0] not in grupo]
+            em = {p["id"]: p.get("email") or "" for p in ps}
             return [{"id": f["id"], "nombre": f["name"], "cliente": f["partner_id"][1], "email": em.get(f["partner_id"][0], ""), "fecha": f["invoice_date"],
                      "total": f["amount_total"], "empresa": f["company_id"][1].split()[0], "abono": f["move_type"] == "out_refund"} for f in fs]
         return guard(run)
