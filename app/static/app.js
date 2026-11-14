@@ -74,11 +74,12 @@ async function openDetail(c) {
   $('#d-sub').textContent = `${c.empresa} · ${fdate(c.fecha)} · ${eur(c.total)}`;
   $('#d-odoo').href = `${ODOO}/odoo/${c.model}/${c.id}`;
   const tb = $('#d-lines tbody'); tb.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
-  $('#d-hist').innerHTML = '';
+  $('#d-hist').innerHTML = ''; $('#d-acc').innerHTML = '';
   $('#drawer').hidden = false;
   if (c.model !== 'sale.order') { tb.innerHTML = '<tr><td colspan="5">Para ver la factura, ábrela en Odoo.</td></tr>'; return; }
   try {
     const d = await api(`/api/ventas/${c.id}?company=${company}`);
+    dAcciones(c, d);
     tb.innerHTML = '';
     d.lineas.forEach(l => {
       const tr = document.createElement('tr');
@@ -95,6 +96,30 @@ async function openDetail(c) {
       $('#d-hist').appendChild(li);
     });
   } catch (e) { tb.innerHTML = `<tr><td colspan="5">${e.message}</td></tr>`; }
+}
+
+function dAcciones(c, d) {
+  const A = $('#d-acc'); let h = '';
+  if (d.estado === 'draft' || d.estado === 'sent') {
+    h += `<div class="d-ok"><button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
+      <label><input type="checkbox" id="d-avi" ${d.email ? 'checked' : 'disabled'}> Avisar al cliente por email de que estamos preparando su material
+      ${d.email ? `<small class="muted">(${escH(d.email)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label></div>`;
+  }
+  if (d.albaranes && d.albaranes.length) {
+    const est = { draft: 'borrador', waiting: 'esperando', confirmed: 'esperando material', assigned: 'listo para servir', done: 'servido' };
+    h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${ODOO}/report/pdf/stock.report_deliveryslip/${a.id}">🖨 Albarán ${escH(a.nombre)}</a>
+      <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
+  }
+  A.innerHTML = h;
+  const b = $('#d-conf'); if (b) b.onclick = async () => {
+    const avi = $('#d-avi').checked;
+    if (!confirm(`¿Pasar ${c.ref} a pedido${avi ? ' y avisar al cliente por email' : ''}?`)) return;
+    b.disabled = true; b.textContent = 'Confirmando…';
+    try { const r = await jpost(`/api/ventas/${c.id}/confirmar?company=${company}`, { avisar: avi });
+      alertBox(`${r.pedido} ya es pedido${r.avisado ? ' · cliente avisado por email' : ''}${r.aviso ? ' · ⚠️ ' + r.aviso : ''}`);
+      $('#drawer').hidden = true; load();
+    } catch (e) { alertBox(e.message); b.disabled = false; b.textContent = '✔ Aceptar: pasar a pedido'; }
+  };
 }
 
 $('#upd').onclick = async () => {

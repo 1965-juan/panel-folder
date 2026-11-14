@@ -432,3 +432,5 @@ label.tb-ok input{width:18px;height:18px}
 .upd-ban{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:#6b3fa0;color:#fff;padding:10px 16px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-weight:600;display:flex;gap:12px;align-items:center;max-width:calc(100vw - 32px)}.upd-ban button{background:#f08a24;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
 
 .tb-vp{font-size:12px;margin-top:4px;padding:3px 6px;border-radius:6px;background:#eef7ee;color:#2d6a2d}.tb-vp-mal{background:#fdecec;color:#a42323}
+
+.d-acc{margin:12px 0}.d-acc .d-ok{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #e3d9f0;border-radius:10px;background:#faf7fd;margin-bottom:8px}.d-acc .d-alb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}

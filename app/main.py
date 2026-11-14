@@ -531,7 +531,54 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                 txt = m["subtype_id"][1]
             hist.append({"fecha": (m.get("date") or "")[:16], "quien": m["author_id"][1] if m.get("author_id") else "",
                          "texto": txt})
-        return {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist}
+        pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("picking_type_code", "=", "outgoing"), ("state", "!=", "cancel")],
+                              ["name", "state"], cids, order="id")
+        so = odoo.search_read("sale.order", [("id", "=", oid)], ["partner_id", "state"], cids)[0]
+        em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email"], cids) if so.get("partner_id") else []
+        return {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist,
+                "albaranes": [{"id": x["id"], "nombre": x["name"], "estado": x["state"]} for x in pk],
+                "email": (em[0].get("email") if em else "") or "", "estado": so["state"]}
+
+    return guard(run)
+
+
+AVISO_PREPARACION = "Folder - Aviso pedido en preparación"
+
+
+@app.post("/api/ventas/{oid}/confirmar")
+async def api_confirmar(request: Request, oid: int, company: str = "all"):
+    """Pasa un presupuesto a pedido y, si se pide, avisa al cliente por email de que se le está preparando el material."""
+    u = current_user(request)
+    try:
+        b = await request.json()
+    except Exception:
+        b = {}
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "state", "company_id", "partner_id"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        so = so[0]
+        if so["state"] not in ("draft", "sent"):
+            raise HTTPException(400, f"{so['name']} ya no es un presupuesto")
+        c = so["company_id"][0]
+        odoo.call("sale.order", "action_confirm", [c], ids=[oid])
+        aviso = ""
+        if b.get("avisar"):
+            em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email"], [c] + [x for x in cids if x != c])
+            if not em or not em[0].get("email"):
+                aviso = "el cliente no tiene email: no se ha enviado el aviso"
+            else:
+                tpl = odoo.search_read("mail.template", [("model", "=", "sale.order"), ("name", "=", AVISO_PREPARACION)], ["id"], [c], limit=1)
+                if not tpl:
+                    aviso = "no encuentro la plantilla del aviso en Odoo"
+                else:
+                    try:
+                        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True)
+                    except Exception as e:
+                        aviso = f"no se pudo enviar el aviso: {str(e)[:150]}"
+        return {"ok": True, "pedido": so["name"], "avisado": bool(b.get("avisar")) and not aviso, "aviso": aviso}
 
     return guard(run)
 
