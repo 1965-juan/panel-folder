@@ -388,3 +388,9 @@ main,.main{padding-bottom:80px}
 .tb-ok{margin-top:8px;background:#2f7d4f;color:#fff;border:0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600}
 .tb-add{background:transparent;border:2px dashed #cfc6e6}.tb-add input{margin-top:6px;padding:7px;border:1px solid #cfc6e6;border-radius:8px}
 #tb-nps a{display:block;padding:5px 6px;font-size:12px;color:#1f2328;text-decoration:none}#tb-nps a:hover{background:#efeaf8}
+
+.tb-col.tb-lanz{background:#e3f4e8;border:2px solid #2f7d4f}
+.tb-fl{display:inline-block;margin-top:4px;background:#2f7d4f;color:#fff;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700}
+.tb-card.tb-fija{cursor:default;opacity:.9}
+label.tb-ok{display:flex;gap:8px;align-items:center;justify-content:center}
+label.tb-ok input{width:18px;height:18px}

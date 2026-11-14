@@ -31,13 +31,19 @@ function tbPinta() {
     const ls = c.lineas.filter(l => !q || (l.articulo + ' ' + l.ref + ' ' + c.proveedor + ' ' + l.para).toLowerCase().includes(q));
     if (q && !ls.length && !c.proveedor.toLowerCase().includes(q)) return '';
     const po = c.pedidos[0];
+    if (c.lanzado) return `<div class="tb-col tb-lanz">
+      <div class="tb-ch"><b>${escH(c.proveedor)}</b><div class="tb-fl">✔ Lanzado el ${coDate(c.fecha_lanzado)}</div>
+        <div class="tb-cs"><a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_form_action/${po.id}">${escH(po.nombre)}</a>
+          · ${c.lineas.length} art. · ${eur(c.total)} · ${c.recepcion === 'partial' ? 'recibido en parte' : 'esperando que llegue'}</div></div>
+      <div class="tb-list">${ls.map(l => `<div class="tb-card tb-fija"><div class="tb-cn"><b>${escH(l.articulo.replace(/^\[[^\]]*\]\s*/, ''))}</b></div>
+        <div class="tb-cm">${l.ref ? escH(l.ref) + ' · ' : ''}${+l.cantidad} ${escH(l.ud)} · ${eur(l.precio)}${l.recibido ? ` · <b>recibidas ${+l.recibido}</b>` : ''}</div></div>`).join('')}</div></div>`;
     return `<div class="tb-col ${c.mismo ? 'tb-mal' : ''} ${c.grupo ? 'tb-grupo' : ''}" data-p="${c.partner_id}">
       <div class="tb-ch"><b>${escH(c.proveedor)}</b>${c.grupo ? ' <span class="bdg">grupo</span>' : ''}
         <div class="tb-cs">${po ? `<a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_rfq/${po.id}">${escH(po.nombre)}</a>` : '<span class="muted">nuevo</span>'}
           · ${c.lineas.length} art. · ${eur(c.total)}</div>
         ${c.mismo ? '<div class="tb-aviso">⚠️ Distriplus pidiéndose a sí misma: mueve estos artículos a su proveedor</div>' : ''}</div>
       <div class="tb-list" data-p="${c.partner_id}">${ls.map(l => tarjeta(l, c)).join('') || '<p class="tb-vacio">Arrastra aquí artículos</p>'}</div>
-      ${po && c.lineas.length && !c.mismo ? `<button class="tb-ok" data-po="${po.id}" data-n="${escH(c.proveedor)}">✔ Confirmar pedido</button>` : ''}
+      ${po && c.lineas.length && !c.mismo ? `<label class="tb-ok"><input type="checkbox" data-po="${po.id}" data-n="${escH(c.proveedor)}"> Lanzar pedido</label>` : ''}
     </div>`;
   }).join('') + `<div class="tb-col tb-add"><b>＋ Proveedor</b><input id="tb-np" placeholder="Buscar proveedor…" autocomplete="off"><div id="tb-nps"></div></div>`;
   tbEventos();
@@ -69,9 +75,11 @@ function tbEventos() {
     if (!confirm('¿Quitar este artículo del pedido? (no se pedirá a ningún proveedor)')) return;
     try { await jpost('/api/tablero/quitar', { line_id: +b.dataset.x }); tbOpen(false); } catch (e) { alertBox(e.message); }
   });
-  B.querySelectorAll('.tb-ok').forEach(b => b.onclick = async () => {
-    if (!confirm(`¿Confirmar el pedido a ${b.dataset.n}? Pasará a pedido de compra y la entrada aparecerá en Recepciones.`)) return;
-    try { const r = await jpost('/api/tablero/confirmar', { po_id: +b.dataset.po }); alertBox(`Pedido ${r.nombre} confirmado`); tbOpen(false); } catch (e) { alertBox(e.message); }
+  B.querySelectorAll('.tb-ok input').forEach(b => b.onchange = async () => {
+    if (!b.checked) return;
+    if (!confirm(`¿Lanzar ya el pedido a ${b.dataset.n}?\n\nSe confirma en Odoo con fecha de hoy y la entrada aparecerá en Recepciones. Lo que se marque después para este proveedor irá a un pedido nuevo.`)) { b.checked = false; return; }
+    b.closest('.tb-col').classList.add('tb-lanz');
+    try { await jpost('/api/tablero/confirmar', { po_id: +b.dataset.po }); tbOpen(false); } catch (e) { b.checked = false; b.closest('.tb-col').classList.remove('tb-lanz'); alertBox(e.message); }
   });
   const np = $('#tb-np'); let t;
   np.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
