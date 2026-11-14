@@ -426,3 +426,5 @@ label.tb-ok input{width:18px;height:18px}
 .tb-oc{font-size:11px;display:inline-block;margin:2px 0}
 
 .tb-pn{font-weight:700;color:inherit;text-decoration:none}.tb-pn:hover{text-decoration:underline;color:var(--morado,#6b3fa0)}
+
+.ac-np{margin-top:12px}.ac-np summary{cursor:pointer;color:#6b3fa0;font-weight:600}.ac-np input#ac-npq{width:100%;margin:6px 0}#ac-nps a{display:block;padding:4px 6px}#ac-nps a:hover{background:#f3eef9}#ac-npf{margin-top:6px}

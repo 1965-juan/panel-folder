@@ -178,7 +178,23 @@ async function acProv(g, l) {
       ${pv.length ? `<div class="pv">${pv.map((p, i) => `<label><input type="radio" name="pv" value="${p.partner_id}" ${i ? '' : 'checked'}> ${escH(p.partner_name)} <b>${acNum(p.price)} ${escH(p.currency_symbol || '€')}</b></label>`).join('')}</div>
         <label class="qp">Cantidad <input id="ac-pq" type="number" min="1" step="any" value="${falta}"></label>
         <button id="ac-pgo" class="ac-go">Pedir</button>
-        <p class="muted">Si ya hay un pedido en borrador a ese proveedor, se añade ahí.</p>` : '<p class="muted">Este artículo no tiene proveedores. Añádelo en Odoo (pestaña Compra del producto).</p>'}`;
+        <p class="muted">Si ya hay un pedido en borrador a ese proveedor, se añade ahí.</p>` : '<p class="muted">Este artículo no tiene proveedores todavía.</p>'}
+      <details class="ac-np" ${pv.length ? '' : 'open'}><summary>＋ Añadir otro proveedor</summary>
+        <input id="ac-npq" placeholder="Buscar proveedor…" autocomplete="off"><div id="ac-nps"></div>
+        <div id="ac-npf" hidden><b id="ac-npn"></b> · precio de compra <input id="ac-npp" type="number" min="0" step="0.01" placeholder="€" style="width:90px">
+          <button class="ac-go" id="ac-npok">Añadir a la ficha</button></div></details>`;
+    let npId = 0, npT;
+    $('#ac-npq').oninput = () => { clearTimeout(npT); npT = setTimeout(async () => {
+      const q = $('#ac-npq').value.trim(); if (q.length < 2) return $('#ac-nps').innerHTML = '';
+      try { const r = await api(`/api/tablero/proveedores?q=${encodeURIComponent(q)}`);
+        $('#ac-nps').innerHTML = r.map(p => `<a href="#" data-id="${p.id}">${escH(p.nombre)}</a>`).join('') || '<small class="muted">Nada</small>';
+        $('#ac-nps').querySelectorAll('a').forEach(a => a.onclick = e => { e.preventDefault(); npId = +a.dataset.id; $('#ac-npn').textContent = a.textContent;
+          $('#ac-npf').hidden = false; $('#ac-nps').innerHTML = ''; $('#ac-npp').focus(); });
+      } catch (x) { $('#ac-nps').innerHTML = `<small class="err">${escH(x.message)}</small>`; } }, 300); };
+    $('#ac-npok').onclick = async () => {
+      if (!npId) return;
+      try { await jpost(`/api/ac/proveedor_ficha?company=${company}`, { product_id: l.product_id, partner_id: npId, price: $('#ac-npp').value }); acProv(g, l); }
+      catch (x) { alertBox(x.message); } };
     if ($('#ac-pgo')) $('#ac-pgo').onclick = async () => {
       const pid = box.querySelector('input[name=pv]:checked').value, qty = parseFloat($('#ac-pq').value);
       try { const r = await jpost(`/api/ac/pedir?company=${company}`, { product_id: l.product_id, partner_id: pid, qty, line_id: g.tipo === 'cliente' ? l.line_id : null });

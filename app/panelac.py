@@ -182,6 +182,32 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             return {"estado": est, "proveedores": prov}
         return guard(run)
 
+    @app.post("/api/ac/proveedor_ficha")
+    async def ac_proveedor_ficha(request: Request, company: str = "all"):
+        """{product_id, partner_id, price?}: pone ese proveedor en la ficha del artículo (pestaña Compra) para poder pedírselo."""
+        _, cids = ctx(request, company)
+        b = await body(request)
+        pid, part = int(b.get("product_id") or 0), int(b.get("partner_id") or 0)
+        if not pid or not part:
+            raise HTTPException(400, "Falta el artículo o el proveedor")
+        try:
+            precio = float(str(b.get("price") or 0).replace(",", "."))
+        except ValueError:
+            raise HTTPException(400, "Precio no válido")
+
+        def run():
+            tm = odoo.search_read("product.product", [("id", "=", pid)], ["product_tmpl_id", "standard_price"], company_ids=[1])[0]
+            t = tm["product_tmpl_id"][0]
+            ya = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "=", t), ("partner_id", "=", part)], ["id"], company_ids=[1, 2, 3, 4, 5], limit=1)
+            if ya:
+                if precio:
+                    odoo.call("product.supplierinfo", "write", [1], ids=[ya[0]["id"]], vals={"price": precio})
+            else:
+                odoo.call("product.supplierinfo", "create", [1], vals_list=[{"partner_id": part, "product_tmpl_id": t, "min_qty": 0, "company_id": 1,
+                                                                              "price": precio or tm.get("standard_price") or 0}])
+            return {"ok": True}
+        return guard(run)
+
     @app.post("/api/ac/pedir")
     async def ac_pedir(request: Request, company: str = "all"):
         _, cids = ctx(request, company)
