@@ -103,7 +103,9 @@ function dAcciones(c, d) {
   if (d.estado === 'draft' || d.estado === 'sent') {
     h += `<div class="d-ok"><button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
       <label><input type="checkbox" id="d-avi" ${d.email ? 'checked' : 'disabled'}> Avisar al cliente por email de que estamos preparando su material
-      ${d.email ? `<small class="muted">(${escH(d.email)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label></div>`;
+      ${d.email ? `<small class="muted">(${escH(d.email)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label>
+      <div class="d-mails"><button class="btn" data-m="presupuesto" ${d.email ? '' : 'disabled'}>📧 Enviar el presupuesto por email</button>
+      <button class="btn" data-m="sin_confirmar" ${d.email ? '' : 'disabled'}>🔔 Avisar: no hemos recibido confirmación (¿archivamos o cambios?)</button></div></div>`;
   }
   if (d.albaranes && d.albaranes.length) {
     const est = { draft: 'borrador', waiting: 'esperando', confirmed: 'esperando material', assigned: 'listo para servir', done: 'servido' };
@@ -111,6 +113,13 @@ function dAcciones(c, d) {
       <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
   }
   A.innerHTML = h;
+  A.querySelectorAll('[data-m]').forEach(m => m.onclick = async () => {
+    const txt = m.dataset.m === 'presupuesto' ? `¿Enviar el presupuesto ${c.ref} en PDF a ${d.email}?` : `¿Enviar a ${d.email} el aviso de que no hemos recibido confirmación de ${c.ref}?`;
+    if (!confirm(txt)) return;
+    const t0 = m.textContent; m.disabled = true; m.textContent = 'Enviando…';
+    try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: m.dataset.m }); m.textContent = '✅ Enviado'; alertBox(`Email enviado a ${d.email}`); }
+    catch (e) { alertBox(e.message); m.disabled = false; m.textContent = t0; }
+  });
   const b = $('#d-conf'); if (b) b.onclick = async () => {
     const avi = $('#d-avi').checked;
     if (!confirm(`¿Pasar ${c.ref} a pedido${avi ? ' y avisar al cliente por email' : ''}?`)) return;

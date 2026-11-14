@@ -545,6 +545,45 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
 AVISO_PREPARACION = "Folder - Aviso pedido en preparación"
 
 
+PLANTILLAS_PRESU = {"presupuesto": "Folder - Envío de presupuesto", "sin_confirmar": "Folder - Presupuesto sin confirmar"}
+
+
+@app.post("/api/ventas/{oid}/email")
+async def api_email_presu(request: Request, oid: int, company: str = "all"):
+    """{tipo}: 'presupuesto' manda el presupuesto en PDF al cliente; 'sin_confirmar' le pregunta si lo archivamos o necesita cambios."""
+    u = current_user(request)
+    try:
+        b = await request.json()
+    except Exception:
+        b = {}
+    tipo = b.get("tipo") or ""
+    if tipo not in PLANTILLAS_PRESU:
+        raise HTTPException(400, "Tipo de email no válido")
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "state", "company_id", "partner_id"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        so = so[0]
+        c = so["company_id"][0]
+        em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email"], [c] + [x for x in cids if x != c])
+        if not em or not em[0].get("email"):
+            raise HTTPException(400, "El cliente no tiene email en su ficha")
+        tpl = odoo.search_read("mail.template", [("model", "=", "sale.order"), ("name", "=", PLANTILLAS_PRESU[tipo])], ["id"], [c], limit=1)
+        if not tpl:
+            raise HTTPException(400, f"No encuentro la plantilla «{PLANTILLAS_PRESU[tipo]}» en Odoo")
+        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True)
+        if tipo == "presupuesto" and so["state"] == "draft":
+            try:
+                odoo.call("sale.order", "write", [c], ids=[oid], vals={"state": "sent"})
+            except Exception:
+                pass
+        return {"ok": True, "pedido": so["name"], "email": em[0]["email"]}
+
+    return guard(run)
+
+
 @app.post("/api/ventas/{oid}/confirmar")
 async def api_confirmar(request: Request, oid: int, company: str = "all"):
     """Pasa un presupuesto a pedido y, si se pide, avisa al cliente por email de que se le está preparando el material."""

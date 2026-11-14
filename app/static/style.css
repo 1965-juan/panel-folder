@@ -434,3 +434,5 @@ label.tb-ok input{width:18px;height:18px}
 .tb-vp{font-size:12px;margin-top:4px;padding:3px 6px;border-radius:6px;background:#eef7ee;color:#2d6a2d}.tb-vp-mal{background:#fdecec;color:#a42323}
 
 .d-acc{margin:12px 0}.d-acc .d-ok{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #e3d9f0;border-radius:10px;background:#faf7fd;margin-bottom:8px}.d-acc .d-alb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+
+.d-acc .d-mails{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
