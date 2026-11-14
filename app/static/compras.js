@@ -573,25 +573,29 @@ function coRecForm(x) {
   };
   $('#co-drawer').hidden = false;
 }
-/* --- usuarios (solo Juan) --- */
+/* --- usuarios (solo el administrador) --- */
 $('#usr-btn').onclick = async () => {
-  const l = await api('/api/usuarios'), emps = [...$('#company').options].filter(o => o.value !== 'all').map(o => o.textContent);
-  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Compras', facturacion: 'Facturación', correo: 'Correo', vencimientos: 'Vencimientos' };
-  $('#co-db').innerHTML = `<h3>Usuarios del panel</h3><table class="co-t"><thead><tr><th>Usuario</th><th>Empresas</th><th>Apartados</th><th>Contraseña</th></tr></thead><tbody>
-    ${l.map(u => `<tr><td><b>${escH(u.usuario)}</b></td><td>${escH(u.empresas.join(', '))}</td><td>${u.modulos.map(m => MOD_N[m]).join(', ')}</td><td>${u.tiene_clave ? 'puesta' : '<i>la elige al entrar</i>'}</td></tr>`).join('')}</tbody></table>
-    <h4>Añadir o cambiar usuario</h4>
-    <label class="co-f">Nombre de usuario<input id="us-n" placeholder="mayte"></label>
-    <p class="muted">Empresas que ve:</p><div class="chk-l"><label><input type="checkbox" value="*" checked> Todas</label>${emps.map(e => `<label><input type="checkbox" value="${escH(e.split(' ')[0])}"> ${escH(e)}</label>`).join('')}</div>
-    <p class="muted">Apartados:</p><div class="chk-m">${Object.entries(MOD_N).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${['ventas', 'compras'].includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>
-    <label class="chk1"><input type="checkbox" id="us-r"> Borrar su contraseña (la vuelve a elegir al entrar)</label>
-    <button id="us-ok" class="ac-go">Guardar usuario</button>
-    <p class="muted">La primera vez que entre, la contraseña que escriba quedará como la suya.</p>`;
-  $('#us-ok').onclick = async () => {
-    const empresas = [...document.querySelectorAll('.chk-l input:checked')].map(i => i.value), modulos = [...document.querySelectorAll('.chk-m input:checked')].map(i => i.value);
-    try { await jpost('/api/usuarios', { usuario: $('#us-n').value, empresas: empresas.includes('*') ? ['*'] : empresas, modulos, reiniciar_clave: $('#us-r').checked });
-      alertBox('Usuario guardado'); $('#usr-btn').click(); } catch (e) { alertBox(e.message); }
-  };
+  const l = await api('/api/usuarios');
+  const MOD_N = { ventas: 'Ventas', web: 'Web', whatsapp: 'WhatsApp', presupuestos: 'Presupuestos', ac: 'Panel AC', compras: 'Albaranes/Facturas', facturacion: 'Facturación',
+    correo: 'Correo', vencimientos: 'Vencimientos', etiquetas: 'Etiquetas', tablero: 'Compras', tienda: 'Mi tienda' };
+  $('#co-db').innerHTML = `<h3>Usuarios del panel</h3><p class="muted">Con <b>👁 Ver como</b> entras en el panel tal como lo ve ese usuario, para probarlo. Para volver, usa el enlace de abajo a la izquierda.</p>
+    <table class="co-t"><thead><tr><th>Usuario</th><th>Empresas</th><th>Ve</th><th>Contraseña</th><th></th></tr></thead><tbody>
+    ${l.map(u => `<tr><td><b>${escH(u.nombre || u.usuario)}</b></td><td>${escH(u.empresas.join(', ').replace('*', 'todas'))}</td><td>${u.modulos.map(m => MOD_N[m] || m).join(', ')}</td>
+      <td>${u.tiene_clave ? 'puesta' : '<i>la elige el primero que entre</i>'}</td>
+      <td style="white-space:nowrap">${u.usuario !== 'administrador' ? `<button class="ac-go" data-vc="${u.usuario}">👁 Ver como</button>` : ''}
+        ${u.tiene_clave && u.usuario !== 'administrador' ? `<button class="lnk" data-bc="${u.usuario}">borrar contraseña</button>` : ''}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">«Borrar contraseña»: el primero que entre con ese usuario elige la nueva. Tu propia contraseña la cambias con «🔑 Cambiar mi contraseña».</p>`;
+  $('#co-db').querySelectorAll('[data-vc]').forEach(b => b.onclick = async () => { await jpost('/api/ver_como', { usuario: b.dataset.vc }); location.href = '/'; });
+  $('#co-db').querySelectorAll('[data-bc]').forEach(b => b.onclick = async () => {
+    if (!confirm(`¿Borrar la contraseña de ${b.dataset.bc}? El primero que entre con ese usuario pondrá la nueva.`)) return;
+    try { await jpost('/api/usuarios/borrar_clave', { usuario: b.dataset.bc }); $('#usr-btn').click(); } catch (e) { alertBox(e.message); } });
   $('#co-drawer').hidden = false;
+};
+$('#mi-clave').onclick = async e => {
+  e.preventDefault();
+  const n = prompt('Nueva contraseña (mínimo 6 caracteres):'); if (n === null) return;
+  const r = prompt('Repite la nueva contraseña:'); if (r === null) return;
+  try { await jpost('/api/mi_clave', { nueva: n, repetir: r }); alertBox('Contraseña cambiada. La próxima vez entra con la nueva.'); } catch (er) { alertBox(er.message); }
 };
 
 /* --- bancos --- */

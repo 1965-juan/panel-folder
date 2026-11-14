@@ -37,9 +37,20 @@ ADMIN = "administrador"
 PERFILES = {
     ADMIN: {"empresas": ["*"], "modulos": None},
     "contabilidad": {"empresas": ["*"], "modulos": None},   # ve lo mismo que el administrador
-    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
+    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "ac", "tablero", "etiquetas"], "sin_facturas": True},
     "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
+    "tienda1": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T1", "nombre": "TIENDA 1"},
+    "tienda2": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T2", "nombre": "TIENDA 2"},
+    "tiendalogipaper": {"empresas": ["LOGIPAPER"], "modulos": ["tienda", "etiquetas"], "tienda": "T3", "nombre": "TIENDA LOGIPAPER"},
 }
+
+
+def tienda_de(u):
+    return PERFILES.get(u, {}).get("tienda")
+
+
+def nombre_usuario(u):
+    return PERFILES.get(u, {}).get("nombre") or u.upper()
 ANTIGUOS = {"juan": ADMIN}   # sesiones abiertas con el nombre viejo
 
 
@@ -51,7 +62,7 @@ def sin_facturas(u):
     return bool(PERFILES.get(u, {}).get("sin_facturas"))
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda"]
 
 
 def modulos_de(u):
@@ -97,13 +108,22 @@ def hash_pw(pw, salt):
     return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200_000).hex()
 
 
-def current_user(request: Request):
+def usuario_real(request: Request):
     u = request.session.get("user")
     if not u:
         raise HTTPException(401, "No has entrado")
     if u in ANTIGUOS:
         u = ANTIGUOS[u]
         request.session["user"] = u
+    return u
+
+
+def current_user(request: Request):
+    """El usuario con el que se ve el panel. El administrador puede «ver como» otro usuario para probar."""
+    u = usuario_real(request)
+    vc = request.session.get("ver_como")
+    if vc and u == ADMIN and vc in allowed_users():
+        return vc
     return u
 
 
@@ -119,7 +139,7 @@ def home(request: Request):
 @app.get("/entrar", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     html = (BASE / "static" / "login.html").read_text()
-    opts = "".join(f'<option value="{u}">{u.upper()}</option>' for u in allowed_users())
+    opts = "".join(f'<option value="{u}">{nombre_usuario(u)}</option>' for u in allowed_users())
     users = load_users()
     nuevos = [u for u in allowed_users() if u not in users]
     aviso = ""
@@ -229,17 +249,66 @@ def es_admin(u):
 @app.get("/api/yo")
 def yo(request: Request):
     u = current_user(request)
-    return {"usuario": u, "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
+    real = usuario_real(request)
+    return {"usuario": u, "nombre": nombre_usuario(u), "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
             "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u),
-            "modulos": modulos_de(u)}
+            "modulos": modulos_de(u), "viendo_como": u != real, "real": real, "tienda": tienda_de(u)}
+
+
+@app.post("/api/ver_como")
+async def ver_como(request: Request):
+    """Solo el administrador: ver el panel como otro usuario (para probarlo). {usuario: ""} vuelve a administrador."""
+    if usuario_real(request) != ADMIN:
+        raise HTTPException(403, "Solo el administrador")
+    b = await request.json()
+    v = (b.get("usuario") or "").strip().lower()
+    if v and v not in allowed_users():
+        raise HTTPException(400, "Usuario no válido")
+    if v and v != ADMIN:
+        request.session["ver_como"] = v
+    else:
+        request.session.pop("ver_como", None)
+    return {"ok": True}
+
+
+@app.post("/api/mi_clave")
+async def mi_clave(request: Request):
+    """Cambiar la contraseña del usuario con el que se ha entrado (el real, no el de «ver como»)."""
+    u = usuario_real(request)
+    b = await request.json()
+    n = b.get("nueva") or ""
+    if len(n) < 6:
+        raise HTTPException(400, "La contraseña debe tener al menos 6 caracteres")
+    if n != (b.get("repetir") or ""):
+        raise HTTPException(400, "Las dos contraseñas no coinciden")
+    users = load_users()
+    salt = secrets.token_hex(16)
+    users[u] = {"salt": salt, "hash": hash_pw(n, salt)}
+    save_users(users)
+    return {"ok": True}
+
+
+@app.post("/api/usuarios/borrar_clave")
+async def borrar_clave(request: Request):
+    """El administrador borra la contraseña de un usuario: la vuelve a elegir el primero que entre con él."""
+    if usuario_real(request) != ADMIN:
+        raise HTTPException(403, "Solo el administrador")
+    b = await request.json()
+    v = (b.get("usuario") or "").strip().lower()
+    if v == ADMIN:
+        raise HTTPException(400, "Para el administrador usa «Cambiar mi contraseña»")
+    users = load_users()
+    users.pop(v, None)
+    save_users(users)
+    return {"ok": True}
 
 
 @app.get("/api/usuarios")
 def api_usuarios(request: Request):
-    if not es_admin(current_user(request)):
+    if usuario_real(request) != ADMIN:
         raise HTTPException(403, "Solo el administrador")
     reg = load_users()
-    return [{"usuario": u, "extra": u in extra_users(), "empresas": regla_empresas(u), "modulos": modulos_de(u),
+    return [{"usuario": u, "nombre": nombre_usuario(u), "extra": u in extra_users(), "empresas": regla_empresas(u), "modulos": modulos_de(u),
              "tiene_clave": u in reg} for u in allowed_users()]
 
 
@@ -603,6 +672,11 @@ _venc.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scop
 from . import etiquetas as _etq  # noqa: E402
 
 _etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- tiendas ----------
+from . import tienda as _tienda  # noqa: E402
+
+_tienda.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL, tienda_de=tienda_de)
 
 # ---------- tablero de compras (tipo Trello) ----------
 from . import tablero as _tab  # noqa: E402

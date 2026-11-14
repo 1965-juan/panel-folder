@@ -400,3 +400,14 @@ main,.main{padding-bottom:80px}
 .tb-card.tb-fija{cursor:default;opacity:.9}
 label.tb-ok{display:flex;gap:8px;align-items:center;justify-content:center}
 label.tb-ok input{width:18px;height:18px}
+/* ---------- Mi tienda / usuarios ---------- */
+.ti-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.ti-top select{padding:8px;border-radius:8px;border:1px solid #d0d3d8}
+.ti-tpv{text-decoration:none;font-size:15px;padding:10px 16px}
+.ti-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){.ti-cols{grid-template-columns:1fr}}
+.ti-ay{font-size:12px;margin-top:-6px}
+.ti-card{background:#fff;border:1px solid #e2e4e8;border-radius:10px;padding:8px 10px;margin-bottom:10px}
+.ti-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px;font-size:13px}.ti-h .muted{margin-left:auto}
+.ti-t{width:100%;font-size:12px}
+.vc-ban{background:#fff3cd;color:#7a5a00;border-radius:8px;padding:6px 8px;font-size:12px;margin:6px 0}
+.mi-clave{display:block;font-size:12px;margin:6px 0;color:inherit;opacity:.85}

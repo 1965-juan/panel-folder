@@ -19,6 +19,7 @@
     <a href="#compras" data-v="compras" data-m="compras">Albaranes/Facturas <span class="nb" id="nb-co" hidden></span></a>
     <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
     <a href="#vencimientos" data-v="vencimientos" data-m="vencimientos">Vencimientos</a>
+    <a href="#tienda" data-v="tienda" data-m="tienda">Mi tienda</a>
     <a href="#etiquetas" data-v="etiquetas" data-m="etiquetas">Etiquetas</a>
     <a href="#correo" data-v="correo" data-m="correo">Correo <span class="nb" id="nb-ma" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
@@ -29,6 +30,8 @@
     <button id="upd" class="upd" hidden>Actualizar panel</button>
     <a id="clave-cl" class="upd" href="/clave-claude" target="_blank" hidden style="text-decoration:none;text-align:center">🔑 Clave de Claude</a>
     <button id="usr-btn" class="upd usr" hidden>Usuarios</button>
+    <div id="vc-ban" class="vc-ban" hidden></div>
+    <a href="#" id="mi-clave" class="mi-clave">🔑 Cambiar mi contraseña</a>
     <span id="who"></span> · <a href="/salir">Salir</a><br><small id="ver"></small>
   </div>
 </aside>
@@ -120,6 +123,19 @@
       <div class="ma-l"><div class="wa-tabs ma-tabs"><button data-e="pendientes" class="on">Por hacer</button><button data-e="hechos">Hechos</button></div>
         <input id="ma-q" type="search" placeholder="Buscar remitente, asunto…"><div id="ma-cts" class="muted"></div><div id="ma-list"></div></div>
       <div class="ma-c" id="ma-c"><p class="empty">Elige un correo de la lista</p></div>
+    </div>
+  </section>
+
+  <section id="v-ti" hidden>
+    <div class="ti-top">
+      <select id="ti-sel" hidden></select>
+      <a id="ti-tpv" class="ac-go ti-tpv" target="_blank" rel="noopener">🧾 Abrir el TPV</a>
+      <button class="btn" id="ti-rec">↻ Recargar</button>
+      <span class="muted" id="ti-info"></span>
+    </div>
+    <div class="ti-cols">
+      <div><h3>🚚 Reposiciones pedidas a almacén</h3><p class="muted ti-ay">Lo que habéis pedido con el botón «Reposición» del TPV. Desaparece cuando almacén lo sirve.</p><div id="ti-rep"></div></div>
+      <div><h3>🔖 Encargos de clientes</h3><p class="muted ti-ay">Lo que habéis encargado para clientes con «Encargar». Desaparece cuando almacén saca el albarán.</p><div id="ti-enc"></div></div>
     </div>
   </section>
 
@@ -268,5 +284,6 @@
 <script src="/static/vencimientos.js"></script>
 <script src="/static/etiquetas.js"></script>
 <script src="/static/tablero.js"></script>
+<script src="/static/tienda.js"></script>
 </body>
 </html>
