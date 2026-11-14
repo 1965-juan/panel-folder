@@ -252,7 +252,8 @@ def yo(request: Request):
     real = usuario_real(request)
     return {"usuario": u, "nombre": nombre_usuario(u), "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
             "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u),
-            "modulos": modulos_de(u), "viendo_como": u != real, "real": real, "tienda": tienda_de(u)}
+            "modulos": modulos_de(u), "viendo_como": u != real, "real": real, "tienda": tienda_de(u),
+            "empresas_ids": [c["id"] for c in allowed_companies(u)]}
 
 
 @app.post("/api/ver_como")

@@ -165,6 +165,12 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     document.querySelectorAll('.side nav a[data-m]').forEach(a => a.hidden = !MODS.includes(a.dataset.m));
     $('#usr-btn').hidden = !(ADMIN || yo.viendo_como);
     window.YO = yo;
+    // los enlaces a Odoo se abren solo con las empresas de este usuario marcadas
+    document.addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('a[href]');
+      if (!a || !ODOO || !a.href.startsWith(ODOO) || !(YO.empresas_ids || []).length) return;
+      try { const u = new URL(a.href); u.searchParams.set('cids', YO.empresas_ids.join('-')); a.href = u.toString(); } catch (_) { }
+    }, true);
     if (yo.viendo_como) { const vb = $('#vc-ban'); vb.hidden = false; vb.innerHTML = `👁 Viendo como <b>${escH(yo.nombre)}</b><br><a href="#" id="vc-salir">volver a ADMINISTRADOR</a>`;
       $('#vc-salir').onclick = async e => { e.preventDefault(); await jpost('/api/ver_como', { usuario: '' }); location.href = '/'; }; }
     const emps = await api('/api/empresas');
