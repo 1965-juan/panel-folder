@@ -474,9 +474,27 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                     cobrado_tpv[k] = cobrado_tpv.get(k, 0) + (l.get("price_subtotal_incl") or 0)
             except Exception:
                 cobrado_tpv = {}
+        # lo que queda de verdad en cada pedido «servido»: algo sin entregar → vuelve a Pedidos; nada que entregar ni facturar → fuera
+        resto = {}
+        llenos = [r["id"] for r in so if r["state"] == "sale" and r.get("delivery_status") == "full" and r.get("invoice_status") != "invoiced"]
+        if llenos:
+            try:
+                for l in odoo.search_read("sale.order.line", [("order_id", "in", llenos), ("display_type", "=", False), ("is_downpayment", "=", False)],
+                                          ["order_id", "product_uom_qty", "qty_delivered", "qty_to_invoice"], cids, limit=50000):
+                    x = resto.setdefault(l["order_id"][0], [0, 0])
+                    x[0] += max(0, (l.get("product_uom_qty") or 0) - (l.get("qty_delivered") or 0))
+                    x[1] += max(0, l.get("qty_to_invoice") or 0)
+            except Exception:
+                resto = {}
         for r in so:
             if r["state"] == "sale" and (r.get("invoice_status") == "invoiced" or cobrado_tpv.get(r["id"], 0) >= (r.get("amount_total") or 0) - 0.05):
                 continue
+            if r["id"] in resto:
+                falta, por_fact = resto[r["id"]]
+                if falta > 0.001:
+                    c = so_card(r, "pedido"); c["entrega"] = "partial"; pedidos.append(c); continue
+                if por_fact <= 0.001:
+                    continue
             if r["state"] in ("draft", "sent"):
                 if r.get("validity_date") and r["validity_date"] < today:
                     caduc.append(so_card(r, "caducado"))
