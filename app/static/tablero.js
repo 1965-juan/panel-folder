@@ -1,5 +1,5 @@
 /* ---------- Compras: tablero tipo Trello (una columna por proveedor, un pedido en borrador por proveedor) ---------- */
-let TB = null, TB_NUEVAS = [];   // columnas vacías añadidas a mano (proveedor sin pedido todavía)
+let TB = null, TB_NUEVAS = [], TB_VOLVER = false;   // columnas vacías añadidas a mano (proveedor sin pedido todavía)
 
 async function tbOpen(juntar = true) {
   $('#tb-board').innerHTML = '<p class="muted">Cargando pedidos en borrador…</p>';
@@ -35,7 +35,7 @@ function tbPinta() {
     if (q && !ls.length && !enLanz && !c.proveedor.toLowerCase().includes(q)) return '';
     const po = c.pedidos[0];
     return `<div class="tb-col ${c.mismo ? 'tb-mal' : ''} ${c.grupo ? 'tb-grupo' : ''}" data-p="${c.partner_id}">
-      <div class="tb-ch"><b>${escH(c.proveedor)}</b>${c.grupo ? ' <span class="bdg">grupo</span>' : ''}
+      <div class="tb-ch"><a href="#" class="tb-pn" data-ab="${c.partner_id}" title="Abrir su pedido en Odoo para añadir material de stock">${escH(c.proveedor)} ↗</a>${c.grupo ? ' <span class="bdg">grupo</span>' : ''}
         ${c.mismo ? '<div class="tb-aviso">⚠️ Distriplus pidiéndose a sí misma: mueve estos artículos a su proveedor</div>' : ''}</div>
       <div class="tb-acu">
         <div class="tb-sub">🛒 Acumulando · ${po ? `<a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_rfq/${po.id}">${escH(po.nombre)}</a>` : 'sin pedido'} · ${c.lineas.length} art. · ${eur(c.total)}</div>
@@ -92,6 +92,11 @@ function tbEventos() {
   B.querySelectorAll('[data-oc]').forEach(a => a.onclick = async e => { e.preventDefault();
     if (!confirm('¿Quitar este pedido del tablero? (no se borra de Odoo; es para pedidos de imprenta o servicios que no son material)')) return;
     try { await jpost('/api/tablero/ocultar', { po_id: +a.dataset.oc }); tbOpen(false); } catch (er) { alertBox(er.message); } });
+  B.querySelectorAll('[data-ab]').forEach(a => a.onclick = async e => { e.preventDefault();
+    const w = window.open('about:blank', '_blank');   // se abre ya, para que el navegador no lo bloquee
+    try { const r = await jpost('/api/tablero/abrir', { partner_id: +a.dataset.ab }); let url = r.url; try { const u = new URL(url); const e = (window.YO && YO.empresas_ids) || [1]; u.searchParams.set('cids', [1, ...e.filter(x => x !== 1)].join('-')); url = u.toString(); } catch (_) { }
+      if (w) w.location = url; else location.href = url; TB_VOLVER = true; }
+    catch (er) { if (w) w.close(); alertBox(er.message); } });
   const np = $('#tb-np'); let t;
   np.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
     const q = np.value.trim(); if (q.length < 2) return $('#tb-nps').innerHTML = '';
@@ -107,3 +112,5 @@ function tbEventos() {
 }
 $('#tb-q').oninput = () => TB && tbPinta();
 $('#tb-rec').onclick = () => tbOpen();
+// al volver de Odoo, recargar el tablero para ver lo que se ha añadido allí
+window.addEventListener('focus', () => { if (TB_VOLVER && !$('#tb-board').closest('[hidden]')) { TB_VOLVER = false; tbOpen(false); } });

@@ -424,3 +424,5 @@ label.tb-ok input{width:18px;height:18px}
 .et-lf select{padding:7px;border-radius:8px;border:1px solid #cfc6e6;max-width:260px}.et-lh .ac-go{margin-left:auto}
 .et-lt{max-height:420px;overflow:auto;background:#fff;border-radius:8px}.et-lt table{width:100%;font-size:12px}
 .tb-oc{font-size:11px;display:inline-block;margin:2px 0}
+
+.tb-pn{font-weight:700;color:inherit;text-decoration:none}.tb-pn:hover{text-decoration:underline;color:var(--morado,#6b3fa0)}

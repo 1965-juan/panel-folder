@@ -170,6 +170,19 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             return {"columnas": out, "odoo_url": odoo_url}
         return guard(run)
 
+    @app.post("/api/tablero/abrir")
+    async def abrir(request: Request):
+        """{partner_id}: el pedido que se va acumulando de ese proveedor (lo crea si no hay) para añadirle material en Odoo."""
+        ctx(request)
+        b = await request.json()
+        pid = int(b.get("partner_id") or 0)
+        if not pid:
+            raise HTTPException(400, "Falta el proveedor")
+        def run():
+            po = pedido_de(pid)
+            return {"po_id": po, "url": f"{odoo_url}/odoo/action-purchase.purchase_rfq/{po}"}
+        return guard(run)
+
     @app.post("/api/tablero/ficha")
     async def ficha(request: Request):
         """{line_id}: añade el proveedor del pedido a la ficha del artículo (pestaña Compra de Odoo) con el precio de esa línea."""
