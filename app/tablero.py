@@ -11,8 +11,16 @@ TODAS = [1, 2, 3, 4, 5]
 ABIERTOS = ["draft", "sent"]
 
 
-def setup(app, *, odoo, current_user, scope, guard, odoo_url):
+def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
     lock = threading.Lock()
+    import json as _json
+    oc_file = (data_dir / "tablero_ocultos.json") if data_dir else None
+
+    def ocultos():
+        try:
+            return set(_json.loads(oc_file.read_text())) if oc_file and oc_file.exists() else set()
+        except Exception:
+            return set()
     cache = {}
 
     def ctx(request):
@@ -112,6 +120,8 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             prop = propias()
             lanz = [p for p in lanz if p["partner_id"][0] not in prop]
             pos = pos + lanz
+            oc = ocultos()
+            pos = [p for p in pos if p["id"] not in oc]   # pedidos que no son de material (imprenta, servicios…)
             lids = [i for p in pos for i in p["order_line"]]
             ls = [l for l in leer_lineas(lids) if not l.get("display_type")]
             pids = list({l["product_id"][0] for l in ls if l.get("product_id")})
@@ -158,6 +168,20 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                 c["lanzados"].sort(key=lambda x: x["fecha"], reverse=True)
             return {"columnas": out, "odoo_url": odoo_url}
         return guard(run)
+
+    @app.post("/api/tablero/ocultar")
+    async def ocultar(request: Request):
+        """Quita del tablero un pedido que no es de material (p. ej. un servicio de imprenta de INGRAF). No toca Odoo."""
+        ctx(request)
+        b = await request.json()
+        po = int(b.get("po_id") or 0)
+        if not po:
+            raise HTTPException(400, "Falta el pedido")
+        with lock:
+            oc = ocultos()
+            oc.add(po)
+            oc_file.write_text(_json.dumps(sorted(oc)))
+        return {"ok": True}
 
     @app.post("/api/tablero/juntar")
     async def juntar_todos(request: Request):

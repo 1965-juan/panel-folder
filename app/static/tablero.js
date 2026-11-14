@@ -45,6 +45,7 @@ function tbPinta() {
         <div class="tb-fl">✔ Lanzado el ${coDate(z.fecha)}</div>
         <div class="tb-cs"><a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_form_action/${z.id}">${escH(z.nombre)}</a>
           · ${z.lineas.length} art. · ${eur(z.total)} · ${z.recepcion === 'partial' ? 'recibido en parte' : 'esperando que llegue'}</div>
+        <a href="#" class="lnk tb-oc" data-oc="${z.id}" title="No es un pedido de material (imprenta, servicios…): quitarlo del tablero">🙈 no es de material</a>
         <details><summary>ver artículos</summary>${z.lineas.map(l => `<div class="tb-card tb-fija"><b>${escH(l.articulo.replace(/^\[[^\]]*\]\s*/, ''))}</b>
           <div class="tb-cm">${l.ref ? escH(l.ref) + ' · ' : ''}${+l.cantidad} ${escH(l.ud)} · ${eur(l.precio)}${l.recibido ? ` · <b>recibidas ${+l.recibido}</b>` : ''}</div></div>`).join('')}</details>
       </div>`).join('')}
@@ -85,6 +86,9 @@ function tbEventos() {
     b.closest('.tb-acu').classList.add('tb-lanzando');
     try { await jpost('/api/tablero/confirmar', { po_id: +b.dataset.po }); tbOpen(false); } catch (e) { b.checked = false; b.closest('.tb-acu').classList.remove('tb-lanzando'); alertBox(e.message); }
   });
+  B.querySelectorAll('[data-oc]').forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm('¿Quitar este pedido del tablero? (no se borra de Odoo; es para pedidos de imprenta o servicios que no son material)')) return;
+    try { await jpost('/api/tablero/ocultar', { po_id: +a.dataset.oc }); tbOpen(false); } catch (er) { alertBox(er.message); } });
   const np = $('#tb-np'); let t;
   np.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
     const q = np.value.trim(); if (q.length < 2) return $('#tb-nps').innerHTML = '';

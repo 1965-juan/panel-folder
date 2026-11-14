@@ -143,8 +143,8 @@ def login_page(request: Request, error: str = ""):
     users = load_users()
     nuevos = [u for u in allowed_users() if u not in users]
     aviso = ""
-    if nuevos:
-        aviso = "Primera vez para: " + ", ".join(n.capitalize() for n in nuevos) + ". La contraseña que escribas quedará guardada como la tuya."
+    if nuevos:   # sin decir qué usuarios: a quien no es administrador no se le enseña más que el nombre
+        aviso = "Si es la primera vez que entras con tu usuario, la contraseña que escribas quedará guardada como la tuya."
     import html as h
     return html.replace("{{opts}}", opts).replace("{{error}}", h.escape(error)).replace("{{aviso}}", h.escape(aviso))
 
@@ -681,4 +681,4 @@ _tienda.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guar
 # ---------- tablero de compras (tipo Trello) ----------
 from . import tablero as _tab  # noqa: E402
 
-_tab.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)
+_tab.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL, data_dir=DATA)

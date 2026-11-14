@@ -423,3 +423,4 @@ label.tb-ok input{width:18px;height:18px}
 .et-lf,.et-lh{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px}.et-lf input[type=search]{flex:1;min-width:220px;padding:8px;border:1px solid #cfc6e6;border-radius:8px}
 .et-lf select{padding:7px;border-radius:8px;border:1px solid #cfc6e6;max-width:260px}.et-lh .ac-go{margin-left:auto}
 .et-lt{max-height:420px;overflow:auto;background:#fff;border-radius:8px}.et-lt table{width:100%;font-size:12px}
+.tb-oc{font-size:11px;display:inline-block;margin:2px 0}
