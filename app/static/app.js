@@ -116,7 +116,21 @@ function dAcciones(c, d) {
     h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${ODOO}/report/pdf/stock.report_deliveryslip/${a.id}">🖨 Albarán ${escH(a.nombre)}</a>
       <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
   }
+  if (c.model === 'sale.order') {
+    const bs = [];
+    if (d.estado === 'draft' || d.estado === 'sent') bs.push(['cancelar', '🗑 Eliminar presupuesto', `¿Eliminar el presupuesto ${c.ref}? (se cancela en Odoo)`]);
+    else if (c.estado === 'pedido' && c.entrega !== 'partial') bs.push(['cancelar', '🗑 Cancelar pedido', `¿Cancelar el pedido ${c.ref}? No se ha servido nada.`]);
+    if (c.estado === 'pedido' && c.entrega === 'partial') bs.push(['cerrar_resto', '✂️ Dar por terminado (cancelar lo que falta)', `¿Cancelar lo que falta por servir de ${c.ref}? Lo ya servido pasará a pendiente de facturar.`]);
+    bs.push(['ocultar', '🙈 Archivar del panel', `¿Quitar ${c.ref} del panel? En Odoo no se toca nada.`]);
+    h += `<div class="d-del">${bs.map(x => `<button class="btn" data-ac="${x[0]}" data-q="${escH(x[2])}">${x[1]}</button>`).join('')}</div>`;
+  }
   A.innerHTML = h;
+  A.querySelectorAll('[data-ac]').forEach(x => x.onclick = async () => {
+    if (!confirm(x.dataset.q)) return;
+    x.disabled = true;
+    try { const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: x.dataset.ac }); alertBox(r.mensaje); $('#drawer').hidden = true; load(); }
+    catch (e) { alertBox(e.message); x.disabled = false; }
+  });
   A.querySelectorAll('[data-m]').forEach(m => m.onclick = async () => {
     const txt = m.dataset.m === 'presupuesto' ? `¿Enviar el presupuesto ${c.ref} en PDF a ${d.email}?` : `¿Enviar a ${d.email} el aviso de que no hemos recibido confirmación de ${c.ref}?`;
     if (!confirm(txt)) return;

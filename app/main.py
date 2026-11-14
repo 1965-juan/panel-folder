@@ -528,7 +528,8 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["reclamado"] = mk.get("reclamado", "")
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
                "albaranes": albaranes, "facturas": facturas}
-        out = {k: [c for c in v if c["cid"] in cids] for k, v in out.items()}
+        ocul = _ventas_ocultas()
+        out = {k: [c for c in v if c["cid"] in cids and not (c.get("model") == "sale.order" and c["id"] in ocul)] for k, v in out.items()}
         if sin_facturas(u):
             out.pop("facturas", None)   # almacén y compras no ven facturas
         if "*" not in regla_empresas(u):
@@ -645,6 +646,55 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
             except Exception:
                 pass
         return {"ok": True, "pedido": so["name"], "email": em[0]["email"]}
+
+    return guard(run)
+
+
+OCULTAS_FILE = DATA / "ventas_ocultas.json"
+
+
+def _ventas_ocultas():
+    try:
+        return set(json.loads(OCULTAS_FILE.read_text())) if OCULTAS_FILE.exists() else set()
+    except Exception:
+        return set()
+
+
+@app.post("/api/ventas/{oid}/accion")
+async def api_venta_accion(request: Request, oid: int, company: str = "all"):
+    """{accion}: 'cancelar' (presupuesto o pedido sin servir: se cancela en Odoo, se puede recuperar),
+    'cerrar_resto' (pedido servido en parte: se cancela lo que falta por servir y pasa a pendiente de facturar),
+    'ocultar' (solo deja de salir en el panel, no toca Odoo)."""
+    u = current_user(request)
+    try:
+        b = await request.json()
+    except Exception:
+        b = {}
+    acc = b.get("accion")
+    if acc not in ("cancelar", "cerrar_resto", "ocultar"):
+        raise HTTPException(400, "Acción no válida")
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "state", "company_id", "delivery_status"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        so = so[0]
+        c = so["company_id"][0]
+        if acc == "ocultar":
+            o = _ventas_ocultas(); o.add(oid); OCULTAS_FILE.write_text(json.dumps(sorted(o)))
+            return {"ok": True, "mensaje": f"{so['name']} ya no sale en el panel (en Odoo sigue igual)"}
+        if acc == "cancelar":
+            if so["state"] == "sale" and so.get("delivery_status") in ("partial", "full"):
+                raise HTTPException(400, "Este pedido ya tiene material servido: usa «Dar por terminado» para cancelar solo lo que falta")
+            odoo.call("sale.order", "action_cancel", [c], ids=[oid], context={"disable_cancel_warning": True})
+            return {"ok": True, "mensaje": f"{so['name']} cancelado en Odoo (se puede recuperar desde Odoo si hiciera falta)"}
+        # cerrar_resto
+        pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("state", "not in", ["done", "cancel"])], ["name"], [c])
+        if not pk:
+            raise HTTPException(400, "No tiene nada pendiente de servir")
+        odoo.call("stock.picking", "action_cancel", [c], ids=[p["id"] for p in pk])
+        return {"ok": True, "mensaje": f"{so['name']}: cancelado lo pendiente ({', '.join(p['name'] for p in pk)}); lo servido queda para facturar"}
 
     return guard(run)
 
