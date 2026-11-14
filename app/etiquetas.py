@@ -103,6 +103,39 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
                     for p in odoo.search_read("product.product", dom, ["display_name", "default_code", "barcode"], company_ids=[EMPRESA], limit=60)]
         return guard(run)
 
+    @app.get("/api/etiquetas/catalogo")
+    def catalogo(request: Request, q: str = "", categ: int = 0, stock: int = 1, t: str = ""):
+        """Listado tipo inventario para marcar artículos: busca por palabras / ref / EAN / categoría y, si se pide, solo lo que hay en stock en la tienda."""
+        u, cids = ctx(request)
+        t = tienda_de(u) or (t or "").upper()
+
+        def run():
+            dom = [("sale_ok", "=", True)]
+            for w in [w for w in q.split() if w][:5]:
+                dom += ["|", "|", ("name", "ilike", w), ("default_code", "ilike", w), ("barcode", "=", w)]
+            if categ:
+                dom.append(("categ_id", "child_of", int(categ)))
+            loc = {"T1": "T1/Stock", "T2": "T2/Stock", "T3": "VP/Stock"}.get(t)
+            if stock and loc:
+                qs = odoo.search_read("stock.quant", [("location_id.complete_name", "=", loc), ("quantity", ">", 0)], ["product_id", "quantity"],
+                                      company_ids=[1, 2, 3, 4, 5], limit=20000)
+                hay = {}
+                for x in qs:
+                    hay[x["product_id"][0]] = hay.get(x["product_id"][0], 0) + x["quantity"]
+                dom.append(("id", "in", list(hay) or [0]))
+            else:
+                hay = None
+            ps = odoo.search_read("product.product", dom, ["display_name", "default_code", "barcode", "lst_price", "categ_id"], company_ids=[EMPRESA], limit=400, order="name")
+            return {"articulos": [{"id": p["id"], "nombre": re.sub(r"^\[[^\]]*\]\s*", "", p["display_name"]), "ref": p.get("default_code") or "", "ean": p.get("barcode") or "",
+                                   "categoria": (p.get("categ_id") or [0, ""])[1].split(" / ")[-1], "stock": round(hay.get(p["id"], 0), 2) if hay is not None else None}
+                                  for p in ps], "tienda": t, "max": len(ps) >= 400}
+        return guard(run)
+
+    @app.get("/api/etiquetas/categorias")
+    def categorias(request: Request):
+        ctx(request)
+        return guard(lambda: [{"id": c["id"], "nombre": c["complete_name"]} for c in odoo.search_read("product.category", [], ["complete_name"], company_ids=[EMPRESA], order="complete_name", limit=500)])
+
     @app.post("/api/etiquetas/datos")
     async def datos(request: Request):
         """{items: [{id, cant}]} o {plantillas: [ids]} (lo marcado en Odoo) -> datos de cada etiqueta."""

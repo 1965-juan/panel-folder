@@ -81,3 +81,31 @@ $('#et-cat').onclick = () => {
   const d = $('#et-desde').value; if (!d) return alertBox('Pon la fecha desde la que han cambiado los precios');
   etTiendas({ desde: d }, `Artículos que han cambiado de precio desde ${coDate(d)}`);
 };
+
+/* --- elegir artículos de una lista (como el inventario de Odoo) --- */
+let ET_L = [];
+$('#et-cat-b').onclick = async () => {
+  const box = $('#et-lista'); box.hidden = !box.hidden; if (box.hidden) return;
+  if ($('#et-lc').options.length < 2) try { (await api('/api/etiquetas/categorias')).forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.nombre; $('#et-lc').appendChild(o); }); } catch (e) { }
+  $('#et-lq').focus();
+};
+async function etLista() {
+  $('#et-lt').innerHTML = '<p class="muted">Buscando…</p>';
+  try {
+    const r = await api(`/api/etiquetas/catalogo?q=${encodeURIComponent($('#et-lq').value)}&categ=${$('#et-lc').value}&stock=${$('#et-ls').checked ? 1 : 0}`);
+    ET_L = r.articulos;
+    $('#et-ln').textContent = `${ET_L.length}${r.max ? '+ (afina la búsqueda)' : ''} artículos${r.tienda && $('#et-ls').checked ? ' con stock en tu tienda' : ''}`;
+    $('#et-lt').innerHTML = ET_L.length ? `<table class="co-t"><tbody>${ET_L.map(a => `<tr><td><input type="checkbox" data-i="${a.id}"></td><td>${escH(a.nombre)}</td><td class="muted">${escH(a.ref)}</td><td class="muted">${escH(a.categoria)}</td>
+      <td class="num">${a.stock != null ? +a.stock + ' ud.' : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">Nada con esa búsqueda</p>';
+    $('#et-lall').checked = false;
+  } catch (e) { $('#et-lt').innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+}
+$('#et-lb').onclick = etLista;
+$('#et-lq').onkeydown = e => { if (e.key === 'Enter') etLista(); };
+$('#et-lc').onchange = etLista; $('#et-ls').onchange = etLista;
+$('#et-lall').onchange = e => $('#et-lt').querySelectorAll('[data-i]').forEach(c => c.checked = e.target.checked);
+$('#et-lok').onclick = () => {
+  const ids = [...$('#et-lt').querySelectorAll('[data-i]:checked')].map(c => +c.dataset.i);
+  if (!ids.length) return alertBox('Marca algún artículo');
+  etTiendas({ productos: ids }, `${ids.length} artículo(s) marcados en la lista`);
+};

@@ -171,7 +171,14 @@
         <span class="et-sep"></span>
         <label class="muted">💶 Cambio de precios / catálogo desde <input type="date" id="et-desde"></label><button class="btn" id="et-cat">Sacar</button>
       </div>
+      <div class="et-rap"><button class="btn" id="et-cat-b">📋 Elegir artículos de la lista (como en inventario)</button></div>
       <div id="et-ent"></div>
+      <div id="et-lista" class="et-lista" hidden>
+        <div class="et-lf"><input id="et-lq" type="search" placeholder="Nombre, referencia o código de barras…"><select id="et-lc"><option value="0">Todas las categorías</option></select>
+          <label class="muted"><input type="checkbox" id="et-ls" checked> solo lo que hay en stock</label><button class="btn" id="et-lb">Buscar</button></div>
+        <div class="et-lh"><label><input type="checkbox" id="et-lall"> marcar todos</label><span class="muted" id="et-ln"></span><button class="ac-go" id="et-lok">Sacar etiquetas de los marcados</button></div>
+        <div id="et-lt" class="et-lt"></div>
+      </div>
       <div id="et-res"></div>
     </div>
   </section>
