@@ -21,12 +21,12 @@ function etCSV(lista, nombre) {
 }
 function etPintaRes(r, titulo) {
   ET_RES = r;
-  const nom = { T1: 'Tienda 1', T2: 'Tienda 2', T3: 'Tienda 3' };
+  const nom = { T1: 'Tienda 1', T2: 'Tienda 2', T3: 'Tienda Logipaper' };
   const fila = (k, lista, etq) => `<div class="et-t"><b>${etq}</b><span>${lista.length} artículo(s)</span>
     ${lista.length ? `<button class="ac-go" data-k="${k}">Ver en el programa</button><button class="btn" data-csv="${k}">⬇ CSV</button>` : '<span class="muted">nada en stock</span>'}</div>`;
   $('#et-res').innerHTML = `<div class="et-tit">${escH(titulo)} · 1 etiqueta por artículo, solo lo que cada tienda tiene en stock</div>
-    ${Object.keys(nom).map(k => fila(k, r.tiendas[k], nom[k])).join('')}
-    ${fila('todos', r.todos, 'Todos (sin mirar stock)')}
+    ${Object.keys(nom).filter(k => r.tiendas[k]).map(k => fila(k, r.tiendas[k], nom[k])).join('')}
+    ${r.todos.length ? fila('todos', r.todos, 'Todos (sin mirar stock)') : ''}
     ${r.sin_stock.length ? `<p class="muted">Sin stock en ninguna tienda: ${r.sin_stock.map(escH).join(', ')}</p>` : ''}
     ${r.sin_precio.length ? `<p class="muted">Fuera por no tener precio de venta: ${r.sin_precio.map(escH).join(', ')}</p>` : ''}`;
   const lista = k => k === 'todos' ? r.todos : r.tiendas[k];
@@ -79,5 +79,5 @@ $('#et-ult').onclick = async () => {
 };
 $('#et-cat').onclick = () => {
   const d = $('#et-desde').value; if (!d) return alertBox('Pon la fecha desde la que han cambiado los precios');
-  etTiendas({ desde: d }, `Artículos con precio o tarifa modificados desde ${coDate(d)}`);
+  etTiendas({ desde: d }, `Artículos que han cambiado de precio desde ${coDate(d)}`);
 };

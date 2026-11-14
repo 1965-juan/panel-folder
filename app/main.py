@@ -671,7 +671,7 @@ _venc.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scop
 # ---------- etiquetas de tienda ----------
 from . import etiquetas as _etq  # noqa: E402
 
-_etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+_etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, tienda_de=tienda_de)
 
 # ---------- tiendas ----------
 from . import tienda as _tienda  # noqa: E402

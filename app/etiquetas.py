@@ -17,7 +17,7 @@ TARIFA_NOMBRE = "Folder Castellón"
 EMPRESA = 1  # DISTRIPLUS: impuestos y tarifa de las tiendas
 
 
-def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
+def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=lambda u: None):
     cache = {}
 
     def tarifa():
@@ -147,7 +147,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
     @app.post("/api/etiquetas/tiendas")
     async def tiendas(request: Request):
         """{productos:[ids]} o {plantillas:[ids]} o {entradas:[picking ids]} -> etiquetas separadas por tienda (según su stock)."""
-        _, cids = ctx(request)
+        _u, cids = ctx(request)
         b = await request.json()
 
         def run():
@@ -158,8 +158,14 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 pids += [m["product_id"][0] for m in odoo.search_read("stock.move", [("picking_id", "in", [int(x) for x in b["entradas"]]), ("state", "=", "done")],
                                                                       ["product_id"], company_ids=[1, 2, 3, 4, 5], limit=5000) if m.get("product_id")]
             if b.get("desde"):
-                pids += [a["id"] for a in t_modificados(b["desde"])["articulos"]]
-            return por_tienda(pids)
+                pids += [a["id"] for a in t_cambios_precio(b["desde"], b.get("hasta"))["articulos"]]
+            r = por_tienda(pids)
+            t = tienda_de(_u)
+            if t:   # una tienda solo ve lo suyo
+                r["tiendas"] = {t: r["tiendas"].get(t, [])}
+                r["todos"] = []
+                r["sin_stock"] = []
+            return r
         return guard(run)
 
     @app.get("/api/etiquetas/entradas")
@@ -240,6 +246,32 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         return {"articulos": list(ar.values())[:500], "total": len(ar),
                 "aviso": "Odoo no guarda el precio anterior: son los artículos modificados (precio, tarifa u otro dato) desde esa fecha"}
 
+    def t_cargas_precios(dias=200):
+        """Días en que se cambiaron muchos precios de golpe (cargas de catálogo)."""
+        desde = (dt.date.today() - dt.timedelta(days=int(dias or 200))).isoformat()
+        g = odoo.call("mail.tracking.value", "read_group", [1], domain=[("field_id.name", "=", "list_price"), ("field_id.model", "=", "product.template"),
+                                                                        ("create_date", ">=", desde)], fields=["id:count"], groupby=["create_date:day"], lazy=False)
+        return {"dias": [{"dia": x.get("create_date:day"), "precios_cambiados": x.get("__count")} for x in g if (x.get("__count") or 0) > 0],
+                "nota": "Los catálogos trimestrales se cargan de golpe: son los días con cientos de cambios."}
+
+    def t_cambios_precio(desde, hasta=None):
+        """Artículos cuyo precio de venta CAMBIÓ de verdad entre dos fechas (historial de Odoo), con precio anterior y nuevo."""
+        dom = [("field_id.name", "=", "list_price"), ("field_id.model", "=", "product.template"), ("create_date", ">=", desde + " 00:00:00")]
+        if hasta:
+            dom.append(("create_date", "<=", hasta + " 23:59:59"))
+        tv = odoo.search_read("mail.tracking.value", dom, ["mail_message_id", "old_value_float", "new_value_float"], company_ids=[EMPRESA], limit=20000)
+        mids = list({x["mail_message_id"][0] for x in tv if x.get("mail_message_id")})
+        msg = {m["id"]: m["res_id"] for m in odoo.search_read("mail.message", [("id", "in", mids)], ["res_id"], company_ids=[EMPRESA], limit=20000)} if mids else {}
+        cambio = {}
+        for x in tv:
+            tid = msg.get((x.get("mail_message_id") or [0])[0])
+            if tid and abs((x.get("new_value_float") or 0) - (x.get("old_value_float") or 0)) > 0.0001:
+                c = cambio.setdefault(tid, {"antes": x.get("old_value_float"), "ahora": x.get("new_value_float")})
+                c["ahora"] = x.get("new_value_float")
+        tids = list(cambio)
+        vs = odoo.search_read("product.product", [("product_tmpl_id", "in", tids), ("sale_ok", "=", True)], ["display_name", "product_tmpl_id"], company_ids=[EMPRESA], limit=5000) if tids else []
+        return {"articulos": [{"id": v["id"], "nombre": v["display_name"], **cambio[v["product_tmpl_id"][0]]} for v in vs][:3000], "total": len(vs)}
+
     HERR = [
         {"name": "buscar_articulos", "description": "Busca artículos de venta por palabras del nombre, referencia o EAN (todas las palabras deben aparecer).",
          "input_schema": {"type": "object", "properties": {"texto": {"type": "string"}, "limite": {"type": "integer"}}, "required": ["texto"]}},
@@ -247,6 +279,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
          "input_schema": {"type": "object", "properties": {"nombre": {"type": "string"}}, "required": ["nombre"]}},
         {"name": "entradas_material", "description": "Artículos que han ENTRADO (recepciones de compra validadas): por proveedor_id, rango de fechas (AAAA-MM-DD) y/o documento (recepción AC/IN/00137 o pedido de compra P00143). Devuelve cantidad recibida.",
          "input_schema": {"type": "object", "properties": {"proveedor_id": {"type": "integer"}, "desde": {"type": "string"}, "hasta": {"type": "string"}, "documento": {"type": "string"}}}},
+        {"name": "cargas_de_precios", "description": "Días en que se cambiaron precios de venta de golpe (cargas de catálogo trimestral). Úsalo para saber cuándo se cargó un catálogo (el más reciente con cientos de cambios es el último catálogo).",
+         "input_schema": {"type": "object", "properties": {"dias": {"type": "integer", "description": "cuántos días hacia atrás mirar (por defecto 200)"}}}},
+        {"name": "cambios_de_precio", "description": "Artículos cuyo precio de venta CAMBIÓ de verdad entre dos fechas (AAAA-MM-DD), según el historial de Odoo. Para 'nuevos precios del catálogo', 'cambios de precio desde…'. El stock por tienda lo filtra el panel después.",
+         "input_schema": {"type": "object", "properties": {"desde": {"type": "string"}, "hasta": {"type": "string"}}, "required": ["desde"]}},
         {"name": "articulos_modificados", "description": "Artículos cuyo precio o tarifa se ha tocado desde una fecha (AAAA-MM-DD). Para 'cambios de precio' o 'catálogo nuevo'.",
          "input_schema": {"type": "object", "properties": {"desde": {"type": "string"}}, "required": ["desde"]}},
         {"name": "resultado", "description": "Devuelve la lista final de etiquetas. cant = nº de etiquetas de cada artículo (1 por defecto, o la cantidad recibida si lo piden).",
@@ -269,7 +305,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             sistema = (f"Eres el ayudante de etiquetas de precio de Folder Castellón (papelería). Hoy es {hoy.isoformat()} ({['lunes','martes','miércoles','jueves','viernes','sábado','domingo'][hoy.weekday()]}). "
                        "El usuario pide etiquetas de estantería en lenguaje normal. Usa las herramientas para encontrar los artículos (ids de product.product) "
                        "y termina SIEMPRE llamando a 'resultado'. Por defecto 1 etiqueta por artículo; si dice 'una por unidad' o 'tantas como han entrado', usa la cantidad recibida. "
-                       "Si dice 'esta semana' es desde el lunes; 'este mes' desde el día 1. Para un proveedor, búscalo primero para tener su id. No inventes ids.")
+                       "Si dice 'esta semana' es desde el lunes; 'este mes' desde el día 1. Para un proveedor, búscalo primero para tener su id. "
+                       "Para 'nuevos precios del catálogo X' o 'cambios de catálogo': mira cargas_de_precios, coge el día de la carga (el último con cientos de cambios si no dice cuál) y usa cambios_de_precio de ese día (desde=hasta=ese día, o un par de días si la carga duró más). "
+                       "Lo de 'que tenga stock' lo filtra el panel por tienda: tú devuelve todos los artículos. No inventes ids.")
             msgs = [{"role": "user", "content": texto}]
             recibido = {}
             http = httpx.Client(timeout=120)
@@ -307,6 +345,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                             o = t_entradas(a.get("proveedor_id"), a.get("desde"), a.get("hasta"), a.get("documento"), cids)
                             for x in o.get("articulos") or []:
                                 recibido[x["id"]] = x["recibido"]
+                        elif u["name"] == "cargas_de_precios":
+                            o = t_cargas_precios(a.get("dias") or 200)
+                        elif u["name"] == "cambios_de_precio":
+                            o = t_cambios_precio(a.get("desde") or hoy.isoformat(), a.get("hasta"))
                         elif u["name"] == "articulos_modificados":
                             o = t_modificados(a.get("desde") or hoy.isoformat())
                         else:
