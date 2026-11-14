@@ -15,7 +15,7 @@ TODAS = [1, 2, 3, 4, 5]
 TIENDAS = {
     "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"], "caja": "Efectivo Tienda 1", "destino": 34},
     "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"], "caja": "Efectivo T2", "destino": 40},
-    "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda 3", "LOGIPAPER", "Logipaper"], "caja": "Efectivo Tienda 3"},
+    "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda Logipaper", "Tienda 3", "LOGIPAPER", "Logipaper"], "caja": "Efectivo Tienda Logipaper"},
 }
 
 
