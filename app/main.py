@@ -709,8 +709,9 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
             return {"ok": True, "mensaje": f"{so['name']} cancelado en Odoo (se puede recuperar desde Odoo si hiciera falta)"}
         # cerrar_resto
         pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("state", "not in", ["done", "cancel"])], ["name"], [c])
-        if not pk:
-            raise HTTPException(400, "No tiene nada pendiente de servir")
+        if not pk:   # lo pendiente no tiene albarán (se canceló o nunca se generó): solo se quita del panel
+            o = _ventas_ocultas(); o.add(oid); OCULTAS_FILE.write_text(json.dumps(sorted(o)))
+            return {"ok": True, "mensaje": f"{so['name']}: lo que faltaba no tenía albarán pendiente; lo he quitado del panel"}
         odoo.call("stock.picking", "action_cancel", [c], ids=[p["id"] for p in pk])
         return {"ok": True, "mensaje": f"{so['name']}: cancelado lo pendiente ({', '.join(p['name'] for p in pk)}); lo servido queda para facturar"}
 
