@@ -430,3 +430,5 @@ label.tb-ok input{width:18px;height:18px}
 .ac-np{margin-top:12px}.ac-np summary{cursor:pointer;color:#6b3fa0;font-weight:600}.ac-np input#ac-npq{width:100%;margin:6px 0}#ac-nps a{display:block;padding:4px 6px}#ac-nps a:hover{background:#f3eef9}#ac-npf{margin-top:6px}
 
 .upd-ban{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:#6b3fa0;color:#fff;padding:10px 16px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-weight:600;display:flex;gap:12px;align-items:center;max-width:calc(100vw - 32px)}.upd-ban button{background:#f08a24;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+
+.tb-vp{font-size:12px;margin-top:4px;padding:3px 6px;border-radius:6px;background:#eef7ee;color:#2d6a2d}.tb-vp-mal{background:#fdecec;color:#a42323}

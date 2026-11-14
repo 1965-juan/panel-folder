@@ -23,6 +23,7 @@ function tbPinta() {
       <div class="tb-cn"><b>${escH(l.articulo.replace(/^\[[^\]]*\]\s*/, ''))}</b><button class="tb-x" data-x="${l.id}" title="Quitar del pedido">✕</button></div>
       <div class="tb-cm">${l.ref ? escH(l.ref) + ' · ' : ''}<input type="number" min="0" step="1" value="${+l.cantidad}" data-q="${l.id}"> ${escH(l.ud)} · ${eur(l.precio)}</div>
       ${l.para ? `<div class="tb-para">para ${escH(l.para)}</div>` : ''}
+      ${l.stock_vp != null ? `<div class="tb-vp ${l.stock_vp - l.reservado_vp < l.cantidad ? 'tb-vp-mal' : ''}">📦 Stock T. Logipaper: <b>${+l.stock_vp}</b>${l.reservado_vp ? ` (${+l.reservado_vp} reservado)` : ''}${l.stock_vp - l.reservado_vp < l.cantidad ? ' · no llega: arrástralo a otro proveedor' : ''}</div>` : ''}
       ${!este ? `<div class="tb-aviso">⚠️ ${l.proveedores.length ? 'este proveedor no está en la ficha del artículo' : 'el artículo no tiene ningún proveedor en su ficha'}
         <br><a href="#" class="lnk" data-fi="${l.id}">＋ ponerlo en su ficha (${eur(l.precio)})</a> · <a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.product_normal_action_puchased/${l.tmpl_id}">abrir en Odoo ↗</a></div>` : ''}
       ${otros.length ? `<div class="tb-alt">${otros.map(p => `<span title="${escH(p.ref)}">${escH(p.proveedor.split(' ')[0])} ${p.precio ? eur(p.precio) : ''}</span>`).join('')}</div>` : ''}

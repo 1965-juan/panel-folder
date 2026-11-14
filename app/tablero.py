@@ -134,6 +134,17 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             prods = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids)], ["default_code", "barcode", "product_tmpl_id", "qty_available"],
                                                           company_ids=[EMPRESA])} if pids else {}
             tmpls = list({p["product_tmpl_id"][0] for p in prods.values()})
+            # stock de Tienda Logipaper (VP/Stock): para lo que se pide a Logipaper, por si se ha agotado y conviene pedirlo a otro proveedor
+            vp = {}
+            pids_lg = list({l["product_id"][0] for l in ls if l.get("product_id") and prop.get(next((p["partner_id"][0] for p in pos if p["id"] == l["order_id"][0]), 0)) == 4})
+            if pids_lg:
+                try:
+                    for q in odoo.search_read("stock.quant", [("product_id", "in", pids_lg), ("location_id", "child_of", 46)], ["product_id", "quantity", "reserved_quantity"],
+                                              company_ids=[4]):
+                        a = vp.setdefault(q["product_id"][0], [0, 0])
+                        a[0] += q["quantity"]; a[1] += q.get("reserved_quantity") or 0
+                except Exception:
+                    vp = {}
             si = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "in", tmpls)], ["partner_id", "product_tmpl_id", "price", "min_qty", "product_code"],
                                   company_ids=[EMPRESA], limit=20000) if tmpls else []
             por_tmpl = {}
@@ -147,7 +158,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             for p in pos:
                 k = p["partner_id"][0]
                 col = cols.setdefault(k, {"partner_id": k, "proveedor": p["partner_id"][1], "pedidos": [], "lineas": [], "total": 0, "lanzados": [],
-                                          "grupo": k in prop, "mismo": prop.get(k) == EMPRESA})
+                                          "grupo": k in prop, "mismo": prop.get(k) == EMPRESA, "empresa_grupo": prop.get(k)})
                 if p["state"] == "purchase":
                     lz = {"id": p["id"], "nombre": p["name"], "fecha": (p.get("date_approve") or "")[:10], "recepcion": p.get("receipt_status") or "",
                           "total": round(p.get("amount_untaxed") or 0, 2), "lineas": []}
@@ -165,7 +176,9 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
                     "id": l["id"], "po_id": l["order_id"][0], "po": l["order_id"][1], "product_id": l["product_id"][0], "articulo": l["product_id"][1],
                     "tmpl_id": (pr.get("product_tmpl_id") or [0])[0],
                     "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get(uom()) or [0, ""])[1], "precio": l["price_unit"],
-                    "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0, "recibido": l.get("qty_received") or 0,
+                    "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0,
+                    "stock_vp": (round(vp[l["product_id"][0]][0], 2) if l["product_id"][0] in vp else (0 if pids_lg and l["product_id"][0] in pids_lg else None)),
+                    "reservado_vp": round(vp.get(l["product_id"][0], [0, 0])[1], 2), "recibido": l.get("qty_received") or 0,
                     "para": (l.get("sale_order_id") or [0, ""])[1] if l.get("sale_order_id") else "",
                     "proveedores": sorted(alt.values(), key=lambda x: (x["precio"] or 9e9))})
             out = sorted(cols.values(), key=lambda c: (c["grupo"], not c["lineas"], c["proveedor"].lower()))
