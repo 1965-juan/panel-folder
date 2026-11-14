@@ -410,9 +410,9 @@ document.getElementById('g').onclick=async()=>{const k=document.getElementById('
 
 @app.post("/api/actualizar")
 def actualizar(request: Request):
-    u = current_user(request)
+    u = usuario_real(request)   # funciona aunque el administrador esté «viendo como» otro usuario
     if not es_admin(u):
-        raise HTTPException(403, "Solo Juan puede actualizar el panel")
+        raise HTTPException(403, "Solo el administrador puede actualizar el panel")
     import threading
     # el contenedor se cierra y Docker lo vuelve a arrancar; al arrancar descarga la última versión
     threading.Timer(1.0, lambda: os._exit(0)).start()
