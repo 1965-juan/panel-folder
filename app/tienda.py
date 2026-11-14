@@ -2,6 +2,9 @@
 y los encargos de clientes hechos en la tienda, hasta que el almacén los sirve. Y el acceso a su TPV.
 """
 import datetime as dt
+import sqlite3
+import threading
+import time
 
 from fastapi import Request, HTTPException
 
@@ -10,13 +13,27 @@ TARJETA = "TARJETERO"   # diario del datáfono (TPV banco)
 TODAS = [1, 2, 3, 4, 5]
 # código de tienda -> datos en Odoo
 TIENDAS = {
-    "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"], "caja": "Efectivo Tienda 1"},
-    "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"], "caja": "Efectivo T2"},
+    "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"], "caja": "Efectivo Tienda 1", "destino": 34},
+    "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"], "caja": "Efectivo T2", "destino": 40},
     "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda 3", "LOGIPAPER", "Logipaper"], "caja": "Efectivo Tienda 3"},
 }
 
 
-def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de):
+AC_STOCK = 8        # AC/Stock (Distriplus)
+TRASLADO_AC = 51    # Almacén Central: Traslados internos
+
+
+def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_dir=None):
+    lock = threading.Lock()
+    db = (data_dir / "tiendas.db") if data_dir else None
+
+    def con():
+        c = sqlite3.connect(db, timeout=20)
+        c.row_factory = sqlite3.Row
+        c.execute("""CREATE TABLE IF NOT EXISTS repo_borrador (id INTEGER PRIMARY KEY AUTOINCREMENT, tienda TEXT, product_id INTEGER, nombre TEXT, ref TEXT,
+                     cant REAL, usuario TEXT, cuando REAL)""")
+        c.execute("CREATE TABLE IF NOT EXISTS repo_lanzadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tienda TEXT, picking TEXT, lineas INTEGER, usuario TEXT, cuando REAL)")
+        return c
 
     def ctx(request, t):
         u = current_user(request)
@@ -126,4 +143,105 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de):
                                   ["name", "amount_residual", "payment_state"], company_ids=[E])
             pend = [f for f in fs if f["payment_state"] not in ("paid", "in_payment", "reversed") and f["amount_residual"] > 0.009]
             return {"ok": True, "cliente": so["partner_id"][1], "facturas": [f["name"] for f in pend], "importe": round(sum(f["amount_residual"] for f in pend), 2)}
+        return guard(run)
+
+    # ---------- reposición preparada en el panel (se va llenando y se lanza cuando hay bastante) ----------
+    def stock_de(pids, locs):
+        q = odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id", "in", locs)], ["product_id", "location_id", "quantity", "reserved_quantity"],
+                             company_ids=TODAS, limit=20000) if pids else []
+        out = {}
+        for x in q:
+            d = out.setdefault(x["product_id"][0], {})
+            d[x["location_id"][0]] = d.get(x["location_id"][0], 0) + (x["quantity"] or 0) - (x.get("reserved_quantity") or 0)
+        return out
+
+    @app.get("/api/tienda/repo")
+    def repo(request: Request, t: str = ""):
+        u, t = ctx(request, t)
+        T = TIENDAS[t]
+        with con() as c:
+            ls = [dict(r) for r in c.execute("SELECT * FROM repo_borrador WHERE tienda=? ORDER BY id", (t,)).fetchall()]
+            ult = [dict(r) for r in c.execute("SELECT * FROM repo_lanzadas WHERE tienda=? ORDER BY id DESC LIMIT 5", (t,)).fetchall()]
+        if ls and T.get("destino"):
+            st = guard(lambda: stock_de([l["product_id"] for l in ls], [AC_STOCK, T["destino"]]))
+            for l in ls:
+                l["stock_ac"] = round(st.get(l["product_id"], {}).get(AC_STOCK, 0), 2)
+                l["stock_tienda"] = round(st.get(l["product_id"], {}).get(T["destino"], 0), 2)
+        return {"lineas": ls, "lanzadas": ult, "puede": bool(T.get("destino"))}
+
+    @app.get("/api/tienda/buscar")
+    def buscar(request: Request, q: str = "", t: str = ""):
+        u, t = ctx(request, t)
+        q = q.strip()
+        if len(q) < 2:
+            return []
+
+        def run():
+            dom = [("sale_ok", "=", True), "|", "|", ("name", "ilike", q), ("default_code", "ilike", q), ("barcode", "=", q)]
+            ps = odoo.search_read("product.product", dom, ["display_name", "default_code", "barcode", "is_storable"], company_ids=[1], limit=40)
+            st = stock_de([p["id"] for p in ps], [AC_STOCK, TIENDAS[t].get("destino") or AC_STOCK])
+            return [{"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "", "ean": p.get("barcode") or "",
+                     "stock_ac": round(st.get(p["id"], {}).get(AC_STOCK, 0), 2), "stock_tienda": round(st.get(p["id"], {}).get(TIENDAS[t].get("destino"), 0), 2)}
+                    for p in ps]
+        return guard(run)
+
+    @app.post("/api/tienda/repo")
+    async def repo_cambiar(request: Request):
+        """{t, accion: anadir|cantidad|quitar|vaciar, product_id, nombre, ref, cant, id}"""
+        b = await request.json()
+        u, t = ctx(request, b.get("t") or "")
+        a = b.get("accion")
+        with lock, con() as c:
+            if a == "anadir":
+                pid = int(b["product_id"])
+                cant = float(b.get("cant") or 1)
+                r = c.execute("SELECT id, cant FROM repo_borrador WHERE tienda=? AND product_id=?", (t, pid)).fetchone()
+                if r:
+                    c.execute("UPDATE repo_borrador SET cant=? WHERE id=?", (r["cant"] + cant, r["id"]))
+                else:
+                    c.execute("INSERT INTO repo_borrador (tienda, product_id, nombre, ref, cant, usuario, cuando) VALUES (?,?,?,?,?,?,?)",
+                              (t, pid, b.get("nombre") or "", b.get("ref") or "", cant, u, time.time()))
+            elif a == "cantidad":
+                q = float(b.get("cant") or 0)
+                if q <= 0:
+                    c.execute("DELETE FROM repo_borrador WHERE id=? AND tienda=?", (int(b["id"]), t))
+                else:
+                    c.execute("UPDATE repo_borrador SET cant=? WHERE id=? AND tienda=?", (q, int(b["id"]), t))
+            elif a == "quitar":
+                c.execute("DELETE FROM repo_borrador WHERE id=? AND tienda=?", (int(b["id"]), t))
+            elif a == "vaciar":
+                c.execute("DELETE FROM repo_borrador WHERE tienda=?", (t,))
+            else:
+                raise HTTPException(400, "Acción no válida")
+        return {"ok": True}
+
+    @app.post("/api/tienda/repo/lanzar")
+    async def repo_lanzar(request: Request):
+        """Lanza la reposición: crea en Odoo el mismo traslado que hace el botón «Reposición» del TPV (AC → tienda) y lo confirma.
+        Aparece en el Panel AC del almacén, en Tiendas."""
+        b = await request.json()
+        u, t = ctx(request, b.get("t") or "")
+        T = TIENDAS[t]
+        if not T.get("destino"):
+            raise HTTPException(400, "La reposición de esta tienda todavía se pide desde su TPV")
+        with con() as c:
+            ls = [dict(r) for r in c.execute("SELECT * FROM repo_borrador WHERE tienda=? ORDER BY id", (t,)).fetchall()]
+        if not ls:
+            raise HTTPException(400, "La reposición está vacía")
+
+        def run():
+            vals = {"picking_type_id": TRASLADO_AC, "location_id": AC_STOCK, "location_dest_id": T["destino"], "origin": f"Reposicion TPV - {T['nombre']}",
+                    "company_id": 1, "move_type": "direct",
+                    "move_ids": [[0, 0, {"product_id": l["product_id"], "product_uom_qty": l["cant"], "location_id": AC_STOCK, "location_dest_id": T["destino"],
+                                         "name": l["nombre"][:200] or "Reposición", "company_id": 1}] for l in ls]}
+            if T.get("usuario_odoo"):
+                vals["user_id"] = T["usuario_odoo"]
+            pid = odoo.call("stock.picking", "create", [1], vals_list=[vals])
+            pid = pid[0] if isinstance(pid, list) else pid
+            odoo.call("stock.picking", "action_confirm", [1], ids=[pid])
+            nombre = odoo.search_read("stock.picking", [("id", "=", pid)], ["name"], company_ids=[1])[0]["name"]
+            with lock, con() as c:
+                c.execute("DELETE FROM repo_borrador WHERE tienda=?", (t,))
+                c.execute("INSERT INTO repo_lanzadas (tienda, picking, lineas, usuario, cuando) VALUES (?,?,?,?,?)", (t, nombre, len(ls), u, time.time()))
+            return {"ok": True, "picking": nombre, "lineas": len(ls)}
         return guard(run)

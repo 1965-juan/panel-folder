@@ -676,7 +676,7 @@ _etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope
 # ---------- tiendas ----------
 from . import tienda as _tienda  # noqa: E402
 
-_tienda.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL, tienda_de=tienda_de)
+_tienda.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL, tienda_de=tienda_de, data_dir=DATA)
 
 # ---------- tablero de compras (tipo Trello) ----------
 from . import tablero as _tab  # noqa: E402
