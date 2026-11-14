@@ -197,7 +197,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
 
         def run():
             po = odoo.search_read("purchase.order", [("id", "=", po_id), ("company_id", "=", EMPRESA)],
-                                  ["name", "partner_id", "date_order", "date_approve", "state", "order_line", "notes"], company_ids=[EMPRESA])
+                                  ["name", "partner_id", "date_order", "date_approve", "state", "order_line"], company_ids=[EMPRESA])
             if not po:
                 raise HTTPException(404, "No encuentro el pedido")
             po = po[0]
