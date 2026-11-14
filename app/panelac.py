@@ -24,11 +24,14 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             ids = [o["order_id"] for o in d.get("orders", [])]
             extra = {}
             if ids:
-                for r in odoo.search_read("sale.order", [("id", "in", ids)], ["client_order_ref", "note"], company_ids=cids):
+                for r in odoo.search_read("sale.order", [("id", "in", ids)], ["client_order_ref", "note", "company_id", "partner_id"], company_ids=cids):
                     extra[r["id"]] = r
             for o in d.get("orders", []):
                 e = extra.get(o["order_id"], {})
                 o["ref_cliente"] = e.get("client_order_ref") or ""
+            # pedidos de Logipaper (u otra empresa nuestra) cuyo cliente es Distriplus: son compras de Distriplus, van al tablero de Compras
+            d["orders"] = [o for o in d.get("orders", []) if not (extra.get(o["order_id"]) and (extra[o["order_id"]].get("company_id") or [1])[0] != 1
+                                                                 and (extra[o["order_id"]].get("partner_id") or [0])[0] in propias())]
             quitar_pedidos_entre_empresas(d)
             d["odoo_url"] = odoo_url
             return d
