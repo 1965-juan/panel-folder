@@ -165,6 +165,15 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     document.querySelectorAll('.side nav a[data-m]').forEach(a => a.hidden = !MODS.includes(a.dataset.m));
     $('#usr-btn').hidden = !(ADMIN || yo.viendo_como);
     window.YO = yo;
+    // aviso de versión nueva del panel (se actualiza en el NAS para todos; aquí basta con recargar)
+    (() => { const v0 = yo.version; let avisado = false;
+      const mira = async () => { if (avisado || document.hidden) return;
+        try { const r = await fetch('/api/yo', { cache: 'no-store' }); if (!r.ok) return; const j = await r.json();
+          if (j.version && v0 && j.version !== v0) { avisado = true;
+            const b = document.createElement('div'); b.className = 'upd-ban';
+            b.innerHTML = `🔄 Hay una actualización del panel (versión ${escH(j.version)}) <button>Actualizar ahora</button>`;
+            b.querySelector('button').onclick = () => location.reload(); document.body.appendChild(b); } } catch (_) { } };
+      setInterval(mira, 120000); document.addEventListener('visibilitychange', mira); window.addEventListener('focus', mira); })();
     // los enlaces a Odoo se abren solo con las empresas de este usuario marcadas
     document.addEventListener('click', e => {
       const a = e.target.closest && e.target.closest('a[href]');
