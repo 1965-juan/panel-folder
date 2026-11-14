@@ -2,6 +2,7 @@
 y los encargos de clientes hechos en la tienda, hasta que el almacén los sirve. Y el acceso a su TPV.
 """
 import datetime as dt
+import re
 import sqlite3
 import threading
 import time
@@ -89,6 +90,8 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
             sv = odoo.search_read("sale.order", dom2, ["name", "partner_id", "date_order", "amount_total", "invoice_status", "invoice_ids", "client_order_ref", "payment_term_id"],
                                   company_ids=[T["empresa"]], order="date_order desc", limit=200)
             sv = [x for x in sv if x["partner_id"][0] not in propias]
+            ems = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", list({x["partner_id"][0] for x in sv}))], ["email"],
+                                                                            company_ids=TODAS)} if sv else {}
             iids = [i for x in sv for i in x["invoice_ids"]]
             invs = {i["id"]: i for i in odoo.search_read("account.move", [("id", "in", iids)], ["name", "state", "payment_state", "amount_residual", "move_type"],
                                                            company_ids=[T["empresa"]])} if iids else {}
@@ -100,7 +103,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                 if sin_fact or pend > 0.009:
                     cobrar.append({"id": x["id"], "ref": x["name"], "cliente": x["partner_id"][1], "fecha": (x.get("date_order") or "")[:10],
                                    "importe": round(pend if fs and not sin_fact else x["amount_total"], 2), "factura": ", ".join(f["name"] for f in fs if f["name"] != "/"),
-                                   "ref_cliente": x.get("client_order_ref") or "", **plazo(x)})
+                                   "ref_cliente": x.get("client_order_ref") or "", "email": ems.get(x["partner_id"][0], ""), **plazo(x)})
             return {"tienda": t, "nombre": T["nombre"], "por_cobrar": cobrar, "fija": bool(tienda_de(u)), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
                     "reposiciones": rep, "encargos": enc, "tiendas": [{"codigo": k, "nombre": v["nombre"]} for k, v in TIENDAS.items()]}
         return guard(run)
@@ -143,6 +146,105 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                                   ["name", "amount_residual", "payment_state"], company_ids=[E])
             pend = [f for f in fs if f["payment_state"] not in ("paid", "in_payment", "reversed") and f["amount_residual"] > 0.009]
             return {"ok": True, "cliente": so["partner_id"][1], "facturas": [f["name"] for f in pend], "importe": round(sum(f["amount_residual"] for f in pend), 2)}
+        return guard(run)
+
+    def facturar_so(T, so_id):
+        """Factura lo servido del pedido (si falta) y la contabiliza. Devuelve (pedido, facturas pendientes de cobro)."""
+        E = T["empresa"]
+        so = odoo.search_read("sale.order", [("id", "=", so_id), ("company_id", "=", E)], ["name", "invoice_status", "user_id", "warehouse_id", "partner_id"],
+                              company_ids=[E])
+        if not so:
+            raise HTTPException(404, "No encuentro el pedido")
+        so = so[0]
+        if (T["usuario_odoo"] and (so.get("user_id") or [0])[0] != T["usuario_odoo"]) or (not T["usuario_odoo"] and (so.get("warehouse_id") or [0])[0] != T["almacen"]):
+            raise HTTPException(403, "Ese pedido no es de esta tienda")
+        ctx_so = {"active_model": "sale.order", "active_ids": [so_id], "active_id": so_id}
+        if so["invoice_status"] == "to invoice":
+            w = odoo.call("sale.advance.payment.inv", "create", [E], vals_list=[{"advance_payment_method": "delivered", "sale_order_ids": [[6, 0, [so_id]]]}], context=ctx_so)
+            w = w[0] if isinstance(w, list) else w
+            odoo.call("sale.advance.payment.inv", "create_invoices", [E], ids=[w], context=ctx_so)
+        fs = odoo.search_read("account.move", [("invoice_origin", "=", so["name"]), ("move_type", "=", "out_invoice"), ("state", "!=", "cancel"), ("company_id", "=", E)],
+                              ["name", "state"], company_ids=[E])
+        borr = [f["id"] for f in fs if f["state"] == "draft"]
+        if borr:
+            odoo.call("account.move", "action_post", [E], ids=borr)
+        fs = odoo.search_read("account.move", [("invoice_origin", "=", so["name"]), ("move_type", "=", "out_invoice"), ("state", "=", "posted"), ("company_id", "=", E)],
+                              ["name", "amount_residual", "payment_state", "partner_id"], company_ids=[E])
+        return so, [f for f in fs if f["payment_state"] not in ("paid", "in_payment", "reversed") and f["amount_residual"] > 0.009]
+
+    def enviar_factura(E, fids):
+        tpl = odoo.search_read("mail.template", [("model", "=", "account.move"), "|", ("name", "ilike", "factura"), ("name", "ilike", "invoice")],
+                               ["name"], company_ids=[E], order="id", limit=5)
+        if not tpl:
+            return "no encuentro la plantilla de email de facturas"
+        tid = next((x["id"] for x in tpl if "envío" in x["name"].lower() or "sending" in x["name"].lower()), tpl[0]["id"])
+        try:
+            for f in fids:
+                odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True)
+                odoo.call("account.move", "write", [E], ids=[f], vals={"is_move_sent": True})
+        except Exception as e:
+            return str(e)[:200]
+        return ""
+
+    @app.post("/api/tienda/cobrar")
+    async def cobrar(request: Request):
+        """{so_id, forma: efectivo|tarjeta, email?}: factura lo servido, lo cobra y envía la factura al cliente, todo sin salir del panel.
+        Efectivo: entra como movimiento de la caja abierta del TPV de la tienda (cuenta 570 de su caja), así el arqueo cuadra.
+        Tarjeta: pago en el diario del datáfono (TARJETERO) de la empresa de la tienda."""
+        b = await request.json()
+        u, t = ctx(request, b.get("t") or "")
+        T = TIENDAS[t]
+        E = T["empresa"]
+        forma = (b.get("forma") or "").lower()
+        if forma not in ("efectivo", "tarjeta"):
+            raise HTTPException(400, "Elige efectivo o tarjeta")
+        email = (b.get("email") or "").strip()
+        if email and not re.fullmatch(r"[^@\s;,]+@[^@\s;,]+\.[A-Za-z]{2,}", email):
+            raise HTTPException(400, "Ese email no parece válido")
+
+        def run():
+            ses = None
+            if forma == "efectivo":   # antes de facturar nada: sin caja abierta no se puede cobrar en efectivo
+                ses = odoo.search_read("pos.session", [("config_id", "=", T["pos"]), ("state", "=", "opened")], ["name", "cash_journal_id"], company_ids=[E], limit=1)
+                if not ses or not ses[0].get("cash_journal_id"):
+                    raise HTTPException(400, f"La caja del TPV de {T['nombre']} no está abierta. Ábrela primero (botón «Abrir el TPV») para que el efectivo entre en la caja de hoy.")
+                ses = ses[0]
+            so, fs = facturar_so(T, int(b.get("so_id") or 0))
+            if not fs:
+                raise HTTPException(400, "Este pedido ya está cobrado")
+            total = round(sum(f["amount_residual"] for f in fs), 2)
+            fids = [f["id"] for f in fs]
+            nombres = ", ".join(f["name"] for f in fs)
+            partner = fs[0]["partner_id"][0]
+            # apuntes a cobrar (430) de las facturas
+            rec = odoo.search_read("account.move.line", [("move_id", "in", fids), ("account_id.account_type", "=", "asset_receivable"), ("reconciled", "=", False)],
+                                   ["id", "account_id", "partner_id", "amount_residual"], company_ids=[E])
+            if not rec:
+                raise HTTPException(400, "No encuentro lo pendiente de cobro de la factura")
+            if forma == "efectivo":
+                sl = odoo.call("account.bank.statement.line", "create", [E], vals_list=[{
+                    "pos_session_id": ses["id"], "journal_id": ses["cash_journal_id"][0], "amount": total, "partner_id": partner,
+                    "date": dt.date.today().isoformat(), "payment_ref": f"{ses['name']}-Cobro {nombres} ({so['name']})",
+                    "counterpart_account_id": rec[0]["account_id"][0]}], context={"no_retrieve_partner": True})
+                sl = sl[0] if isinstance(sl, list) else sl
+                mv = odoo.search_read("account.bank.statement.line", [("id", "=", sl)], ["move_id"], company_ids=[E])[0]["move_id"][0]
+                contra = odoo.search_read("account.move.line", [("move_id", "=", mv), ("account_id", "=", rec[0]["account_id"][0])], ["id"], company_ids=[E])
+                odoo.call("account.move.line", "reconcile", [E], ids=[c["id"] for c in contra] + [r["id"] for r in rec])
+            else:
+                j = diario(TARJETA, E)
+                w = odoo.call("account.payment.register", "create", [E], vals_list=[{"journal_id": j, "payment_date": dt.date.today().isoformat(),
+                                                                                    "group_payment": True, "amount": total}],
+                              context={"active_model": "account.move", "active_ids": fids})
+                w = w[0] if isinstance(w, list) else w
+                odoo.call("account.payment.register", "action_create_payments", [E], ids=[w],
+                          context={"active_model": "account.move", "active_ids": fids, "dont_redirect_to_payments": True})
+            # factura por email al cliente
+            if email:
+                odoo.call("res.partner", "write", TODAS, ids=[partner], vals={"email": email})
+            tiene = email or (odoo.search_read("res.partner", [("id", "=", partner)], ["email"], company_ids=TODAS) or [{}])[0].get("email")
+            aviso = enviar_factura(E, fids) if tiene else "el cliente no tiene email: la factura no se ha enviado"
+            return {"ok": True, "cliente": so["partner_id"][1], "facturas": nombres, "importe": total, "forma": forma,
+                    "enviada": bool(tiene) and not aviso, "aviso": aviso}
         return guard(run)
 
     # ---------- reposición preparada en el panel (se va llenando y se lanza cuando hay bastante) ----------

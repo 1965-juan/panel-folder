@@ -21,21 +21,30 @@ async function tiOpen() {
   const cob = TI.por_cobrar.filter(o => o.contado);
   $('#ti-cob').innerHTML = cob.length ? `<table class="co-t ti-t"><tbody>${cob.map(o => `<tr><td><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
       <br><small class="muted">${coDate(o.fecha)}${o.factura ? ' · ' + escH(o.factura) : ''}</small></td><td class="num"><b>${eur(o.importe)}</b></td>
-      <td class="ti-cb"><button class="ac-go" data-c="${o.id}">💶 Cobrar en el TPV</button></td></tr>`).join('')}</tbody></table>`
+      <td class="ti-cb"><button class="ac-go" data-c="${o.id}">💶 Cobrar</button></td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No hay nada servido pendiente de cobrar</p>';
-  $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = async () => {
-    const o = cob.find(x => x.id === +b.dataset.c);
-    b.disabled = true; b.textContent = 'Preparando…';
-    try { const r = await jpost('/api/tienda/preparar_cobro', { so_id: o.id, t: TI.tienda });
-      $('#ti-paso').hidden = false;
-      $('#ti-paso').innerHTML = `<b>Cobra ${eur(r.importe)} a ${escH(r.cliente)} en el TPV:</b>
-        <ol><li>Abre el TPV (botón de arriba).</li><li>Pulsa <b>Cliente</b> y elige <b>${escH(r.cliente)}</b>.</li>
-        <li>En la ficha del cliente pulsa <b>Liquidar deuda</b> (o «Settle due») y marca ${r.facturas.length > 1 ? 'las facturas' : 'la factura'} <b>${escH(r.facturas.join(', '))}</b>.</li>
-        <li>Cobra en <b>Efectivo</b> o <b>Tarjeta</b>. El dinero entra en la caja del TPV y el material no se vuelve a descontar.</li></ol>
-        <button class="btn" onclick="this.parentElement.hidden=true">Entendido</button>`;
-      $('#ti-paso').scrollIntoView({ behavior: 'smooth' });
-    } catch (e) { alertBox(e.message); }
-    b.disabled = false; b.textContent = '💶 Cobrar en el TPV';
+  $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = () => {
+    const o = cob.find(x => x.id === +b.dataset.c), P = $('#ti-paso');
+    P.hidden = false;
+    P.innerHTML = `<b>Cobrar ${eur(o.importe)} a ${escH(o.cliente)}</b> <span class="muted">(${escH(o.ref)})</span>
+      <p>Se hace la factura, se cobra y se le envía por email. El efectivo entra en la caja del TPV de la tienda (tiene que estar abierta).</p>
+      <label>Email para la factura <input id="ti-em" type="email" value="${escH(o.email || '')}" placeholder="correo del cliente" style="width:100%"></label>
+      <div class="ti-lz"><button class="ac-go" data-f="efectivo">💶 Efectivo</button><button class="ac-go" data-f="tarjeta">💳 Tarjeta</button>
+      <button class="btn" data-f="">Cancelar</button></div><div id="ti-res"></div>`;
+    P.scrollIntoView({ behavior: 'smooth' });
+    P.querySelectorAll('[data-f]').forEach(x => x.onclick = async () => {
+      const f = x.dataset.f; if (!f) { P.hidden = true; return; }
+      const em = $('#ti-em').value.trim();
+      if (!em && !confirm('El cliente no tiene email: se cobrará pero la factura no se enviará. ¿Seguir?')) return;
+      if (!confirm(`¿Cobrar ${eur(o.importe)} en ${f.toUpperCase()} a ${o.cliente}?`)) return;
+      P.querySelectorAll('button').forEach(z => z.disabled = true); $('#ti-res').innerHTML = '<p class="muted">Facturando y cobrando…</p>';
+      try {
+        const r = await jpost('/api/tienda/cobrar', { so_id: o.id, t: TI.tienda, forma: f, email: em !== (o.email || '') ? em : '' });
+        P.innerHTML = `✅ <b>Cobrado ${eur(r.importe)} en ${r.forma}</b> · ${escH(r.cliente)} · factura ${escH(r.facturas)}
+          <br>${r.enviada ? '📧 Factura enviada por email' : '⚠️ ' + escH(r.aviso)} <button class="btn" onclick="this.parentElement.hidden=true">Cerrar</button>`;
+        tiOpen();
+      } catch (e) { $('#ti-res').innerHTML = `<p class="err">${escH(e.message)}</p>`; P.querySelectorAll('button').forEach(z => z.disabled = false); }
+    });
   });
   tiRepo();
   $('#ti-info').textContent = `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
