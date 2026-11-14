@@ -1,14 +1,18 @@
 """Apartado de cada tienda: lo que ha pedido al almacén central (reposiciones desde el botón «Reposición» del TPV)
 y los encargos de clientes hechos en la tienda, hasta que el almacén los sirve. Y el acceso a su TPV.
 """
+import datetime as dt
+
 from fastapi import Request, HTTPException
+
+TARJETA = "TARJETERO"   # diario del datáfono (TPV banco)
 
 TODAS = [1, 2, 3, 4, 5]
 # código de tienda -> datos en Odoo
 TIENDAS = {
-    "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"]},
-    "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"]},
-    "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda 3", "LOGIPAPER", "Logipaper"]},
+    "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"], "caja": "Efectivo Tienda 1"},
+    "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"], "caja": "Efectivo T2"},
+    "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda 3", "LOGIPAPER", "Logipaper"], "caja": "Efectivo Tienda 3"},
 }
 
 
@@ -56,6 +60,74 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de):
             so = [s for s in so if s["partner_id"][0] not in propias]   # fuera los pedidos entre nuestras empresas
             enc = [{"id": s["id"], "ref": s["name"], "cliente": s["partner_id"][1], "fecha": (s.get("date_order") or "")[:10], "total": s["amount_total"],
                     "ref_cliente": s.get("client_order_ref") or "", "lineas": por.get(s["id"], [])} for s in so]
-            return {"tienda": t, "nombre": T["nombre"], "fija": bool(tienda_de(u)), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
+            # servidos (albarán ya sacado) y todavía sin cobrar: se cobran desde aquí, sin pasar por el TPV
+            desde = (dt.date.today() - dt.timedelta(days=90)).isoformat()
+            dom2 = [("state", "=", "sale"), ("delivery_status", "=", "full"), ("company_id", "=", T["empresa"]), ("date_order", ">=", desde)]
+            dom2 += (["|", ("user_id", "=", T["usuario_odoo"]), ("warehouse_id", "=", T["almacen"])] if T["usuario_odoo"] else [("warehouse_id", "=", T["almacen"])])
+            sv = odoo.search_read("sale.order", dom2, ["name", "partner_id", "date_order", "amount_total", "invoice_status", "invoice_ids", "client_order_ref"],
+                                  company_ids=[T["empresa"]], order="date_order desc", limit=200)
+            sv = [x for x in sv if x["partner_id"][0] not in propias]
+            iids = [i for x in sv for i in x["invoice_ids"]]
+            invs = {i["id"]: i for i in odoo.search_read("account.move", [("id", "in", iids)], ["name", "state", "payment_state", "amount_residual", "move_type"],
+                                                           company_ids=[T["empresa"]])} if iids else {}
+            cobrar = []
+            for x in sv:
+                fs = [invs[i] for i in x["invoice_ids"] if i in invs and invs[i]["state"] != "cancel" and invs[i]["move_type"] == "out_invoice"]
+                pend = sum(f["amount_residual"] for f in fs if f["state"] == "posted" and f["payment_state"] not in ("paid", "in_payment", "reversed"))
+                sin_fact = x["invoice_status"] == "to invoice"
+                if sin_fact or pend > 0.009:
+                    cobrar.append({"id": x["id"], "ref": x["name"], "cliente": x["partner_id"][1], "fecha": (x.get("date_order") or "")[:10],
+                                   "importe": round(pend if fs and not sin_fact else x["amount_total"], 2), "factura": ", ".join(f["name"] for f in fs if f["name"] != "/"),
+                                   "ref_cliente": x.get("client_order_ref") or ""})
+            return {"tienda": t, "nombre": T["nombre"], "por_cobrar": cobrar, "fija": bool(tienda_de(u)), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
                     "reposiciones": rep, "encargos": enc, "tiendas": [{"codigo": k, "nombre": v["nombre"]} for k, v in TIENDAS.items()]}
+        return guard(run)
+
+    def diario(nombre, empresa):
+        j = odoo.search_read("account.journal", [("name", "=", nombre), ("company_id", "=", empresa)], ["id"], company_ids=[empresa], limit=1)
+        if not j:
+            raise HTTPException(400, f"No encuentro el diario «{nombre}» en Odoo")
+        return j[0]["id"]
+
+    @app.post("/api/tienda/cobrar")
+    async def cobrar(request: Request):
+        """{so_id, forma: caja|tarjeta}: factura lo servido (si falta) y registra el cobro en la caja de la tienda o en el datáfono."""
+        b = await request.json()
+        u, t = ctx(request, b.get("t") or "")
+        T = TIENDAS[t]
+        so_id = int(b.get("so_id") or 0)
+        forma = b.get("forma")
+        if forma not in ("caja", "tarjeta"):
+            raise HTTPException(400, "Forma de cobro no válida")
+        E = T["empresa"]
+
+        def run():
+            so = odoo.search_read("sale.order", [("id", "=", so_id), ("company_id", "=", E)], ["name", "invoice_status", "invoice_ids", "delivery_status", "user_id", "warehouse_id"],
+                                  company_ids=[E])
+            if not so:
+                raise HTTPException(404, "No encuentro el pedido")
+            so = so[0]
+            if (so.get("warehouse_id") or [0])[0] != T["almacen"] and (so.get("user_id") or [0])[0] != T["usuario_odoo"]:
+                raise HTTPException(403, "Ese pedido no es de esta tienda")
+            jid = diario(T["caja"] if forma == "caja" else TARJETA, E)
+            ctx_so = {"active_model": "sale.order", "active_ids": [so_id], "active_id": so_id}
+            if so["invoice_status"] == "to invoice":
+                w = odoo.call("sale.advance.payment.inv", "create", [E], vals_list=[{"advance_payment_method": "delivered", "sale_order_ids": [[6, 0, [so_id]]]}], context=ctx_so)
+                w = w[0] if isinstance(w, list) else w
+                odoo.call("sale.advance.payment.inv", "create_invoices", [E], ids=[w], context=ctx_so)
+            fs = odoo.search_read("account.move", [("invoice_origin", "=", so["name"]), ("move_type", "=", "out_invoice"), ("state", "!=", "cancel"), ("company_id", "=", E)],
+                                  ["name", "state", "payment_state", "amount_residual"], company_ids=[E])
+            borr = [f["id"] for f in fs if f["state"] == "draft"]
+            if borr:
+                odoo.call("account.move", "action_post", [E], ids=borr)
+                fs = odoo.search_read("account.move", [("id", "in", [f["id"] for f in fs])], ["name", "state", "payment_state", "amount_residual"], company_ids=[E])
+            pend = [f for f in fs if f["state"] == "posted" and f["payment_state"] not in ("paid", "in_payment", "reversed") and f["amount_residual"] > 0.009]
+            if not pend:
+                raise HTTPException(400, "No hay nada pendiente de cobro en ese pedido")
+            ids = [f["id"] for f in pend]
+            ctx_m = {"active_model": "account.move", "active_ids": ids}
+            w = odoo.call("account.payment.register", "create", [E], vals_list=[{"journal_id": jid, "group_payment": True}], context=ctx_m)
+            w = w[0] if isinstance(w, list) else w
+            odoo.call("account.payment.register", "action_create_payments", [E], ids=[w], context=ctx_m)
+            return {"ok": True, "facturas": [f["name"] for f in pend], "importe": round(sum(f["amount_residual"] for f in pend), 2), "forma": forma}
         return guard(run)

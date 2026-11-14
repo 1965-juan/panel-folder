@@ -17,6 +17,17 @@ async function tiOpen() {
       : '<p class="empty">No tenéis reposiciones pendientes</p>');
   $('#ti-enc').innerHTML = TI.encargos.length ? TI.encargos.map(o => `<div class="ti-card"><div class="ti-h"><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
       <span class="muted">${coDate(o.fecha)} · ${eur(o.total)}</span></div>${tabla(o.lineas)}</div>`).join('') : '<p class="empty">No hay encargos pendientes de servir</p>';
+  $('#ti-cob').innerHTML = TI.por_cobrar.length ? `<table class="co-t ti-t"><tbody>${TI.por_cobrar.map(o => `<tr><td><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
+      <br><small class="muted">${coDate(o.fecha)}${o.factura ? ' · ' + escH(o.factura) : ' · se factura al cobrar'}</small></td><td class="num"><b>${eur(o.importe)}</b></td>
+      <td class="ti-cb"><button class="ac-go" data-c="${o.id}" data-f="caja">💶 Caja</button><button class="ac-go ti-tar" data-c="${o.id}" data-f="tarjeta">💳 TPV banco</button></td></tr>`).join('')}</tbody></table>`
+    : '<p class="empty">No hay nada servido pendiente de cobrar</p>';
+  $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = async () => {
+    const o = TI.por_cobrar.find(x => x.id === +b.dataset.c), caja = b.dataset.f === 'caja';
+    if (!confirm(`¿Cobrar ${eur(o.importe)} de ${o.cliente} (${o.ref}) ${caja ? 'en efectivo, a la caja de la tienda' : 'con tarjeta, por el TPV del banco'}?`)) return;
+    b.disabled = true; b.textContent = 'Cobrando…';
+    try { const r = await jpost('/api/tienda/cobrar', { so_id: o.id, forma: b.dataset.f, t: TI.tienda });
+      alertBox(`Cobrado ${eur(r.importe)} (${r.facturas.join(', ')})`); tiOpen(); } catch (e) { alertBox(e.message); tiOpen(); }
+  });
   $('#ti-info').textContent = `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
 }
 $('#ti-sel').onchange = () => tiOpen();
