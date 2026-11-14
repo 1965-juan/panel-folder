@@ -104,6 +104,9 @@ function dAcciones(c, d) {
     h += `<div class="d-ok"><button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
       <label><input type="checkbox" id="d-avi" ${d.email ? 'checked' : 'disabled'}> Avisar al cliente por email de que estamos preparando su material
       ${d.email ? `<small class="muted">(${escH(d.email)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label>
+      <small class="d-ver">👁 Ver cómo quedan: <a target="_blank" href="/ventas/${c.id}/vista?tipo=preparacion&company=${company}">pedido en preparación</a> ·
+        <a target="_blank" href="/ventas/${c.id}/vista?tipo=presupuesto&company=${company}">envío del presupuesto</a> ·
+        <a target="_blank" href="/ventas/${c.id}/vista?tipo=sin_confirmar&company=${company}">sin confirmar</a></small>
       <div class="d-mails"><button class="btn" data-m="presupuesto" ${d.email ? '' : 'disabled'}>📧 Enviar el presupuesto por email</button>
       <button class="btn" data-m="sin_confirmar" ${d.email ? '' : 'disabled'}>🔔 Avisar: no hemos recibido confirmación (¿archivamos o cambios?)</button></div></div>`;
   }

@@ -548,6 +548,38 @@ AVISO_PREPARACION = "Folder - Aviso pedido en preparación"
 PLANTILLAS_PRESU = {"presupuesto": "Folder - Envío de presupuesto", "sin_confirmar": "Folder - Presupuesto sin confirmar"}
 
 
+@app.get("/ventas/{oid}/vista")
+def vista_email(request: Request, oid: int, tipo: str = "presupuesto", company: str = "all"):
+    """Cómo le llegaría el email al cliente (sin enviarlo): se monta con la misma plantilla de Odoo."""
+    u = current_user(request)
+    nombre = {**PLANTILLAS_PRESU, "preparacion": AVISO_PREPARACION}.get(tipo)
+    if not nombre:
+        raise HTTPException(400, "Tipo de email no válido")
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "company_id", "partner_id"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        c = so[0]["company_id"][0]
+        tpl = odoo.search_read("mail.template", [("model", "=", "sale.order"), ("name", "=", nombre)], ["id", "report_template_ids"], [c], limit=1)
+        if not tpl:
+            raise HTTPException(400, f"No encuentro la plantilla «{nombre}» en Odoo")
+        w = odoo.call("mail.compose.message", "create", [c], vals_list=[{"model": "sale.order", "res_ids": f"[{oid}]", "template_id": tpl[0]["id"],
+                                                                         "composition_mode": "comment"}])
+        w = w[0] if isinstance(w, list) else w
+        m = odoo.search_read("mail.compose.message", [("id", "=", w)], ["subject", "body"], [c])[0]
+        em = odoo.search_read("res.partner", [("id", "=", so[0]["partner_id"][0])], ["email"], [c] + [x for x in cids if x != c])
+        return m, (em[0].get("email") if em else ""), bool(tpl[0].get("report_template_ids"))
+    m, email, pdf = guard(run)
+    import html as _h
+    cab = (f'<div style="font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;background:#f3eef9;border-bottom:1px solid #ddd;padding:12px 20px">'
+           f'<b>Vista previa · no se ha enviado</b><br>Para: {_h.escape(email or "(el cliente no tiene email)")}<br>'
+           f'Asunto: <b>{_h.escape(m.get("subject") or "")}</b>{"<br>📎 Adjunto: presupuesto en PDF" if pdf else ""}</div>')
+    return HTMLResponse(f'<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                        f'<title>Vista previa del email</title></head><body style="margin:0;background:#fff">{cab}<div style="padding:16px">{m.get("body") or ""}</div></body></html>')
+
+
 @app.post("/api/ventas/{oid}/email")
 async def api_email_presu(request: Request, oid: int, company: str = "all"):
     """{tipo}: 'presupuesto' manda el presupuesto en PDF al cliente; 'sin_confirmar' le pregunta si lo archivamos o necesita cambios."""
