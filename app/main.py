@@ -32,14 +32,30 @@ def extra_users():
         return {}
 
 
+# Perfiles fijos del panel. "administrador" lo usan Juan y Mayte (hereda la contraseña del antiguo usuario "juan").
+ADMIN = "administrador"
+PERFILES = {
+    ADMIN: {"empresas": ["*"], "modulos": None},
+    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
+    "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
+}
+ANTIGUOS = {"juan": ADMIN}   # sesiones abiertas con el nombre viejo
+
+
 def allowed_users():
-    return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
+    return list(PERFILES) + [u for u in extra_users() if u not in PERFILES and u not in ANTIGUOS and u not in ENV_USERS]
+
+
+def sin_facturas(u):
+    return bool(PERFILES.get(u, {}).get("sin_facturas"))
 
 
 TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero"]
 
 
 def modulos_de(u):
+    if u in PERFILES:
+        return list(PERFILES[u]["modulos"] or TODOS_MODULOS)
     mods = list(extra_users().get(u, {}).get("modulos") or TODOS_MODULOS)
     if "compras" in mods and "facturacion" not in mods:  # usuarios creados antes de separar Facturación (Mayte)
         mods.append("facturacion")
@@ -84,6 +100,9 @@ def current_user(request: Request):
     u = request.session.get("user")
     if not u:
         raise HTTPException(401, "No has entrado")
+    if u in ANTIGUOS:
+        u = ANTIGUOS[u]
+        request.session["user"] = u
     return u
 
 
@@ -99,7 +118,7 @@ def home(request: Request):
 @app.get("/entrar", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     html = (BASE / "static" / "login.html").read_text()
-    opts = "".join(f'<option value="{u}">{u.capitalize()}</option>' for u in allowed_users())
+    opts = "".join(f'<option value="{u}">{u.upper()}</option>' for u in allowed_users())
     users = load_users()
     nuevos = [u for u in allowed_users() if u not in users]
     aviso = ""
@@ -111,10 +130,14 @@ def login_page(request: Request, error: str = ""):
 
 @app.post("/entrar")
 def login(request: Request, usuario: str = Form(...), clave: str = Form(...)):
-    usuario = usuario.strip().lower()
+    usuario = ANTIGUOS.get(usuario.strip().lower(), usuario.strip().lower())
     if usuario not in allowed_users():
         return RedirectResponse("/entrar?error=Usuario+no+válido", 303)
     users = load_users()
+    for viejo, nuevo in ANTIGUOS.items():   # el administrador entra con la contraseña que tenía "juan"
+        if nuevo == usuario and usuario not in users and viejo in users:
+            users[usuario] = users[viejo]
+            save_users(users)
     if usuario not in users:
         if len(clave) < 6:
             return RedirectResponse("/entrar?error=La+contraseña+debe+tener+al+menos+6+caracteres", 303)
@@ -155,6 +178,8 @@ for part in os.environ.get("PANEL_USER_COMPANIES", "almacen=DISTRIPLUS").split("
 
 
 def regla_empresas(user):
+    if user in PERFILES:
+        return list(PERFILES[user]["empresas"])
     if user in extra_users():
         return [x.upper() for x in extra_users()[user].get("empresas", ["*"])]
     return USER_COMPANIES.get(user, ["*"])
@@ -197,7 +222,7 @@ VERSION = (BASE / "VERSION").read_text().strip() if (BASE / "VERSION").exists() 
 
 
 def es_admin(u):
-    return u in ENV_USERS and "*" in USER_COMPANIES.get(u, ["*"])
+    return u == ADMIN
 
 
 @app.get("/api/yo")
@@ -211,7 +236,7 @@ def yo(request: Request):
 @app.get("/api/usuarios")
 def api_usuarios(request: Request):
     if not es_admin(current_user(request)):
-        raise HTTPException(403, "Solo Juan")
+        raise HTTPException(403, "Solo el administrador")
     reg = load_users()
     return [{"usuario": u, "extra": u in extra_users(), "empresas": regla_empresas(u), "modulos": modulos_de(u),
              "tiene_clave": u in reg} for u in allowed_users()]
@@ -220,10 +245,10 @@ def api_usuarios(request: Request):
 @app.post("/api/usuarios")
 async def api_usuario_nuevo(request: Request):
     if not es_admin(current_user(request)):
-        raise HTTPException(403, "Solo Juan")
+        raise HTTPException(403, "Solo el administrador")
     b = await request.json()
     u = re.sub(r"[^a-z0-9]", "", (b.get("usuario") or "").strip().lower())
-    if not u or u in ENV_USERS:
+    if not u or u in ENV_USERS or u in PERFILES or u in ANTIGUOS:
         raise HTTPException(400, "Nombre de usuario no válido")
     ex = extra_users()
     ex[u] = {"empresas": b.get("empresas") or ["*"], "modulos": [m for m in (b.get("modulos") or TODOS_MODULOS) if m in TODOS_MODULOS]}
@@ -400,6 +425,8 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
                "albaranes": albaranes, "facturas": facturas}
         out = {k: [c for c in v if c["cid"] in cids] for k, v in out.items()}
+        if sin_facturas(u):
+            out.pop("facturas", None)   # almacén y compras no ven facturas
         if "*" not in regla_empresas(u):
             # usuarios limitados: no ven ventas entre empresas del grupo
             grupo = ["DISTRIPLUS", "LOGIPAPER", "INGRAF", "FERMASA"]
@@ -531,7 +558,7 @@ _compras.setup_fotos(app, odoo=odoo, current_user=current_user, scope=scope, gua
 def diag(request: Request):
     """Solo Juan: qué archivos hay en datos (nombres y tamaños, nunca el contenido)."""
     if not es_admin(current_user(request)):
-        raise HTTPException(403, "Solo Juan")
+        raise HTTPException(403, "Solo el administrador")
     out = []
     for p in sorted(DATA.iterdir()):
         if p.is_file():

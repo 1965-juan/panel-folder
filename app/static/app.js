@@ -54,7 +54,10 @@ async function load() {
     $('#ncad').textContent = d.caducados.length;
     fill('pedidos', d.pedidos);
     fill('albaranes', d.albaranes);
-    fill('facturas', d.facturas);
+    const verFac = Array.isArray(d.facturas);
+    document.querySelectorAll('.col[data-k="facturas"], .kpi.k-fac').forEach(x => x.hidden = !verFac);
+    d.facturas = d.facturas || [];
+    if (verFac) fill('facturas', d.facturas);
     const sum = (l, k = 'total') => eur(l.reduce((a, c) => a + (c[k] || 0), 0));
     $('#k-pre').textContent = d.presupuestos.length; $('#k-pre-e').textContent = sum(d.presupuestos);
     $('#k-ped').textContent = d.pedidos.length; $('#k-ped-e').textContent = sum(d.pedidos);
