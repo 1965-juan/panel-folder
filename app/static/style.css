@@ -366,3 +366,25 @@ main,.main{padding-bottom:80px}
 .det-mail{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
 .det-mail input{min-width:260px;padding:6px 8px;border:1px solid #cfc6e6;border-radius:8px}
 .det-box table{width:100%;font-size:12px}.det-tot{text-align:right;margin-top:6px;font-size:13px}
+/* ---------- Compras: tablero tipo Trello ---------- */
+.tb-barra{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.tb-barra input{flex:0 1 340px;padding:8px 10px;border:1px solid #d0d3d8;border-radius:8px}
+.tb-ayuda{font-size:12px;margin:2px 0 10px}
+.tb-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:14px;min-height:60vh}
+.tb-col{flex:0 0 280px;background:#efedf6;border-radius:12px;padding:8px;display:flex;flex-direction:column;max-height:76vh}
+.tb-col.over{outline:3px dashed #5b3ea8;background:#e6e0f5}
+.tb-col.tb-grupo{background:#f3efe6}.tb-col.tb-mal{background:#fbe9e9}
+.tb-ch{padding:4px 4px 8px;font-size:14px}.tb-cs{font-size:12px;color:#5a6069;margin-top:2px}
+.tb-list{overflow-y:auto;display:flex;flex-direction:column;gap:7px;min-height:40px;flex:1}
+.tb-card{background:#fff;border-radius:9px;padding:7px 8px;box-shadow:0 1px 2px rgba(0,0,0,.12);cursor:grab;font-size:12px}
+.tb-card.arr{opacity:.4}
+.tb-cn{display:flex;justify-content:space-between;gap:6px}.tb-cn b{font-size:12px;line-height:1.25}
+.tb-x{border:0;background:none;color:#999;cursor:pointer;font-size:12px;padding:0 2px}.tb-x:hover{color:#c00}
+.tb-cm{color:#5a6069;margin-top:3px}.tb-cm input{width:52px;padding:2px 4px;border:1px solid #d0d3d8;border-radius:5px}
+.tb-para{margin-top:3px;color:#5b3ea8;font-weight:600}
+.tb-alt{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}.tb-alt span{background:#f1f2f4;border-radius:5px;padding:1px 5px;font-size:11px;color:#444}
+.tb-aviso{margin-top:4px;color:#b45309;font-size:11px}
+.tb-vacio{color:#999;font-size:12px;text-align:center;margin:12px 0}
+.tb-ok{margin-top:8px;background:#2f7d4f;color:#fff;border:0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600}
+.tb-add{background:transparent;border:2px dashed #cfc6e6}.tb-add input{margin-top:6px;padding:7px;border:1px solid #cfc6e6;border-radius:8px}
+#tb-nps a{display:block;padding:5px 6px;font-size:12px;color:#1f2328;text-decoration:none}#tb-nps a:hover{background:#efeaf8}

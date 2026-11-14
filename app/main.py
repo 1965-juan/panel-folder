@@ -36,7 +36,7 @@ def allowed_users():
     return ENV_USERS + [u for u in extra_users() if u not in ENV_USERS]
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero"]
 
 
 def modulos_de(u):
@@ -47,6 +47,8 @@ def modulos_de(u):
         mods.append("vencimientos")
     if ("ac" in mods or "compras" in mods) and "etiquetas" not in mods:
         mods.append("etiquetas")
+    if ("ac" in mods or "compras" in mods) and "tablero" not in mods:
+        mods.append("tablero")
     return mods
 DEMO = os.environ.get("PANEL_DEMO") == "1"
 odoo = DemoOdoo() if DEMO else Odoo()
@@ -573,3 +575,8 @@ _venc.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scop
 from . import etiquetas as _etq  # noqa: E402
 
 _etq.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- tablero de compras (tipo Trello) ----------
+from . import tablero as _tab  # noqa: E402
+
+_tab.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL)

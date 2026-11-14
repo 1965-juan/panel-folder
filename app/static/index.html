@@ -15,7 +15,8 @@
     <a href="#whatsapp" data-v="whatsapp" data-m="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
     <a href="/presupuestos" data-m="presupuestos">Presupuestos</a>
     <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
-    <a href="#compras" data-v="compras" data-m="compras">Compras <span class="nb" id="nb-co" hidden></span></a>
+    <a href="#tablero" data-v="tablero" data-m="tablero">Compras</a>
+    <a href="#compras" data-v="compras" data-m="compras">Albaranes/Facturas <span class="nb" id="nb-co" hidden></span></a>
     <a href="#facturacion" data-v="facturacion" data-m="facturacion">Facturación</a>
     <a href="#vencimientos" data-v="vencimientos" data-m="vencimientos">Vencimientos</a>
     <a href="#etiquetas" data-v="etiquetas" data-m="etiquetas">Etiquetas</a>
@@ -120,6 +121,16 @@
         <input id="ma-q" type="search" placeholder="Buscar remitente, asunto…"><div id="ma-cts" class="muted"></div><div id="ma-list"></div></div>
       <div class="ma-c" id="ma-c"><p class="empty">Elige un correo de la lista</p></div>
     </div>
+  </section>
+
+  <section id="v-tb" hidden>
+    <div class="tb-barra">
+      <input id="tb-q" type="search" placeholder="Buscar artículo o proveedor…">
+      <span class="muted" id="tb-info"></span>
+      <button class="btn" id="tb-rec">↻ Recargar</button>
+    </div>
+    <p class="muted tb-ayuda">Cada columna es el pedido en borrador de un proveedor. Arrastra un artículo a otra columna para pedírselo a ese proveedor. Con <b>＋ Proveedor</b> abres una columna nueva.</p>
+    <div id="tb-board" class="tb-board"></div>
   </section>
 
   <section id="v-et" hidden>
@@ -256,5 +267,6 @@
 <script src="/static/correo.js"></script>
 <script src="/static/vencimientos.js"></script>
 <script src="/static/etiquetas.js"></script>
+<script src="/static/tablero.js"></script>
 </body>
 </html>
