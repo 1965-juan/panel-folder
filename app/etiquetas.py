@@ -15,6 +15,7 @@ from fastapi import Request, HTTPException
 
 TARIFA_NOMBRE = "Folder Castellón"
 EMPRESA = 1  # DISTRIPLUS: impuestos y tarifa de las tiendas
+TODAS = [1, 2, 3, 4, 5]
 
 
 def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=lambda u: None):
