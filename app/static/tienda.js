@@ -16,17 +16,26 @@ async function tiOpen() {
     (rep.length ? rep.map(r => `<div class="ti-card"><div class="ti-h"><b>${escH(r.ref)}</b><span class="muted">${escH(r.fecha)}</span></div>${tabla(r.lineas)}</div>`).join('')
       : '<p class="empty">No tenéis reposiciones pendientes</p>');
   $('#ti-enc').innerHTML = TI.encargos.length ? TI.encargos.map(o => `<div class="ti-card"><div class="ti-h"><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
+      ${o.contado ? '<span class="bdg b-warn">💶 Contado: cobrar al entregar</span>' : `<span class="bdg">${escH(o.plazo)}: solo servir</span>`}
       <span class="muted">${coDate(o.fecha)} · ${eur(o.total)}</span></div>${tabla(o.lineas)}</div>`).join('') : '<p class="empty">No hay encargos pendientes de servir</p>';
-  $('#ti-cob').innerHTML = TI.por_cobrar.length ? `<table class="co-t ti-t"><tbody>${TI.por_cobrar.map(o => `<tr><td><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
-      <br><small class="muted">${coDate(o.fecha)}${o.factura ? ' · ' + escH(o.factura) : ' · se factura al cobrar'}</small></td><td class="num"><b>${eur(o.importe)}</b></td>
-      <td class="ti-cb"><button class="ac-go" data-c="${o.id}" data-f="caja">💶 Caja</button><button class="ac-go ti-tar" data-c="${o.id}" data-f="tarjeta">💳 TPV banco</button></td></tr>`).join('')}</tbody></table>`
+  const cob = TI.por_cobrar.filter(o => o.contado);
+  $('#ti-cob').innerHTML = cob.length ? `<table class="co-t ti-t"><tbody>${cob.map(o => `<tr><td><b>${escH(o.ref)}</b> ${escH(o.cliente)}${o.ref_cliente ? ` · <i>${escH(o.ref_cliente)}</i>` : ''}
+      <br><small class="muted">${coDate(o.fecha)}${o.factura ? ' · ' + escH(o.factura) : ''}</small></td><td class="num"><b>${eur(o.importe)}</b></td>
+      <td class="ti-cb"><button class="ac-go" data-c="${o.id}">💶 Cobrar en el TPV</button></td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No hay nada servido pendiente de cobrar</p>';
   $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = async () => {
-    const o = TI.por_cobrar.find(x => x.id === +b.dataset.c), caja = b.dataset.f === 'caja';
-    if (!confirm(`¿Cobrar ${eur(o.importe)} de ${o.cliente} (${o.ref}) ${caja ? 'en efectivo, a la caja de la tienda' : 'con tarjeta, por el TPV del banco'}?`)) return;
-    b.disabled = true; b.textContent = 'Cobrando…';
-    try { const r = await jpost('/api/tienda/cobrar', { so_id: o.id, forma: b.dataset.f, t: TI.tienda });
-      alertBox(`Cobrado ${eur(r.importe)} (${r.facturas.join(', ')})`); tiOpen(); } catch (e) { alertBox(e.message); tiOpen(); }
+    const o = cob.find(x => x.id === +b.dataset.c);
+    b.disabled = true; b.textContent = 'Preparando…';
+    try { const r = await jpost('/api/tienda/preparar_cobro', { so_id: o.id, t: TI.tienda });
+      $('#ti-paso').hidden = false;
+      $('#ti-paso').innerHTML = `<b>Cobra ${eur(r.importe)} a ${escH(r.cliente)} en el TPV:</b>
+        <ol><li>Abre el TPV (botón de arriba).</li><li>Pulsa <b>Cliente</b> y elige <b>${escH(r.cliente)}</b>.</li>
+        <li>En la ficha del cliente pulsa <b>Liquidar deuda</b> (o «Settle due») y marca ${r.facturas.length > 1 ? 'las facturas' : 'la factura'} <b>${escH(r.facturas.join(', '))}</b>.</li>
+        <li>Cobra en <b>Efectivo</b> o <b>Tarjeta</b>. El dinero entra en la caja del TPV y el material no se vuelve a descontar.</li></ol>
+        <button class="btn" onclick="this.parentElement.hidden=true">Entendido</button>`;
+      $('#ti-paso').scrollIntoView({ behavior: 'smooth' });
+    } catch (e) { alertBox(e.message); }
+    b.disabled = false; b.textContent = '💶 Cobrar en el TPV';
   });
   $('#ti-info').textContent = `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
 }

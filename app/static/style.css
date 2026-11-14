@@ -412,3 +412,4 @@ label.tb-ok input{width:18px;height:18px}
 .vc-ban{background:#fff3cd;color:#7a5a00;border-radius:8px;padding:6px 8px;font-size:12px;margin:6px 0}
 .mi-clave{display:block;font-size:12px;margin:6px 0;color:inherit;opacity:.85}
 .ti-cb{white-space:nowrap;text-align:right}.ti-cb button{margin-left:6px}.ti-tar{background:#1f6fb2}
+.ti-paso{background:#fff8e6;border:2px solid #e0a32e;border-radius:10px;padding:10px 14px;margin:8px 0;font-size:13px}.ti-paso ol{margin:6px 0 8px 18px}
