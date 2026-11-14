@@ -318,10 +318,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
          "input_schema": {"type": "object", "properties": {"desde": {"type": "string"}, "hasta": {"type": "string"}}, "required": ["desde"]}},
         {"name": "articulos_modificados", "description": "Artículos cuyo precio o tarifa se ha tocado desde una fecha (AAAA-MM-DD). Para 'cambios de precio' o 'catálogo nuevo'.",
          "input_schema": {"type": "object", "properties": {"desde": {"type": "string"}}, "required": ["desde"]}},
-        {"name": "resultado", "description": "Devuelve la lista final de etiquetas. cant = nº de etiquetas de cada artículo (1 por defecto, o la cantidad recibida si lo piden).",
+        {"name": "resultado", "description": "Devuelve la lista final de etiquetas. cant = nº de etiquetas de cada artículo (1 por defecto, o la cantidad recibida si lo piden). Si quieres TODOS los artículos de la última herramienta que has usado, pon usar_ultima_lista=true y no hace falta copiar los ids.",
          "input_schema": {"type": "object", "properties": {"explicacion": {"type": "string", "description": "una frase: qué has sacado y de dónde"},
+                                                            "usar_ultima_lista": {"type": "boolean"},
                                                             "items": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "integer"}, "cant": {"type": "integer"}}, "required": ["id"]}}},
-                          "required": ["explicacion", "items"]}},
+                          "required": ["explicacion"]}},
     ]
 
     @app.post("/api/etiquetas/pedir")
@@ -343,6 +344,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
                        "Lo de 'que tenga stock' lo filtra el panel por tienda: tú devuelve todos los artículos. No inventes ids.")
             msgs = [{"role": "user", "content": texto}]
             recibido = {}
+            ultima = []
             http = httpx.Client(timeout=120)
             for _ in range(10):
                 r = http.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", headers={
@@ -361,6 +363,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
                     a = u.get("input") or {}
                     if u["name"] == "resultado":
                         cant = {}
+                        if a.get("usar_ultima_lista"):
+                            for i in ultima:
+                                cant[i] = 1
                         for x in a.get("items") or []:
                             cant[int(x["id"])] = max(1, int(round(x.get("cant") or 1)))
                         et = datos_etiquetas(list(cant))
@@ -388,6 +393,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, tienda_de=la
                             o = {"error": "herramienta desconocida"}
                     except Exception as e:
                         o = {"error": str(e)[:300]}
+                    if isinstance(o, dict) and o.get("articulos"):
+                        ultima = [x["id"] for x in o["articulos"] if x.get("id")]
+                        if len(o["articulos"]) > 150:   # listas largas: a Claude solo le mandamos un resumen; el panel guarda la lista entera
+                            o = dict(o, articulos=[{"id": x["id"], "nombre": x.get("nombre", "")} for x in o["articulos"][:40]],
+                                     aviso_panel=f"Lista de {len(ultima)} artículos guardada en el panel: si son todos los que piden, llama a resultado con usar_ultima_lista=true")
                     res.append({"type": "tool_result", "tool_use_id": u["id"], "content": json.dumps(o, ensure_ascii=False, default=str)[:60000]})
                 msgs.append({"role": "user", "content": res})
             raise HTTPException(500, "No he terminado de buscar: prueba a concretar más")
