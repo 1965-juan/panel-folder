@@ -23,7 +23,8 @@ function tbPinta() {
       <div class="tb-cn"><b>${escH(l.articulo.replace(/^\[[^\]]*\]\s*/, ''))}</b><button class="tb-x" data-x="${l.id}" title="Quitar del pedido">✕</button></div>
       <div class="tb-cm">${l.ref ? escH(l.ref) + ' · ' : ''}<input type="number" min="0" step="1" value="${+l.cantidad}" data-q="${l.id}"> ${escH(l.ud)} · ${eur(l.precio)}</div>
       ${l.para ? `<div class="tb-para">para ${escH(l.para)}</div>` : ''}
-      ${!este && l.proveedores.length ? '<div class="tb-aviso">⚠️ este proveedor no lo tiene en su ficha</div>' : ''}
+      ${!este ? `<div class="tb-aviso">⚠️ ${l.proveedores.length ? 'este proveedor no está en la ficha del artículo' : 'el artículo no tiene ningún proveedor en su ficha'}
+        <br><a href="#" class="lnk" data-fi="${l.id}">＋ ponerlo en su ficha (${eur(l.precio)})</a> · <a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.product_normal_action_puchased/${l.tmpl_id}">abrir en Odoo ↗</a></div>` : ''}
       ${otros.length ? `<div class="tb-alt">${otros.map(p => `<span title="${escH(p.ref)}">${escH(p.proveedor.split(' ')[0])} ${p.precio ? eur(p.precio) : ''}</span>`).join('')}</div>` : ''}
     </div>`;
   };
@@ -86,6 +87,8 @@ function tbEventos() {
     b.closest('.tb-acu').classList.add('tb-lanzando');
     try { await jpost('/api/tablero/confirmar', { po_id: +b.dataset.po }); tbOpen(false); } catch (e) { b.checked = false; b.closest('.tb-acu').classList.remove('tb-lanzando'); alertBox(e.message); }
   });
+  B.querySelectorAll('[data-fi]').forEach(a => a.onclick = async e => { e.preventDefault();
+    try { const r = await jpost('/api/tablero/ficha', { line_id: +a.dataset.fi }); a.closest('.tb-aviso').innerHTML = `✅ ${escH(r.proveedor)} añadido a la ficha`; } catch (er) { alertBox(er.message); } });
   B.querySelectorAll('[data-oc]').forEach(a => a.onclick = async e => { e.preventDefault();
     if (!confirm('¿Quitar este pedido del tablero? (no se borra de Odoo; es para pedidos de imprenta o servicios que no son material)')) return;
     try { await jpost('/api/tablero/ocultar', { po_id: +a.dataset.oc }); tbOpen(false); } catch (er) { alertBox(er.message); } });

@@ -157,6 +157,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
                 dst = lanzados[l["order_id"][0]]["lineas"] if l["order_id"][0] in lanzados else cols[po_partner[l["order_id"][0]]]["lineas"]
                 dst.append({
                     "id": l["id"], "po_id": l["order_id"][0], "po": l["order_id"][1], "product_id": l["product_id"][0], "articulo": l["product_id"][1],
+                    "tmpl_id": (pr.get("product_tmpl_id") or [0])[0],
                     "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get(uom()) or [0, ""])[1], "precio": l["price_unit"],
                     "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0, "recibido": l.get("qty_received") or 0,
                     "para": (l.get("sale_order_id") or [0, ""])[1] if l.get("sale_order_id") else "",
@@ -167,6 +168,29 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
                 c["lineas"].sort(key=lambda x: x["articulo"].lower())
                 c["lanzados"].sort(key=lambda x: x["fecha"], reverse=True)
             return {"columnas": out, "odoo_url": odoo_url}
+        return guard(run)
+
+    @app.post("/api/tablero/ficha")
+    async def ficha(request: Request):
+        """{line_id}: añade el proveedor del pedido a la ficha del artículo (pestaña Compra de Odoo) con el precio de esa línea."""
+        ctx(request)
+        b = await request.json()
+        lid = int(b.get("line_id") or 0)
+
+        def run():
+            ls = odoo.search_read("purchase.order.line", [("id", "=", lid)], ["product_id", "price_unit", "partner_id", "order_id"], company_ids=[EMPRESA])
+            if not ls:
+                raise HTTPException(404, "No encuentro la línea")
+            l = ls[0]
+            tm = odoo.search_read("product.product", [("id", "=", l["product_id"][0])], ["product_tmpl_id"], company_ids=[EMPRESA])[0]["product_tmpl_id"][0]
+            part = l["partner_id"][0]
+            ya = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "=", tm), ("partner_id", "=", part)], ["id"], company_ids=[EMPRESA], limit=1)
+            if ya:
+                odoo.call("product.supplierinfo", "write", [EMPRESA], ids=[ya[0]["id"]], vals={"price": l["price_unit"]})
+            else:
+                odoo.call("product.supplierinfo", "create", [EMPRESA], vals_list=[{"partner_id": part, "product_tmpl_id": tm, "price": l["price_unit"],
+                                                                                    "min_qty": 0, "company_id": EMPRESA}])
+            return {"ok": True, "proveedor": l["partner_id"][1]}
         return guard(run)
 
     @app.post("/api/tablero/ocultar")
