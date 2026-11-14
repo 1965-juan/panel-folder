@@ -28,11 +28,11 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
         return cache["propias"]
 
     def campos_linea():
-        if "campos" not in cache:
+        if not cache.get("campos"):
             try:
                 cache["campos"] = set(odoo.call("purchase.order.line", "fields_get", [EMPRESA], attributes=["type"]).keys())
             except Exception:
-                cache["campos"] = set()
+                return {"product_uom_id"}  # Odoo 19; se reintenta la próxima vez
         return cache["campos"]
 
     def pedidos_abiertos(partner_id=None):
