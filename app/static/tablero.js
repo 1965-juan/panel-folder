@@ -38,14 +38,14 @@ function tbPinta() {
       <div class="tb-ch"><a href="#" class="tb-pn" data-ab="${c.partner_id}" title="Abrir su pedido en Odoo para añadir material de stock">${escH(c.proveedor)} ↗</a>${c.grupo ? ' <span class="bdg">grupo</span>' : ''}
         ${c.mismo ? '<div class="tb-aviso">⚠️ Distriplus pidiéndose a sí misma: mueve estos artículos a su proveedor</div>' : ''}</div>
       <div class="tb-acu">
-        <div class="tb-sub">🛒 Acumulando · ${po ? `<a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_rfq/${po.id}">${escH(po.nombre)}</a>` : 'sin pedido'} · ${c.lineas.length} art. · ${eur(c.total)}</div>
+        <div class="tb-sub">🛒 Acumulando · ${po ? `<a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_rfq/${po.id}">${escH(po.nombre)}</a>` : 'sin pedido'} · ${c.lineas.length} art. · ${eur(c.total)}${po ? ` · <a class="lnk" target="_blank" href="/tablero/imprimir/${po.id}" title="Imprimir el pedido para el proveedor">🖨 imprimir</a>` : ''}</div>
         <div class="tb-list" data-p="${c.partner_id}">${ls.map(l => tarjeta(l, c)).join('') || '<p class="tb-vacio">Arrastra aquí artículos</p>'}</div>
         ${po && c.lineas.length && !c.mismo ? `<label class="tb-ok"><input type="checkbox" data-po="${po.id}" data-n="${escH(c.proveedor)}"> Lanzar pedido</label>` : ''}
       </div>
       ${lanz.map(z => `<div class="tb-lanz">
         <div class="tb-fl">✔ Lanzado el ${coDate(z.fecha)}</div>
         <div class="tb-cs"><a class="lnk" target="_blank" rel="noopener" href="${TB.odoo_url}/odoo/action-purchase.purchase_form_action/${z.id}">${escH(z.nombre)}</a>
-          · ${z.lineas.length} art. · ${eur(z.total)} · ${z.recepcion === 'partial' ? 'recibido en parte' : 'esperando que llegue'}</div>
+          · ${z.lineas.length} art. · ${eur(z.total)} · ${z.recepcion === 'partial' ? 'recibido en parte' : 'esperando que llegue'} · <a class="lnk" target="_blank" href="/tablero/imprimir/${z.id}">🖨 imprimir</a></div>
         <a href="#" class="lnk tb-oc" data-oc="${z.id}" title="No es un pedido de material (imprenta, servicios…): quitarlo del tablero">🙈 no es de material</a>
         <details><summary>ver artículos</summary>${z.lineas.map(l => `<div class="tb-card tb-fija"><b>${escH(l.articulo.replace(/^\[[^\]]*\]\s*/, ''))}</b>
           <div class="tb-cm">${l.ref ? escH(l.ref) + ' · ' : ''}${+l.cantidad} ${escH(l.ud)} · ${eur(l.precio)}${l.recibido ? ` · <b>recibidas ${+l.recibido}</b>` : ''}</div></div>`).join('')}</details>

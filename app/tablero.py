@@ -4,11 +4,17 @@ Todo en DISTRIPLUS (empresa 1), que es quien compra.
 """
 import threading
 
+import html as _h
+import re as _re
+
 from fastapi import Request, HTTPException
+from fastapi.responses import HTMLResponse
 
 EMPRESA = 1
 TODAS = [1, 2, 3, 4, 5]
 ABIERTOS = ["draft", "sent"]
+# stock que se enseña al imprimir: (título, empresa, ubicación)
+STOCKS = [("Almacén", 1, 8), ("Tienda 1", 1, 34), ("Tienda 2", 1, 40), ("T. Logipaper", 4, 46)]
 
 
 def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
@@ -182,6 +188,80 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             po = pedido_de(pid)
             return {"po_id": po, "url": f"{odoo_url}/odoo/action-purchase.purchase_rfq/{po}"}
         return guard(run)
+
+    @app.get("/tablero/imprimir/{po_id}", response_class=HTMLResponse)
+    def imprimir(po_id: int, request: Request):
+        """Hoja del pedido de compra para pasarla al proveedor: ref. Folder, ref. proveedor, descripción y cantidad,
+        y al final (opcional) el stock de almacén y de las 3 tiendas por si hay que pedir alguna unidad más."""
+        ctx(request)
+
+        def run():
+            po = odoo.search_read("purchase.order", [("id", "=", po_id), ("company_id", "=", EMPRESA)],
+                                  ["name", "partner_id", "date_order", "date_approve", "state", "order_line", "notes"], company_ids=[EMPRESA])
+            if not po:
+                raise HTTPException(404, "No encuentro el pedido")
+            po = po[0]
+            ls = [l for l in leer_lineas(po["order_line"]) if not l.get("display_type") and l.get("product_id")]
+            pids = list({l["product_id"][0] for l in ls})
+            pr = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids)], ["default_code", "name", "product_tmpl_id"],
+                                                        company_ids=TODAS)} if pids else {}
+            part = odoo.search_read("res.partner", [("id", "=", po["partner_id"][0])], ["commercial_partner_id", "email", "phone"], company_ids=TODAS)[0]
+            provs = {po["partner_id"][0], part["commercial_partner_id"][0]}
+            tm = list({p["product_tmpl_id"][0] for p in pr.values()})
+            refp = {}
+            for si in (odoo.search_read("product.supplierinfo", [("product_tmpl_id", "in", tm), ("partner_id", "in", list(provs))],
+                                        ["product_tmpl_id", "product_id", "product_code", "product_name"], company_ids=TODAS) if tm else []):
+                if si.get("product_code"):
+                    refp.setdefault(si["product_tmpl_id"][0], si["product_code"])
+            st = {}
+            for tit, emp, loc in STOCKS:
+                try:
+                    for q in odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id", "child_of", loc)], ["product_id", "quantity"],
+                                              company_ids=[emp]):
+                        st[(q["product_id"][0], tit)] = st.get((q["product_id"][0], tit), 0) + q["quantity"]
+                except Exception:
+                    pass
+            emp = odoo.search_read("res.company", [("id", "=", EMPRESA)], ["name", "vat", "street", "zip", "city", "phone", "email"], company_ids=[EMPRESA])[0]
+            return po, ls, pr, refp, st, emp, part
+        po, ls, pr, refp, st, emp, part = guard(run)
+        e = lambda x: _h.escape(str(x or ""))
+        n = lambda x: (f"{x:g}".replace(".", ",") if isinstance(x, (int, float)) else "")
+        filas = []
+        for l in sorted(ls, key=lambda l: (pr.get(l["product_id"][0], {}).get("default_code") or "zzz", l["name"])):
+            p = pr.get(l["product_id"][0], {})
+            desc = _re.sub(r"^\[[^\]]*\]\s*", "", p.get("name") or l["name"])
+            stock = "".join(f'<td class="n s{" sep" if k == 0 else ""}">{n(round(st.get((l["product_id"][0], t), 0), 2))}</td>' for k, (t, _, _) in enumerate(STOCKS))
+            filas.append(f'<tr><td>{e(p.get("default_code"))}</td><td>{e(refp.get((p.get("product_tmpl_id") or [0])[0]))}</td><td>{e(desc)}</td>'
+                         f'<td class="n"><b>{n(l["product_qty"])}</b></td><td>{e((l.get(uom()) or [0, ""])[1])}</td>{stock}</tr>')
+        fecha = (po.get("date_approve") or po.get("date_order") or "")[:10]
+        fecha = "/".join(reversed(fecha.split("-"))) if fecha else ""
+        cab_st = "".join(f'<th class="n s">{t}</th>' for t, _, _ in STOCKS)
+        dir_ = ", ".join(x for x in [emp.get("street"), " ".join(x for x in [emp.get("zip"), emp.get("city")] if x)] if x)
+        page = f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Pedido {e(po['name'])} · {e(po['partner_id'][1])}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{{font:13px/1.35 -apple-system,Segoe UI,Arial,sans-serif;color:#222;background:#fff;margin:24px}}
+.bar{{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap}} .bar button{{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #6b3fa0;background:#6b3fa0;color:#fff;cursor:pointer}}
+.bar button.b2{{background:#fff;color:#6b3fa0}} .bar label{{margin-left:6px}}
+h1{{font-size:20px;margin:0 0 2px;color:#6b3fa0}} .top{{display:flex;justify-content:space-between;gap:20px;border-bottom:3px solid #f08a24;padding-bottom:10px;margin-bottom:14px}}
+.muted{{color:#666}} table{{width:100%;border-collapse:collapse}} th,td{{border-bottom:1px solid #ddd;padding:5px 6px;text-align:left;vertical-align:top}}
+th{{background:#f3eef9;font-size:12px}} .n{{text-align:right;white-space:nowrap}} .s{{color:#555;background:#fafafa}} th.s{{background:#eee}}
+.sep{{border-left:2px solid #999}} .pie{{margin-top:16px;font-size:12px}}
+body.sin .s{{display:none}}
+@media print{{.bar{{display:none}} body{{margin:10mm}}}}
+</style></head><body>
+<div class="bar"><button onclick="document.body.classList.add('sin');print()">🖨 Imprimir para el proveedor</button>
+<button class="b2" onclick="document.body.classList.remove('sin');print()">🖨 Imprimir con stock</button>
+<label><input type="checkbox" checked onchange="document.body.classList.toggle('sin',!this.checked)"> ver stock de almacén y tiendas</label></div>
+<div class="top"><div><h1>Pedido de compra {e(po['name'])}</h1><div class="muted">Fecha: {fecha}</div>
+<div style="margin-top:8px"><b>Proveedor:</b> {e(po['partner_id'][1])}<br><span class="muted">{e(part.get('email'))} {e(part.get('phone'))}</span></div></div>
+<div style="text-align:right"><b>{e(emp['name'])}</b><br>{e(emp.get('vat'))}<br>{e(dir_)}<br>{e(emp.get('phone'))} {e(emp.get('email'))}<br><span class="muted">Folder Castellón</span></div></div>
+<table><thead><tr><th>Ref. Folder</th><th>Ref. proveedor</th><th>Descripción</th><th class="n">Cantidad</th><th>Ud.</th>{cab_st.replace('<th class="n s">', '<th class="n s sep">', 1)}</tr></thead>
+<tbody>{''.join(filas)}</tbody></table>
+<p class="pie">{len(filas)} líneas. Entregar en: {e(emp['name'])}, {e(dir_)}. Por favor, indiquen nuestro nº de pedido <b>{e(po['name'])}</b> en el albarán.</p>
+<p class="pie s muted">Stock a día de hoy (no sale al imprimir para el proveedor).</p>
+</body></html>"""
+        return HTMLResponse(page)
 
     @app.post("/api/tablero/ficha")
     async def ficha(request: Request):
