@@ -127,30 +127,35 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                 if not prev or (s["price"] and s["price"] < prev["precio"]):
                     por_tmpl[s["product_tmpl_id"][0]][s["partner_id"][0]] = {"partner_id": s["partner_id"][0], "proveedor": s["partner_id"][1], "precio": s["price"],
                                                                              "ref": s.get("product_code") or ""}
-            cols = {}
+            cols, lanzados = {}, {}
             for p in pos:
-                lanzado = p["state"] == "purchase"
-                k = ("L", p["id"]) if lanzado else p["partner_id"][0]
-                col = cols.setdefault(k, {"partner_id": p["partner_id"][0], "proveedor": p["partner_id"][1], "pedidos": [], "lineas": [], "total": 0,
-                                          "grupo": p["partner_id"][0] in prop, "mismo": prop.get(p["partner_id"][0]) == EMPRESA,
-                                          "lanzado": lanzado, "fecha_lanzado": (p.get("date_approve") or "")[:10] if lanzado else "",
-                                          "recepcion": p.get("receipt_status") or ""})
-                col["pedidos"].append({"id": p["id"], "nombre": p["name"], "estado": p["state"], "origen": p.get("origin") or ""})
-                col["total"] += p.get("amount_untaxed") or 0
-            po_partner = {p["id"]: (("L", p["id"]) if p["state"] == "purchase" else p["partner_id"][0]) for p in pos}
+                k = p["partner_id"][0]
+                col = cols.setdefault(k, {"partner_id": k, "proveedor": p["partner_id"][1], "pedidos": [], "lineas": [], "total": 0, "lanzados": [],
+                                          "grupo": k in prop, "mismo": prop.get(k) == EMPRESA})
+                if p["state"] == "purchase":
+                    lz = {"id": p["id"], "nombre": p["name"], "fecha": (p.get("date_approve") or "")[:10], "recepcion": p.get("receipt_status") or "",
+                          "total": round(p.get("amount_untaxed") or 0, 2), "lineas": []}
+                    col["lanzados"].append(lz)
+                    lanzados[p["id"]] = lz
+                else:
+                    col["pedidos"].append({"id": p["id"], "nombre": p["name"], "estado": p["state"], "origen": p.get("origin") or ""})
+                    col["total"] += p.get("amount_untaxed") or 0
+            po_partner = {p["id"]: p["partner_id"][0] for p in pos}
             for l in ls:
                 pr = prods.get(l["product_id"][0], {})
                 alt = por_tmpl.get((pr.get("product_tmpl_id") or [0])[0], {})
-                cols[po_partner[l["order_id"][0]]]["lineas"].append({
+                dst = lanzados[l["order_id"][0]]["lineas"] if l["order_id"][0] in lanzados else cols[po_partner[l["order_id"][0]]]["lineas"]
+                dst.append({
                     "id": l["id"], "po_id": l["order_id"][0], "po": l["order_id"][1], "product_id": l["product_id"][0], "articulo": l["product_id"][1],
                     "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get(uom()) or [0, ""])[1], "precio": l["price_unit"],
                     "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0, "recibido": l.get("qty_received") or 0,
                     "para": (l.get("sale_order_id") or [0, ""])[1] if l.get("sale_order_id") else "",
                     "proveedores": sorted(alt.values(), key=lambda x: (x["precio"] or 9e9))})
-            out = sorted(cols.values(), key=lambda c: (c["lanzado"], c["grupo"], c["proveedor"].lower(), c["fecha_lanzado"]))
+            out = sorted(cols.values(), key=lambda c: (c["grupo"], not c["lineas"], c["proveedor"].lower()))
             for c in out:
                 c["total"] = round(c["total"], 2)
                 c["lineas"].sort(key=lambda x: x["articulo"].lower())
+                c["lanzados"].sort(key=lambda x: x["fecha"], reverse=True)
             return {"columnas": out, "odoo_url": odoo_url}
         return guard(run)
 

@@ -371,11 +371,11 @@ main,.main{padding-bottom:80px}
 .tb-barra input{flex:0 1 340px;padding:8px 10px;border:1px solid #d0d3d8;border-radius:8px}
 .tb-ayuda{font-size:12px;margin:2px 0 10px}
 .tb-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:14px;min-height:60vh}
-.tb-col{flex:0 0 280px;background:#efedf6;border-radius:12px;padding:8px;display:flex;flex-direction:column;max-height:76vh}
+.tb-col{flex:0 0 280px;background:#efedf6;border-radius:12px;padding:8px;display:flex;flex-direction:column;max-height:80vh}
 .tb-col.over{outline:3px dashed #5b3ea8;background:#e6e0f5}
 .tb-col.tb-grupo{background:#f3efe6}.tb-col.tb-mal{background:#fbe9e9}
 .tb-ch{padding:4px 4px 8px;font-size:14px}.tb-cs{font-size:12px;color:#5a6069;margin-top:2px}
-.tb-list{overflow-y:auto;display:flex;flex-direction:column;gap:7px;min-height:40px;flex:1}
+.tb-list{overflow-y:auto;display:flex;flex-direction:column;gap:7px;min-height:40px;max-height:52vh}
 .tb-card{background:#fff;border-radius:9px;padding:7px 8px;box-shadow:0 1px 2px rgba(0,0,0,.12);cursor:grab;font-size:12px}
 .tb-card.arr{opacity:.4}
 .tb-cn{display:flex;justify-content:space-between;gap:6px}.tb-cn b{font-size:12px;line-height:1.25}
@@ -389,7 +389,13 @@ main,.main{padding-bottom:80px}
 .tb-add{background:transparent;border:2px dashed #cfc6e6}.tb-add input{margin-top:6px;padding:7px;border:1px solid #cfc6e6;border-radius:8px}
 #tb-nps a{display:block;padding:5px 6px;font-size:12px;color:#1f2328;text-decoration:none}#tb-nps a:hover{background:#efeaf8}
 
-.tb-col.tb-lanz{background:#e3f4e8;border:2px solid #2f7d4f}
+.tb-col{overflow-y:auto}
+.tb-acu{display:flex;flex-direction:column;background:#f7f5fc;border-radius:9px;padding:6px}
+.tb-acu.tb-lanzando{background:#e3f4e8}
+.tb-sub{font-size:12px;color:#5b3ea8;font-weight:600;margin:0 2px 6px}
+.tb-lanz{margin-top:10px;background:#e3f4e8;border:2px solid #2f7d4f;border-radius:9px;padding:7px}
+.tb-lanz .tb-cs{margin:4px 0}.tb-lanz details summary{cursor:pointer;font-size:12px;color:#2f7d4f;margin:4px 0}
+.tb-lanz .tb-card{margin-top:5px}
 .tb-fl{display:inline-block;margin-top:4px;background:#2f7d4f;color:#fff;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700}
 .tb-card.tb-fija{cursor:default;opacity:.9}
 label.tb-ok{display:flex;gap:8px;align-items:center;justify-content:center}
