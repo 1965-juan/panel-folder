@@ -36,6 +36,7 @@ def extra_users():
 ADMIN = "administrador"
 PERFILES = {
     ADMIN: {"empresas": ["*"], "modulos": None},
+    "contabilidad": {"empresas": ["*"], "modulos": None},   # ve lo mismo que el administrador
     "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
     "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
 }
