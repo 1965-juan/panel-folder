@@ -103,7 +103,7 @@ function acLine(g, l, locs, i) {
       <span data-fill="${x.id}" class="stk ${s > 0 ? (x.read_only ? 'vp' : 'si can') : 'no'}" title="Stock en ${escH(x.name)}${s > 0 && !x.read_only ? ' · pulsa para coger' : ''}">${acNum(s)}</span>
       ${x.read_only ? '<span class="hueco"></span>' : `<input type="number" min="0" step="any" data-loc="${x.id}" value="${sel[x.id] || 0}" ${s > 0 ? '' : 'disabled'}>`}</td>`; }).join('')}
     <td class="acts"><button class="prv" title="Pedir a proveedor">Prov.</button><button class="del" title="Quitar la línea">🗑</button><button class="val">Validar</button></td>`;
-  r.querySelector('.art').textContent = l.product_name;
+  r.querySelector('.art').textContent = l.product_name; r.querySelector('.art').title = l.product_name;
   r.querySelector('.art').title = l.product_name + (l.product_barcode ? ' · ' + l.product_barcode : '');
   const save = () => {
     const t = {}; r.querySelectorAll('input[data-loc]').forEach(i => { const v = parseFloat(i.value); if (v > 0) t[i.dataset.loc] = v; });
