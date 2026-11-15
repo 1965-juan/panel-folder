@@ -25,7 +25,7 @@ function card(c) {
   if (c.estado === 'caducado') foot += ` · caducó ${fdate(c.caduca)}`;
   if (c.estado === 'pedido' && c.entrega === 'partial') foot += ' · servido en parte';
   if (c.model === 'account.move' && !c.borrador) foot += ` · vence ${fdate(c.vence)}` + (c.vencida ? ' (vencida)' : '');
-  if (c.borrador) foot += c.origen ? ` · ${c.origen}` : '';
+  if (c.borrador && c.origen) { const o = c.origen.split(/,\s*/); foot += ` · ${o.slice(0, 2).join(', ')}${o.length > 2 ? ` y ${o.length - 2} más` : ''}`; }
   d.innerHTML = `<div class="c1"><span class="ref"></span>${right}</div>
     <div class="cli"></div><div class="c3"><span class="emp"></span><span>${foot}</span></div>`;
   d.querySelector('.ref').textContent = c.ref;
