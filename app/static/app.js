@@ -24,11 +24,13 @@ function card(c) {
   if (c.estado === 'presupuesto' && c.caduca) foot += ` · válido hasta ${fdate(c.caduca)}`;
   if (c.estado === 'caducado') foot += ` · caducó ${fdate(c.caduca)}`;
   if (c.estado === 'pedido' && c.entrega === 'partial') foot += ' · servido en parte';
-  if (c.model === 'account.move') foot += ` · vence ${fdate(c.vence)}` + (c.vencida ? ' (vencida)' : '');
+  if (c.model === 'account.move' && !c.borrador) foot += ` · vence ${fdate(c.vence)}` + (c.vencida ? ' (vencida)' : '');
+  if (c.borrador) foot += c.origen ? ` · ${c.origen}` : '';
   d.innerHTML = `<div class="c1"><span class="ref"></span>${right}</div>
     <div class="cli"></div><div class="c3"><span class="emp"></span><span>${foot}</span></div>`;
   d.querySelector('.ref').textContent = c.ref;
   if (c.enviado || c.reclamado) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Enviado${/\d/.test(c.enviado) ? ' ' + fdate(c.enviado) : ''}</span>` : ''}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado ${fdate(c.reclamado)}</span>` : ''}</div>`);
+  if (c.borrador) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.su_ref ? `<span class="mk mk-env">ORD ${escH(c.su_ref)}</span><span class="mk">Sin validar</span>` : '<span class="mk mk-rec">⚠ Falta la ORD / ref. cliente</span>'}</div>`);
   if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
@@ -59,6 +61,10 @@ async function load() {
     document.querySelectorAll('.col[data-k="facturas"], .kpi.k-fac').forEach(x => x.hidden = !verFac);
     d.facturas = d.facturas || [];
     if (verFac) fill('facturas', d.facturas);
+    d.borradores = d.borradores || [];
+    if (verFac) fill('facturas', d.borradores, '.cards.bor');
+    $('#nbor').textContent = d.borradores.length;
+    $('#tgbor').classList.toggle('hay', d.borradores.some(b => !b.su_ref));
     const sum = (l, k = 'total') => eur(l.reduce((a, c) => a + (c[k] || 0), 0));
     $('#k-pre').textContent = d.presupuestos.length; $('#k-pre-e').textContent = sum(d.presupuestos);
     $('#k-ped').textContent = d.pedidos.length; $('#k-ped-e').textContent = sum(d.pedidos);
@@ -77,7 +83,12 @@ async function openDetail(c) {
   const tb = $('#d-lines tbody'); tb.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
   $('#d-hist').innerHTML = ''; $('#d-acc').innerHTML = '';
   $('#drawer').hidden = false;
-  if (c.model !== 'sale.order') { tb.innerHTML = '<tr><td colspan="5">Para ver la factura, ábrela en Odoo.</td></tr>'; return; }
+  if (c.model !== 'sale.order') {
+    tb.innerHTML = c.borrador
+      ? `<tr><td colspan="5">Factura en borrador${c.su_ref ? ' (ORD ' + escH(c.su_ref) + ')' : ' <b>sin la ORD del cliente</b>'}. Ábrela en Odoo, rellena «Referencia del cliente», pulsa <b>Confirmar</b> y luego <b>Enviar</b>.</td></tr>`
+      : '<tr><td colspan="5">Para ver la factura, ábrela en Odoo.</td></tr>';
+    return;
+  }
   try {
     const d = await api(`/api/ventas/${c.id}?company=${company}`);
     dAcciones(c, d);
@@ -234,6 +245,7 @@ setInterval(() => waBadge(), 60 * 1000);
 $('#close').onclick = () => $('#drawer').hidden = true;
 $('#drawer').onclick = e => { if (e.target.id === 'drawer') $('#drawer').hidden = true; };
 $('#reload').onclick = () => route();
+$('#tgbor').onclick = () => { const b = document.querySelector('.cards.bor'); b.hidden = !b.hidden; };
 $('#tgcad').onclick = () => { const b = document.querySelector('.cards.cad'); b.hidden = !b.hidden; };
 let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 400); };
 $('#company').onchange = e => { company = e.target.value; try { localStorage.setItem('pf_company', company); } catch (x) {} route(); };

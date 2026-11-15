@@ -523,6 +523,22 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             "cid": r["company_id"][0] if r.get("company_id") else None,
             "vencida": bool(r.get("invoice_date_due") and r["invoice_date_due"] < today),
         } for r in inv]
+        # facturas que se han quedado en borrador (normalmente por falta de la ORD / referencia del cliente): sin validar ni enviar
+        bor = odoo.search_read(
+            "account.move",
+            cd + [("partner_id", "ilike", q)] * bool(q) + [("move_type", "in", ["out_invoice", "out_refund"]), ("state", "=", "draft")],
+            ["name", "partner_id", "invoice_date", "create_date", "amount_total", "company_id", "invoice_origin", "ref", "move_type"],
+            cids, limit=300, order="create_date desc")
+        borradores = [{
+            "id": r["id"], "model": "account.move", "ref": (r["name"] if r.get("name") not in (False, "/") else "Borrador") + (" (abono)" if r.get("move_type") == "out_refund" else ""),
+            "cliente": r["partner_id"][1] if r.get("partner_id") else "",
+            "fecha": r.get("invoice_date") or (r.get("create_date") or "")[:10], "vence": "",
+            "total": r.get("amount_total") or 0, "pendiente": r.get("amount_total") or 0,
+            "empresa": short_company(r["company_id"][1] if r.get("company_id") else ""),
+            "origen": r.get("invoice_origin") or "", "su_ref": r.get("ref") or "", "borrador": True,
+            "cid": r["company_id"][0] if r.get("company_id") else None, "vencida": False,
+        } for r in bor]
+        borradores.sort(key=lambda c: (bool(c["su_ref"]), c["fecha"]))   # primero las que no tienen la ORD
         # marcas de lo hecho con cada presupuesto: enviado al cliente y reclamado (sin confirmar)
         pids = [c["id"] for c in presu + caduc]
         if pids:
@@ -545,11 +561,12 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["enviado"] = mk.get("enviado") or ("sí" if st.get(c["id"]) == "sent" else "")
                 c["reclamado"] = mk.get("reclamado", "")
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
-               "albaranes": albaranes, "facturas": facturas}
+               "albaranes": albaranes, "facturas": facturas, "borradores": borradores}
         ocul = _ventas_ocultas()
         out = {k: [c for c in v if c["cid"] in cids and not (c.get("model") == "sale.order" and c["id"] in ocul)] for k, v in out.items()}
         if sin_facturas(u):
             out.pop("facturas", None)   # almacén y compras no ven facturas
+            out.pop("borradores", None)
         if "*" not in regla_empresas(u):
             # usuarios limitados: no ven ventas entre empresas del grupo
             grupo = ["DISTRIPLUS", "LOGIPAPER", "INGRAF", "FERMASA"]

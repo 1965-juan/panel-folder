@@ -454,3 +454,6 @@ label.tb-ok input{width:18px;height:18px}
 #wc-sug{position:absolute;right:0;top:100%;background:var(--card,#fff);box-shadow:0 6px 18px rgba(0,0,0,.15);border-radius:8px;z-index:20;min-width:260px}
 #wc-sug a{display:block;padding:6px 10px}#wc-sug a:hover{background:#f3eef9}
 .wc-t td{vertical-align:top}.wc-t{overflow-x:auto;display:block}
+.tg-bor{display:block}
+.tg-bor.hay{color:#c0392b;font-weight:600}
+.cards.bor{border-left:3px solid #f39200;padding-left:6px;margin-bottom:12px}
