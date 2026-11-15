@@ -721,7 +721,7 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     except Exception:
         b = {}
     acc = b.get("accion")
-    if acc not in ("cancelar", "cerrar_resto", "ocultar"):
+    if acc not in ("cancelar", "cerrar_resto", "ocultar", "servir"):
         raise HTTPException(400, "Acción no válida")
 
     def run():
@@ -739,6 +739,28 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
                 raise HTTPException(400, "Este pedido ya tiene material servido: usa «Dar por terminado» para cancelar solo lo que falta")
             odoo.call("sale.order", "action_cancel", [c], ids=[oid], context={"disable_cancel_warning": True})
             return {"ok": True, "mensaje": f"{so['name']} cancelado en Odoo (se puede recuperar desde Odoo si hiciera falta)"}
+        if acc == "servir":
+            # se da por servido TODO lo pendiente del pedido: se valida el albarán con las cantidades pedidas (sin pedido pendiente)
+            pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("picking_type_code", "=", "outgoing"), ("state", "not in", ["done", "cancel"])],
+                                  ["name"], [c])
+            if not pk:
+                raise HTTPException(400, f"{so['name']} no tiene albaranes pendientes de servir")
+            ids = [p["id"] for p in pk]
+            try:
+                odoo.call("stock.picking", "action_assign", [c], ids=ids)
+            except Exception:
+                pass
+            for m in odoo.search_read("stock.move", [("picking_id", "in", ids), ("state", "not in", ["done", "cancel"])], ["product_uom_qty"], [c], limit=2000):
+                odoo.call("stock.move", "write", [c], ids=[m["id"]], vals={"quantity": m["product_uom_qty"], "picked": True})
+            ctx = {"skip_backorder": True, "picking_ids_not_to_backorder": ids, "skip_sms": True, "skip_expired": True}
+            res = odoo.call("stock.picking", "button_validate", [c], ids=ids, context=ctx)
+            hechos = odoo.search_read("stock.picking", [("id", "in", ids)], ["name", "state"], [c])
+            ok = [p for p in hechos if p["state"] == "done"]
+            if len(ok) < len(hechos):
+                falta = ", ".join(p["name"] for p in hechos if p["state"] != "done")
+                raise HTTPException(400, f"Odoo no ha dejado validar {falta}" + (" (pide confirmar algo: ábrelo en Odoo)" if isinstance(res, dict) else ""))
+            return {"ok": True, "mensaje": f"{so['name']} servido: albarán {', '.join(p['name'] for p in ok)} validado. Pasa a Albaranes (pendiente de facturar).",
+                    "albaranes": [{"id": p["id"], "nombre": p["name"]} for p in ok], "cid": c}
         # cerrar_resto
         pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("state", "not in", ["done", "cancel"])], ["name"], [c])
         if not pk:   # lo pendiente no tiene albarán (se canceló o nunca se generó): solo se quita del panel

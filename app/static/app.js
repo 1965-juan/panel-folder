@@ -118,6 +118,9 @@ async function openDetail(c) {
   } catch (e) { tb.innerHTML = `<tr><td colspan="5">${e.message}</td></tr>`; }
 }
 
+// el PDF del albarán se abre en la empresa del pedido (si no, Odoo da «403 registros ultrasecretos» con otra empresa activa)
+const albPdf = (id, cid) => `${ODOO}/report/pdf/stock.report_deliveryslip/${id}` + (cid ? `?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [cid] }))}` : '');
+
 function dAcciones(c, d) {
   const A = $('#d-acc'); let h = '';
   if (d.estado === 'draft' || d.estado === 'sent') {
@@ -132,13 +135,15 @@ function dAcciones(c, d) {
   }
   if (d.albaranes && d.albaranes.length) {
     const est = { draft: 'borrador', waiting: 'esperando', confirmed: 'esperando material', assigned: 'listo para servir', done: 'servido' };
-    h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${ODOO}/report/pdf/stock.report_deliveryslip/${a.id}">🖨 Albarán ${escH(a.nombre)}</a>
+    h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${albPdf(a.id, c.cid)}">🖨 Albarán ${escH(a.nombre)}</a>
       <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
   }
   if (c.model === 'sale.order') {
     const bs = [];
     if (d.estado === 'draft' || d.estado === 'sent') bs.push(['cancelar', '🗑 Eliminar presupuesto', `¿Eliminar el presupuesto ${c.ref}? (se cancela en Odoo)`]);
     else if (c.estado === 'pedido' && c.entrega !== 'partial') bs.push(['cancelar', '🗑 Cancelar pedido', `¿Cancelar el pedido ${c.ref}? No se ha servido nada.`]);
+    if (c.estado === 'pedido' && (d.albaranes || []).some(a => !['done', 'cancel'].includes(a.estado)))
+      bs.unshift(['servir', '🚚 Servido: validar albarán y pasar a Albaranes', `¿Dar por servido TODO lo pendiente de ${c.ref}? Se valida el albarán en Odoo con las cantidades del pedido (descuenta stock) y pasa a Albaranes para facturar.`]);
     if (c.estado === 'pedido' && c.entrega === 'partial') bs.push(['cerrar_resto', '✂️ Dar por terminado (cancelar lo que falta)', `¿Cancelar lo que falta por servir de ${c.ref}? Lo ya servido pasará a pendiente de facturar.`]);
     bs.push(['ocultar', '🙈 Archivar del panel', `¿Quitar ${c.ref} del panel? En Odoo no se toca nada.`]);
     h += `<div class="d-del">${bs.map(x => `<button class="btn" data-ac="${x[0]}" data-q="${escH(x[2])}">${x[1]}</button>`).join('')}</div>`;
@@ -147,7 +152,9 @@ function dAcciones(c, d) {
   A.querySelectorAll('[data-ac]').forEach(x => x.onclick = async () => {
     if (!confirm(x.dataset.q)) return;
     x.disabled = true;
-    try { const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: x.dataset.ac }); alertBox(r.mensaje); $('#drawer').hidden = true; load(); }
+    try { const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: x.dataset.ac });
+      alertBox(r.mensaje); $('#drawer').hidden = true; load();
+      if (r.albaranes) r.albaranes.forEach(a => window.open(albPdf(a.id, r.cid), '_blank')); }
     catch (e) { alertBox(e.message); x.disabled = false; }
   });
   A.querySelectorAll('[data-m]').forEach(m => m.onclick = async () => {
