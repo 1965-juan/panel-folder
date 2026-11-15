@@ -459,3 +459,4 @@ label.tb-ok input{width:18px;height:18px}
 #v-ventas>.kpis:has(.k-fac[hidden]){grid-template-columns:repeat(3,1fr)}
 #v-ventas>.kpis{grid-template-columns:repeat(5,1fr)}#v-ventas>.board{grid-template-columns:repeat(5,minmax(190px,1fr))}
 @media (max-width:900px){#v-ventas>.kpis,#v-ventas>.board{grid-template-columns:1fr 1fr}}
+.d-acc .d-fac{display:flex;flex-direction:column;gap:6px;padding:10px;margin:8px 0;background:#f6f1fb;border-radius:8px}.d-fac label{display:flex;flex-direction:column;gap:2px;font-size:13px}.d-fac label:has(input[type=checkbox]){flex-direction:row;align-items:center;gap:6px}.d-fac select,.d-fac input:not([type=checkbox]){padding:6px;border:1px solid #ccc;border-radius:6px;font:inherit}

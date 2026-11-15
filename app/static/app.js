@@ -138,6 +138,16 @@ function dAcciones(c, d) {
     h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${albPdf(a.id, c.cid)}">🖨 Albarán ${escH(a.nombre)}</a>
       <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
   }
+  if (d.facturar) {
+    const hoy = new Date().toISOString().slice(0, 10);
+    h += `<div class="d-fac"><b>🧾 Facturar lo servido</b>
+      <label>Serie <select id="f-dia">${(d.diarios || []).map(j => `<option value="${j.id}">${escH(j.nombre)}</option>`).join('')}</select></label>
+      <label>Fecha factura <input type="date" id="f-fec" value="${hoy}"></label>
+      ${d.pide_ord ? `<label>ORD / nº pedido del cliente (Gimeno) <input id="f-ref" value="${escH(/^S\d{4,}$/i.test(d.su_ref || '') ? '' : (d.su_ref || ''))}" placeholder="obligatorio para subirla a su plataforma"></label>`
+        : `<label>Ref. cliente (opcional) <input id="f-ref" value="${escH(d.su_ref || '')}"></label>`}
+      <label><input type="checkbox" id="f-env" ${d.email_factura ? 'checked' : 'disabled'}> Enviar la factura por email ${d.email_factura ? `<small class="muted">(${escH(d.email_factura)})</small>` : '<small class="muted">(el cliente no tiene email)</small>'}</label>
+      <div class="d-mails"><button class="ac-go" id="f-go">🧾 Facturar${d.email_factura ? ' y enviar' : ''}</button><button class="btn" id="f-bor">Dejar en borrador</button></div></div>`;
+  }
   if (c.model === 'sale.order') {
     const bs = [];
     if (d.estado === 'draft' || d.estado === 'sent') bs.push(['cancelar', '🗑 Eliminar presupuesto', `¿Eliminar el presupuesto ${c.ref}? (se cancela en Odoo)`]);
@@ -164,6 +174,19 @@ function dAcciones(c, d) {
     try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: m.dataset.m }); m.textContent = '✅ Enviado'; alertBox(`Email enviado a ${d.email}`); load(); }
     catch (e) { alertBox(e.message); m.disabled = false; m.textContent = t0; }
   });
+  const fac = async borrador => {
+    const ref = ($('#f-ref').value || '').trim(), env = $('#f-env').checked && !borrador;
+    const dia = $('#f-dia'), serie = dia.options[dia.selectedIndex]?.text || '';
+    if (!borrador && d.pide_ord && !ref) { if (!confirm('Es del Grupo Gimeno y no tiene ORD: sin ella no la aceptan en su plataforma. ¿Dejarla en borrador hasta tener la ORD?')) return; return fac(true); }
+    if (!confirm(borrador ? `¿Crear la factura de ${c.ref} en borrador (${serie})?` : `¿Facturar ${c.ref} en ${serie} con fecha ${fdate($('#f-fec').value)}${env ? ` y enviarla a ${d.email_factura}` : ''}?`)) return;
+    const bt = $('#f-go'); bt.disabled = true; bt.textContent = 'Facturando…';
+    try {
+      const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: 'facturar', diario: dia.value, fecha: $('#f-fec').value, ref, enviar: env, borrador });
+      alertBox(r.mensaje); $('#drawer').hidden = true; load();
+      if (r.facturas) r.facturas.forEach(f => window.open(`${ODOO}/report/pdf/account.report_invoice/${f.id}?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [r.cid] }))}`, '_blank'));
+    } catch (e) { alertBox(e.message); bt.disabled = false; bt.textContent = '🧾 Facturar'; }
+  };
+  if ($('#f-go')) { $('#f-go').onclick = () => fac(false); $('#f-bor').onclick = () => fac(true); }
   const b = $('#d-conf'); if (b) b.onclick = async () => {
     const avi = $('#d-avi').checked;
     if (!confirm(`¿Pasar ${c.ref} a pedido${avi ? ' y avisar al cliente por email' : ''}?`)) return;

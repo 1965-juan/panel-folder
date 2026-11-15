@@ -453,6 +453,19 @@ def so_card(r, kind):
     }
 
 
+def _gimeno_ids(cids):
+    """Empresas (commercial partner) del Grupo Gimeno: etiqueta «e-Factura Gimeno», los 5 sin etiqueta o email pdf-facturas@nealis.com."""
+    gim = set()
+    try:
+        dom = ["|", "|", ("email", "ilike", EMAIL_GIMENO), ("category_id.name", "ilike", "e-Factura Gimeno")]
+        dom += ["|"] * (len(GIMENO_SIN_ETIQUETA) - 1) + [("name", "ilike", n) for n in GIMENO_SIN_ETIQUETA]
+        for r in odoo.search_read("res.partner", dom + [("active", "in", [True, False])], ["commercial_partner_id"], cids, limit=2000):
+            gim.add(r["commercial_partner_id"][0])
+    except Exception:
+        pass
+    return gim
+
+
 @app.get("/api/ventas")
 def api_ventas(request: Request, company: str = "all", q: str = ""):
     u = current_user(request)
@@ -538,16 +551,9 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             "origen": r.get("invoice_origin") or "", "su_ref": r.get("ref") or "", "borrador": True,
             "cid": r["company_id"][0] if r.get("company_id") else None, "vencida": False,
         } for r in bor]
-        # la ORD solo la piden las empresas del Grupo Gimeno: las que reciben las facturas en su plataforma (pdf-facturas@nealis.com)
-        gim = set()
+        # la ORD solo la piden las empresas del Grupo Gimeno
+        gim = _gimeno_ids(cids) if bor else set()
         if bor:
-            try:
-                dom = ["|", "|", ("email", "ilike", EMAIL_GIMENO), ("category_id.name", "ilike", "e-Factura Gimeno")]
-                dom += ["|"] * (len(GIMENO_SIN_ETIQUETA) - 1) + [("name", "ilike", n) for n in GIMENO_SIN_ETIQUETA]
-                for r in odoo.search_read("res.partner", dom + [("active", "in", [True, False])], ["commercial_partner_id"], cids, limit=2000):
-                    gim.add(r["commercial_partner_id"][0])
-            except Exception:
-                pass
             pc = {p["id"]: p["commercial_partner_id"][0] for p in odoo.search_read(
                 "res.partner", [("id", "in", list({r["partner_id"][0] for r in bor if r.get("partner_id")}))], ["commercial_partner_id"], cids)}
             for c, r in zip(borradores, bor):
@@ -617,11 +623,21 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                          "texto": txt})
         pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("picking_type_code", "=", "outgoing"), ("state", "!=", "cancel")],
                               ["name", "state"], cids, order="id")
-        so = odoo.search_read("sale.order", [("id", "=", oid)], ["partner_id", "state"], cids)[0]
-        em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email"], cids) if so.get("partner_id") else []
-        return {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist,
-                "albaranes": [{"id": x["id"], "nombre": x["name"], "estado": x["state"]} for x in pk],
-                "email": (em[0].get("email") if em else "") or "", "estado": so["state"]}
+        so = odoo.search_read("sale.order", [("id", "=", oid)], ["partner_id", "state", "company_id", "invoice_status", "client_order_ref", "partner_invoice_id"], cids)[0]
+        em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email", "commercial_partner_id"], cids) if so.get("partner_id") else []
+        out = {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist,
+               "albaranes": [{"id": x["id"], "nombre": x["name"], "estado": x["state"]} for x in pk],
+               "email": (em[0].get("email") if em else "") or "", "estado": so["state"], "facturar": False}
+        if so["state"] == "sale" and so.get("invoice_status") == "to invoice" and not sin_facturas(u):
+            c = so["company_id"][0]
+            inv_p = so.get("partner_invoice_id") or so.get("partner_id")
+            emf = odoo.search_read("res.partner", [("id", "=", inv_p[0])], ["email"], cids) if inv_p else []
+            out.update({"facturar": True, "su_ref": so.get("client_order_ref") or "",
+                        "email_factura": (emf[0].get("email") if emf else "") or out["email"],
+                        "pide_ord": bool(em) and em[0]["commercial_partner_id"][0] in _gimeno_ids(cids),
+                        "diarios": [{"id": j["id"], "nombre": j["name"]} for j in odoo.search_read(
+                            "account.journal", [("type", "=", "sale"), ("company_id", "=", c)], ["name"], [c], order="sequence,id")]})
+        return out
 
     return guard(run)
 
@@ -733,6 +749,22 @@ def admin_leer(request: Request, model: str, dominio: str = "[]", campos: str = 
     return guard(lambda: odoo.search_read(model, json.loads(dominio), [c for c in campos.split(",") if c], [int(x) for x in empresas.split(",")], limit=limite))
 
 
+def _enviar_factura(E, fids):
+    """Envía las facturas por email con la plantilla de Odoo (PDF adjunto) y las marca como enviadas. Devuelve '' o el error."""
+    tpl = odoo.search_read("mail.template", [("model", "=", "account.move"), "|", ("name", "ilike", "factura"), ("name", "ilike", "invoice")],
+                           ["name"], [E], order="id", limit=5)
+    if not tpl:
+        return "no encuentro la plantilla de email de facturas"
+    tid = next((x["id"] for x in tpl if "envío" in x["name"].lower() or "sending" in x["name"].lower()), tpl[0]["id"])
+    try:
+        for f in fids:
+            odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True)
+            odoo.call("account.move", "write", [E], ids=[f], vals={"is_move_sent": True})
+    except Exception as e:
+        return str(e)[:200]
+    return ""
+
+
 @app.post("/api/ventas/{oid}/accion")
 async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     """{accion}: 'cancelar' (presupuesto o pedido sin servir: se cancela en Odoo, se puede recuperar),
@@ -744,7 +776,7 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     except Exception:
         b = {}
     acc = b.get("accion")
-    if acc not in ("cancelar", "cerrar_resto", "ocultar", "servir"):
+    if acc not in ("cancelar", "cerrar_resto", "ocultar", "servir", "facturar"):
         raise HTTPException(400, "Acción no válida")
 
     def run():
@@ -762,6 +794,43 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
                 raise HTTPException(400, "Este pedido ya tiene material servido: usa «Dar por terminado» para cancelar solo lo que falta")
             odoo.call("sale.order", "action_cancel", [c], ids=[oid], context={"disable_cancel_warning": True})
             return {"ok": True, "mensaje": f"{so['name']} cancelado en Odoo (se puede recuperar desde Odoo si hiciera falta)"}
+        if acc == "facturar":
+            # factura lo servido con la serie (diario) y fecha elegidas, la valida y, si se pide, la envía por email al cliente
+            if sin_facturas(u):
+                raise HTTPException(403, "Este usuario no hace facturas")
+            jid = int(b.get("diario") or 0)
+            if jid and not odoo.search_read("account.journal", [("id", "=", jid), ("type", "=", "sale"), ("company_id", "=", c)], ["id"], [c]):
+                raise HTTPException(400, "Esa serie no es de la empresa del pedido")
+            fecha = (b.get("fecha") or dt.date.today().isoformat())[:10]
+            ref = (b.get("ref") or "").strip()
+            antes = {f["id"] for f in odoo.search_read("account.move", [("invoice_origin", "ilike", so["name"]), ("move_type", "=", "out_invoice")], ["id"], [c])}
+            ctx_so = {"active_model": "sale.order", "active_ids": [oid], "active_id": oid}
+            w = odoo.call("sale.advance.payment.inv", "create", [c], vals_list=[{"advance_payment_method": "delivered", "sale_order_ids": [[6, 0, [oid]]]}], context=ctx_so)
+            w = w[0] if isinstance(w, list) else w
+            odoo.call("sale.advance.payment.inv", "create_invoices", [c], ids=[w], context=ctx_so)
+            nuevas = [f for f in odoo.search_read("account.move", [("invoice_origin", "ilike", so["name"]), ("move_type", "=", "out_invoice"), ("state", "=", "draft")],
+                                                  ["id"], [c]) if f["id"] not in antes]
+            if not nuevas:
+                raise HTTPException(400, "Odoo no ha generado la factura (¿no hay nada servido pendiente de facturar?)")
+            fids = [f["id"] for f in nuevas]
+            vals = {"invoice_date": fecha}
+            if jid:
+                vals["journal_id"] = jid
+            if ref:
+                vals["ref"] = ref
+            odoo.call("account.move", "write", [c], ids=fids, vals=vals)
+            if ref:
+                odoo.call("sale.order", "write", [c], ids=[oid], vals={"client_order_ref": ref})
+            if b.get("borrador"):
+                return {"ok": True, "mensaje": f"Factura de {so['name']} creada en borrador (sale en «Facturas borrador»)"}
+            odoo.call("account.move", "action_post", [c], ids=fids)
+            fs = odoo.search_read("account.move", [("id", "in", fids)], ["name", "partner_id"], [c])
+            nombres = ", ".join(f["name"] for f in fs)
+            aviso = ""
+            if b.get("enviar"):
+                aviso = _enviar_factura(c, fids)
+            return {"ok": True, "mensaje": f"{so['name']} facturado: {nombres}" + (" · enviada por email" if b.get("enviar") and not aviso else "")
+                    + (f" · ⚠️ no se pudo enviar: {aviso}" if aviso else ""), "facturas": [{"id": f["id"], "nombre": f["name"]} for f in fs], "cid": c}
         if acc == "servir":
             # se da por servido TODO lo pendiente del pedido: se valida el albarán con las cantidades pedidas (sin pedido pendiente)
             pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("picking_type_code", "=", "outgoing"), ("state", "not in", ["done", "cancel"])],
