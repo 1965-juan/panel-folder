@@ -49,8 +49,8 @@ function acChips() {
   const nc = (AC.orders || []).length, nt = (AC.reposicion || []).length;
   const gsAll = acGroups(), nTi = k => k === 'TL' ? gsAll.filter(acEsTL).length : (AC.reposicion || []).filter(p => acTienda(p.store_name) === k).length;
   const ncli = gsAll.filter(acEsCli).length;
-  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${ncli})`], ['reposicion', `Tiendas (${nt})`],
-    ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`], ['AC', `Almacén (${nTi('AC')})`]]
+  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${ncli})`], ['AC', `Almacén (${nTi('AC')})`],
+    ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`]]
     .map(([k, t]) => `<button data-v="${k}" class="${ACV === k ? 'on' : ''}">${t}</button>`).join('');
   $('#ac-ver').querySelectorAll('button').forEach(b => b.onclick = () => { ACV = b.dataset.v; acRender(); });
 }

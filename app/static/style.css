@@ -486,17 +486,3 @@ label.tb-ok input{width:18px;height:18px}
 .d-stk .pd-b{background:#ece4f6}
 body.u-compras #v-ac input[data-loc],body.u-compras #v-ac .hueco{display:none!important}
 body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
-/* compras: Panel AC compacto, cada artículo en una sola línea */
-body.u-compras #v-ac .act{font-size:12.5px}
-body.u-compras #v-ac .act th,body.u-compras #v-ac .act td{padding:2px 5px}
-body.u-compras #v-ac .act tr.ord td{padding:4px 8px}
-body.u-compras #v-ac .act td.art{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
-body.u-compras #v-ac .act td.loc{padding:2px}
-body.u-compras #v-ac .act td.loc .stk{display:inline-block;padding:1px 8px;min-width:0;font-size:12px;line-height:18px}
-body.u-compras #v-ac .act td.est .bdg{padding:1px 6px;font-size:11px}
-body.u-compras #v-ac .acts button{padding:1px 6px;font-size:12px}
-body.u-compras #v-ac .act td.ckc input{width:14px;height:14px}
-body.u-compras #v-ac .act td.loc .stk{height:20px;margin:0 auto;min-width:32px;border-width:1px}
-body.u-compras #v-ac .act tr.ln td{height:auto!important}body.u-compras #v-ac .act td.art{white-space:nowrap!important;overflow-wrap:normal!important}
-body.u-compras #v-ac .act td.est .oo{display:block;font-size:10.5px;line-height:1.2;margin-top:1px;white-space:normal}body.u-compras #v-ac .act th,body.u-compras #v-ac .act td{padding:4px 6px}
-body.u-compras #v-ac .act col.c-est{width:160px}
