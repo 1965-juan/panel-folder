@@ -109,8 +109,11 @@ async function openDetail(c) {
       if (l.stock || (l.pendiente && l.pendiente.length)) {
         const t2 = document.createElement('tr'); t2.className = 'd-stk';
         t2.innerHTML = `<td colspan="5">${(l.stock || []).map(s => `<span class="${s.hay > 0 ? 'si' : 'no'}">${escH(s.donde)} <b>${+s.hay}</b></span>`).join('')}
-          ${(l.pendiente || []).map(p => `<span class="pd">🚚 ${+p.cantidad} de ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}${p.fecha ? ', prev. ' + fdate(p.fecha) : ''})</span>`).join('')}</td>`;
+          ${(l.pendiente || []).map(p => `<span class="pd">🚚 ${+p.cantidad} de ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}${p.fecha ? ', prev. ' + fdate(p.fecha) : ''})</span>`).join('')}
+          ${d.estado === 'sale' && l.product_id ? '<a href="#" class="lnk d-pv-t">🛒 Pedir a proveedor</a><div class="d-pv" hidden></div>' : ''}</td>`;
         tb.appendChild(t2);
+        const tg = t2.querySelector('.d-pv-t');
+        if (tg) tg.onclick = e => { e.preventDefault(); const bx = t2.querySelector('.d-pv'); bx.hidden = !bx.hidden; if (!bx.hidden && !bx.dataset.ok) dPedirProv(bx, c, l); };
       }
     });
     d.historial.forEach(h => {
@@ -126,6 +129,28 @@ async function openDetail(c) {
 
 // el PDF del albarán se abre en la empresa del pedido (si no, Odoo da «403 registros ultrasecretos» con otra empresa activa)
 const albPdf = (id, cid) => `${ODOO}/report/pdf/stock.report_deliveryslip/${id}` + (cid ? `?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [cid] }))}` : '');
+
+// desplegable dentro de cada línea del pedido: proveedores de la ficha con su precio y pedirlo (se añade al borrador de ese proveedor)
+async function dPedirProv(bx, c, l) {
+  bx.innerHTML = '<small class="muted">Cargando proveedores…</small>';
+  try {
+    const d = await api(`/api/ac/proveedor/${l.product_id[0]}?company=${c.cid || company}`), pv = d.proveedores || [], e = d.estado || {};
+    const falta = Math.max(1, (l.product_uom_qty || 0) - (l.qty_delivered || 0));
+    bx.dataset.ok = 1;
+    if (!pv.length) { bx.innerHTML = '<small class="muted">Este artículo no tiene proveedores en su ficha (añádelo desde Panel AC o Compras).</small>'; return; }
+    bx.innerHTML = `${e.total_on_order ? `<small class="muted">Ya pedido a proveedor: ${+e.total_on_order}</small>` : ''}
+      <div class="d-pvl">${pv.map((p, i) => `<label><input type="radio" name="pv${l.id}" value="${p.partner_id}" ${i ? '' : 'checked'}> ${escH(p.partner_name)} <b>${eur(p.price)}</b></label>`).join('')}</div>
+      <label>Cantidad <input type="number" min="1" step="any" value="${falta}" class="d-pvq"></label> <button class="ac-go d-pvgo">Pedir</button>`;
+    bx.querySelector('.d-pvgo').onclick = async ev => {
+      const b = ev.target, pid = bx.querySelector('input[type=radio]:checked').value, qty = parseFloat(bx.querySelector('.d-pvq').value);
+      if (!(qty > 0)) return alertBox('Cantidad no válida');
+      b.disabled = true; b.textContent = 'Pidiendo…';
+      try { const r = await jpost(`/api/ac/pedir?company=${c.cid || company}`, { product_id: l.product_id[0], partner_id: +pid, qty, line_id: l.id });
+        bx.innerHTML = `<small>✅ ${r.is_new ? 'Pedido de compra ' + escH(r.po_name) + ' creado' : 'Añadido al borrador ' + escH(r.po_name)} (${qty} ud.). Sale en Compras.</small>`;
+      } catch (x) { alertBox(x.message); b.disabled = false; b.textContent = 'Pedir'; }
+    };
+  } catch (x) { bx.innerHTML = `<small class="err">${escH(x.message)}</small>`; }
+}
 
 function dAcciones(c, d) {
   const A = $('#d-acc'); let h = '';
