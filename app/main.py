@@ -37,8 +37,8 @@ ADMIN = "administrador"
 PERFILES = {
     ADMIN: {"empresas": ["*"], "modulos": None},
     "contabilidad": {"empresas": ["*"], "modulos": None},   # ve lo mismo que el administrador
-    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "ac", "tablero", "etiquetas"], "sin_facturas": True},
-    "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "ac", "tablero"], "sin_facturas": True},
+    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "pedidos", "articulos", "ac", "tablero", "etiquetas"], "sin_facturas": True},
+    "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "pedidos", "articulos", "ac", "tablero"], "sin_facturas": True},
     "tienda1": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T1", "nombre": "TIENDA 1"},
     "tienda2": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T2", "nombre": "TIENDA 2"},
     "tiendalogipaper": {"empresas": ["LOGIPAPER"], "modulos": ["tienda", "etiquetas"], "tienda": "T3", "nombre": "TIENDA LOGIPAPER"},
@@ -62,7 +62,8 @@ def sin_facturas(u):
     return bool(PERFILES.get(u, {}).get("sin_facturas"))
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda"]
+TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda",
+                 "pedidos", "articulos"]
 
 
 def modulos_de(u):
@@ -1603,3 +1604,10 @@ _tienda.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guar
 from . import tablero as _tab  # noqa: E402
 
 _tab.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL, data_dir=DATA)
+
+
+# ---------- nuevo pedido de cliente y buscador de artículos (almacén y compras) ----------
+from . import pedidos as _ped  # noqa: E402
+
+_ped.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL,
+           allowed_companies=allowed_companies, nombre_usuario=nombre_usuario)

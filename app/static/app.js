@@ -267,14 +267,14 @@ async function webClientes() {
   }, 300); };
 })();
 function route() {
-  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo', '#vencimientos': 'vencimientos', '#etiquetas': 'etiquetas', '#tablero': 'tablero', '#tienda': 'tienda' })[location.hash.split('?')[0]] || 'ventas';
+  let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo', '#vencimientos': 'vencimientos', '#etiquetas': 'etiquetas', '#tablero': 'tablero', '#tienda': 'tienda', '#pedidos': 'pedidos', '#articulos': 'articulos' })[location.hash.split('?')[0]] || 'ventas';
   if (!location.hash && MODS.includes('compras') && !MODS.includes('ac')) v = 'compras';
   if (MODS.length && !MODS.includes(v)) v = MODS.includes('compras') ? 'compras' : MODS[0];
   document.querySelectorAll('.side nav a[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === v));
-  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion'; $('#v-ma').hidden = v !== 'correo'; $('#v-ve').hidden = v !== 'vencimientos'; $('#v-et').hidden = v !== 'etiquetas'; $('#v-tb').hidden = v !== 'tablero'; $('#v-ti').hidden = v !== 'tienda'; document.body.classList.toggle('et-on', v === 'etiquetas');
-  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Albaranes/Facturas', tablero: 'Compras', tienda: 'Mi tienda', facturacion: 'Facturación', correo: 'Correo', vencimientos: 'Vencimientos', etiquetas: 'Etiquetas' })[v] || 'Ventas';
+  $('#v-web').hidden = v !== 'web'; $('#v-ventas').hidden = v !== 'ventas'; $('#v-wa').hidden = v !== 'whatsapp'; $('#v-ac').hidden = v !== 'ac'; $('#v-co').hidden = v !== 'compras'; $('#v-fa').hidden = v !== 'facturacion'; $('#v-ma').hidden = v !== 'correo'; $('#v-ve').hidden = v !== 'vencimientos'; $('#v-et').hidden = v !== 'etiquetas'; $('#v-tb').hidden = v !== 'tablero'; $('#v-ti').hidden = v !== 'tienda'; $('#v-pe').hidden = v !== 'pedidos'; $('#v-ar').hidden = v !== 'articulos'; document.body.classList.toggle('et-on', v === 'etiquetas');
+  $('#h1').textContent = ({ web: 'Web', whatsapp: 'WhatsApp', ac: 'Panel AC', compras: 'Albaranes/Facturas', tablero: 'Compras', tienda: 'Mi tienda', pedidos: 'Nuevo pedido', articulos: 'Artículos', facturacion: 'Facturación', correo: 'Correo', vencimientos: 'Vencimientos', etiquetas: 'Etiquetas' })[v] || 'Ventas';
   $('#q').hidden = v !== 'ventas'; $('#company').hidden = !['ventas', 'ac', 'compras'].includes(v);
-  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else if (v === 'correo') maOpen(); else if (v === 'vencimientos') veOpen(); else if (v === 'etiquetas') etOpen(); else if (v === 'tablero') tbOpen(); else if (v === 'tienda') tiOpen(); else load();
+  if (v === 'web') loadWeb(); else if (v === 'whatsapp') waOpen(); else if (v === 'ac') acLoad(); else if (v === 'compras') coOpen(); else if (v === 'facturacion') faOpen(); else if (v === 'correo') maOpen(); else if (v === 'vencimientos') veOpen(); else if (v === 'etiquetas') etOpen(); else if (v === 'tablero') tbOpen(); else if (v === 'tienda') tiOpen(); else if (v === 'pedidos') peOpen(); else if (v === 'articulos') arOpen(); else load();
 }
 window.addEventListener('hashchange', route);
 setInterval(() => loadWeb(true), 5 * 60 * 1000);

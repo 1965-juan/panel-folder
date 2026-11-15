@@ -13,6 +13,8 @@
     <a class="on" href="#ventas" data-v="ventas" data-m="ventas">Ventas</a>
     <a href="#web" data-v="web" data-m="web">Web <span class="nb" id="nb-web" hidden></span></a>
     <a href="#whatsapp" data-v="whatsapp" data-m="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
+    <a href="#pedidos" data-v="pedidos" data-m="pedidos">Nuevo pedido</a>
+    <a href="#articulos" data-v="articulos" data-m="articulos">Artículos</a>
     <a href="/presupuestos" data-m="presupuestos">Presupuestos</a>
     <a href="#ac" data-v="ac" data-m="ac">Panel AC</a>
     <a href="#tablero" data-v="tablero" data-m="tablero">Compras</a>
@@ -23,7 +25,6 @@
     <a href="#etiquetas" data-v="etiquetas" data-m="etiquetas">Etiquetas</a>
     <a href="#correo" data-v="correo" data-m="correo">Correo <span class="nb" id="nb-ma" hidden></span></a>
     <a class="off" title="Próximamente">Avisos</a>
-    <a class="off" title="Próximamente">Artículos</a>
     <a class="off" title="Próximamente">Inventarios</a>
   </nav>
   <div class="side-foot">
@@ -151,6 +152,32 @@
     <h3>💶 Servido, pendiente de cobrar (clientes de contado)</h3><p class="muted ti-ay">Encargos ya servidos por almacén. Los clientes con giro o pago a fin de mes no salen: se les sirve y ya está. No los «recuperes» en el TPV, que descuenta el material otra vez.</p>
     <div id="ti-paso" class="ti-paso" hidden></div>
     <div id="ti-cob"></div>
+  </section>
+
+  <section id="v-pe" hidden>
+    <div class="pe-grid">
+      <div class="pe-box">
+        <h3>1 · Cliente</h3>
+        <label class="pe-l">Empresa que vende <select id="pe-emp"></select></label>
+        <div class="pe-bus"><input id="pe-cq" type="search" placeholder="Buscar cliente por nombre, NIF, email…" autocomplete="off"><div id="pe-csug" class="pe-sug"></div></div>
+        <div id="pe-cli" class="pe-cli muted">Ningún cliente elegido</div>
+        <label class="pe-l">Ref. / nº de pedido del cliente <input id="pe-ref" placeholder="opcional"></label>
+        <label class="pe-l">Observaciones <textarea id="pe-nota" rows="2" placeholder="opcional (salen en el presupuesto)"></textarea></label>
+      </div>
+      <div class="pe-box">
+        <h3>2 · Artículos</h3>
+        <div class="pe-bus"><input id="pe-aq" type="search" placeholder="Buscar artículo por nombre, ref. Folder, ref. fabricante o código de barras…" autocomplete="off"><div id="pe-asug" class="pe-sug"></div></div>
+        <table class="pe-t"><thead><tr><th>Artículo</th><th>Cant.</th><th>Precio <small class="muted">(vacío = tarifa)</small></th><th></th></tr></thead><tbody id="pe-lin"></tbody></table>
+        <p id="pe-vacio" class="muted">Añade artículos con el buscador (o desde la pestaña Artículos).</p>
+        <div class="pe-bot"><button class="btn" id="pe-pre">💾 Guardar como presupuesto</button><button class="ac-go" id="pe-ped">✔ Crear pedido</button><button class="btn" id="pe-borra">Vaciar</button></div>
+        <div id="pe-res"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="v-ar" hidden>
+    <div class="tb-barra"><input id="ar-q" type="search" placeholder="Buscar artículo por nombre, ref. Folder, ref. fabricante o código de barras…" autocomplete="off"><span class="muted" id="ar-info"></span></div>
+    <div id="ar-list"></div>
   </section>
 
   <section id="v-tb" hidden>
@@ -309,5 +336,6 @@
 <script src="/static/etiquetas.js"></script>
 <script src="/static/tablero.js"></script>
 <script src="/static/tienda.js"></script>
+<script src="/static/pedidos.js"></script>
 </body>
 </html>
