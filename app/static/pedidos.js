@@ -24,7 +24,7 @@ async function peOpen() {
 // direcciones de entrega del cliente elegido (la de entrega primero, como en Odoo)
 async function peDirs() {
   const l = $('#pe-dir-l'), sel = $('#pe-dir');
-  $('#pe-hist').hidden = !PE.cli; if (!PE.cli) { $('#pe-hbox').hidden = true; }
+  $('#pe-hist').disabled = !PE.cli; $('#pe-hist').title = PE.cli ? '' : 'Elige primero el cliente'; if (!PE.cli) { $('#pe-hbox').hidden = true; }
   if (!PE.cli) { l.hidden = true; return; }
   try {
     const d = await api(`/api/pedidos/cliente/${PE.cli.id}`);
