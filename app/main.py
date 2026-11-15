@@ -552,7 +552,7 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             for c, r in zip(borradores, bor):
                 com = pc.get(r["partner_id"][0]) if r.get("partner_id") else None
                 c["pide_ord"] = com in gim or "gimeno" in c["cliente"].lower()
-        borradores.sort(key=lambda c: (not (c.get("pide_ord") and not c["su_ref"]), c["fecha"]))   # primero las de Gimeno sin ORD
+        borradores.sort(key=lambda c: (not (c.get("pide_ord") and not c["su_ref"].upper().startswith("ORD")), c["fecha"]))   # primero las de Gimeno sin ORD
         # marcas de lo hecho con cada presupuesto: enviado al cliente y reclamado (sin confirmar)
         pids = [c["id"] for c in presu + caduc]
         if pids:
