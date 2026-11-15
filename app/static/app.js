@@ -137,10 +137,28 @@ async function dPedirProv(bx, c, l) {
     const d = await api(`/api/ac/proveedor/${l.product_id[0]}?company=${c.cid || company}`), pv = d.proveedores || [], e = d.estado || {};
     const falta = Math.max(1, (l.product_uom_qty || 0) - (l.qty_delivered || 0));
     bx.dataset.ok = 1;
-    if (!pv.length) { bx.innerHTML = '<small class="muted">Este artículo no tiene proveedores en su ficha (añádelo desde Panel AC o Compras).</small>'; return; }
-    bx.innerHTML = `${e.total_on_order ? `<small class="muted">Ya pedido a proveedor: ${+e.total_on_order}</small>` : ''}
+    const otro = `<details class="d-np" ${pv.length ? '' : 'open'}><summary>＋ Añadir otro proveedor</summary>
+        <input class="d-npq" placeholder="Buscar proveedor…" autocomplete="off"><div class="d-nps"></div>
+        <div class="d-npf" hidden><b class="d-npn"></b> · precio de compra <input class="d-npp" type="number" min="0" step="0.01" placeholder="€" style="width:80px">
+          <button class="ac-go d-npok">Añadir a la ficha</button></div></details>`;
+    bx.innerHTML = pv.length ? `${e.total_on_order ? `<small class="muted">Ya pedido a proveedor: ${+e.total_on_order}</small>` : ''}
       <div class="d-pvl">${pv.map((p, i) => `<label><input type="radio" name="pv${l.id}" value="${p.partner_id}" ${i ? '' : 'checked'}> ${escH(p.partner_name)} <b>${eur(p.price)}</b></label>`).join('')}</div>
-      <label>Cantidad <input type="number" min="1" step="any" value="${falta}" class="d-pvq"></label> <button class="ac-go d-pvgo">Pedir</button>`;
+      <label>Cantidad <input type="number" min="1" step="any" value="${falta}" class="d-pvq"></label> <button class="ac-go d-pvgo">Pedir</button>${otro}`
+      : `<small class="muted">Este artículo no tiene proveedores en su ficha.</small>${otro}`;
+    // nuevo proveedor: se pone en la ficha del artículo con su precio y vuelve a salir la lista para pedírselo
+    let npId = 0, npT;
+    bx.querySelector('.d-npq').oninput = ev => { clearTimeout(npT); npT = setTimeout(async () => {
+      const q = ev.target.value.trim(), sg = bx.querySelector('.d-nps'); if (q.length < 2) return sg.innerHTML = '';
+      try { const r = await api(`/api/tablero/proveedores?q=${encodeURIComponent(q)}`);
+        sg.innerHTML = r.map(p => `<a href="#" data-id="${p.id}">${escH(p.nombre)}</a>`).join('') || '<small class="muted">Nada</small>';
+        sg.querySelectorAll('a').forEach(a => a.onclick = x => { x.preventDefault(); npId = +a.dataset.id; bx.querySelector('.d-npn').textContent = a.textContent;
+          bx.querySelector('.d-npf').hidden = false; sg.innerHTML = ''; bx.querySelector('.d-npp').focus(); });
+      } catch (x) { sg.innerHTML = `<small class="err">${escH(x.message)}</small>`; } }, 300); };
+    bx.querySelector('.d-npok').onclick = async () => {
+      if (!npId) return;
+      try { await jpost(`/api/ac/proveedor_ficha?company=${c.cid || company}`, { product_id: l.product_id[0], partner_id: npId, price: bx.querySelector('.d-npp').value });
+        delete bx.dataset.ok; dPedirProv(bx, c, l); } catch (x) { alertBox(x.message); } };
+    if (!pv.length) return;
     bx.querySelector('.d-pvgo').onclick = async ev => {
       const b = ev.target, pid = bx.querySelector('input[type=radio]:checked').value, qty = parseFloat(bx.querySelector('.d-pvq').value);
       if (!(qty > 0)) return alertBox('Cantidad no válida');
