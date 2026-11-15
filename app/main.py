@@ -627,7 +627,7 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
         em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email", "commercial_partner_id"], cids) if so.get("partner_id") else []
         out = {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist,
                "albaranes": [{"id": x["id"], "nombre": x["name"], "estado": x["state"]} for x in pk],
-               "email": (em[0].get("email") if em else "") or "", "estado": so["state"], "facturar": False, "_dbg": [so.get("invoice_status"), sin_facturas(u), str(u)[:30]]}
+               "email": (em[0].get("email") if em else "") or "", "estado": so["state"], "facturar": False}
         if so["state"] == "sale" and so.get("invoice_status") == "to invoice" and not sin_facturas(u):
             c = so["company_id"][0]
             inv_p = so.get("partner_invoice_id") or so.get("partner_id")
