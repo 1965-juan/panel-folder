@@ -177,7 +177,9 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
                     "tmpl_id": (pr.get("product_tmpl_id") or [0])[0],
                     "ref": pr.get("default_code") or "", "cantidad": l["product_qty"], "ud": (l.get(uom()) or [0, ""])[1], "precio": l["price_unit"],
                     "importe": l["price_subtotal"], "stock": pr.get("qty_available") or 0,
-                    "stock_vp": (round(vp[l["product_id"][0]][0], 2) if l["product_id"][0] in vp else (0 if pids_lg and l["product_id"][0] in pids_lg else None)),
+                    # el stock de Tienda Logipaper solo se avisa en las líneas pedidas al proveedor Logipaper
+                    "stock_vp": (None if prop.get(po_partner[l["order_id"][0]]) != 4 else
+                                 round(vp[l["product_id"][0]][0], 2) if l["product_id"][0] in vp else 0),
                     "reservado_vp": round(vp.get(l["product_id"][0], [0, 0])[1], 2), "recibido": l.get("qty_received") or 0,
                     "para": (l.get("sale_order_id") or [0, ""])[1] if l.get("sale_order_id") else "",
                     "proveedores": sorted(alt.values(), key=lambda x: (x["precio"] or 9e9))})
