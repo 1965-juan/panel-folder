@@ -822,6 +822,10 @@ async def admin_reintentar_correos(request: Request):
         out = {"a_enviar": len(enviar), "duplicados": len(dup), "asuntos": [m["subject"] for m in mm if m["id"] in enviar][:80]}
         if b.get("solo_ver"):
             return out
+        if b.get("descartar"):
+            odoo.call("mail.mail", "write", T, ids=enviar + dup, vals={"state": "cancel"})
+            out["descartados"] = len(enviar) + len(dup)
+            return out
         if dup:
             odoo.call("mail.mail", "write", T, ids=dup, vals={"state": "cancel"})
         odoo.call("mail.mail", "write", T, ids=enviar, vals={"email_from": "Folder Castellón <info@foldercastellon.es>",
