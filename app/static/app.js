@@ -347,6 +347,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     $('#upd').hidden = !yo.puede_actualizar; $('#clave-cl').hidden = !yo.puede_actualizar;
     ADMIN = !!yo.admin; MODS = yo.modulos || [];
     document.querySelectorAll('.side nav a[data-m]').forEach(a => a.hidden = !MODS.includes(a.dataset.m));
+    if (MODS.includes('compras') && !MODS.includes('facturacion')) { const a = document.querySelector('.side nav a[data-v="compras"]'); if (a) a.firstChild.textContent = 'Recepción albaranes '; }
     $('#usr-btn').hidden = !(ADMIN || yo.viendo_como);
     window.YO = yo;
     document.body.classList.toggle('u-compras', yo.usuario === 'compras');   // compras no reparte stock en el Panel AC

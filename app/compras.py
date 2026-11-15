@@ -44,7 +44,27 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             c.execute("ALTER TABLE docs ADD COLUMN compra TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            c.execute("ALTER TABLE docs ADD COLUMN recepcion TEXT")
+        except sqlite3.OperationalError:
+            pass
         return c
+
+    # fotos de albaranes (móvil): se guardan tal cual y Claude las lee igual que un PDF
+    FOTOS = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+    def _mime(fichero):
+        return FOTOS.get(Path(fichero or "").suffix.lower(), "application/pdf")
+
+    def _tipo_foto(nombre, datos):
+        ext = Path(nombre or "").suffix.lower()
+        if datos[:3] == b"\xff\xd8\xff":
+            return ".jpg"
+        if datos[:8] == b"\x89PNG\r\n\x1a\n":
+            return ".png"
+        if datos[:4] == b"RIFF" and datos[8:12] == b"WEBP":
+            return ".webp"
+        return ext if ext in FOTOS else None
 
     def ctx(request, company="all"):
         u = current_user(request)
@@ -105,7 +125,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                     r = c.execute("SELECT fichero, lectura FROM docs WHERE id=?", (did,)).fetchone()
                 if not r or r["lectura"]:
                     return
-                datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
+                datos = leer_con_claude((carpeta / r["fichero"]).read_bytes(), _mime(r["fichero"]))
                 with lock, con() as c:
                     if datos.get("error"):
                         c.execute("UPDATE docs SET lectura=? WHERE id=?", (json.dumps({"error": str(datos["error"])[:300]}, ensure_ascii=False), did))
@@ -134,8 +154,12 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
     def poner_pdf(model, rid, nombre, datos, cids):
         """Adjunta el PDF al registro de Odoo de forma que se VEA: mensaje en el historial con el PDF y PDF principal
         (el que Odoo enseña al lado de la factura)."""
+        ext = ".pdf" if datos.startswith(b"%PDF") else (_tipo_foto(nombre, datos) or ".pdf")
+        mt = _mime("x" + ext)
+        if ext != ".pdf" and not (nombre or "").lower().endswith(ext):
+            nombre = (nombre or "albaran") + ext
         att = odoo.call("ir.attachment", "create", cids, vals_list=[{"name": nombre or "documento.pdf", "res_model": model, "res_id": rid,
-                                                                     "mimetype": "application/pdf", "datas": base64.b64encode(datos).decode()}])
+                                                                     "mimetype": mt, "datas": base64.b64encode(datos).decode()}])
         att = att[0] if isinstance(att, list) else att
         try:
             odoo.call(model, "message_post", cids, ids=[rid], body=f"Documento subido desde el Panel Folder: {nombre}", attachment_ids=[att])
@@ -271,15 +295,18 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             datos = await f.read()
             if not datos:
                 continue
+            ext = ".pdf"
             if not (f.filename or "").lower().endswith(".pdf") and not datos.startswith(b"%PDF"):
-                out.append({"nombre": f.filename, "error": "No es un PDF"})
-                continue
+                ext = _tipo_foto(f.filename, datos) if tipo == "albaran" else None
+                if not ext:
+                    out.append({"nombre": f.filename, "error": "No es un PDF ni una foto (JPG/PNG)" if tipo == "albaran" else "No es un PDF"})
+                    continue
             igual = ya_subido(datos)
             if igual:
                 out.append({"nombre": f.filename, "error": f"Este PDF ya está subido ({igual['nombre']}, {time.strftime('%d/%m %H:%M', time.localtime(igual['subido']))}). No lo subo otra vez."})
                 continue
             did = secrets.token_hex(8)
-            fich = carpeta / f"{did}.pdf"
+            fich = carpeta / f"{did}{ext}"
             fich.write_bytes(datos)
             item = {"id": did, "nombre": f.filename, "tipo": tipo}
             estado, model, oid = "pendiente", None, None
@@ -335,10 +362,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             r = c.execute("SELECT fichero, nombre FROM docs WHERE id=?", (did,)).fetchone()
         if not r:
             raise HTTPException(404)
-        return FileResponse(carpeta / r["fichero"], media_type="application/pdf", filename=r["nombre"],
+        return FileResponse(carpeta / r["fichero"], media_type=_mime(r["fichero"]), filename=r["nombre"],
                             content_disposition_type="inline")
 
-    def leer_con_claude(datos):
+    def leer_con_claude(datos, mime="application/pdf"):
         import os as _os
         import httpx as _hx
         cf = data_dir / "claude_clave.txt"
@@ -354,7 +381,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         r = _hx.post(_os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages", timeout=180, headers={
             "x-api-key": k[0], "anthropic-version": "2023-06-01", "content-type": "application/json"},
             json={"model": _os.environ.get("PANEL_MODEL", "claude-sonnet-5-5"), "max_tokens": 8000, "messages": [{"role": "user", "content": [
-                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(datos).decode()}},
+                ({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(datos).decode()}} if mime.startswith("image/")
+                 else {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(datos).decode()}}),
                 {"type": "text", "text": pide}]}]})
         if r.status_code != 200:
             raise HTTPException(502, f"Claude respondió {r.status_code}: {r.text[:200]}")
@@ -370,7 +398,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             r = c.execute("SELECT fichero FROM docs WHERE id=?", (did,)).fetchone()
         if not r:
             raise HTTPException(404)
-        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
+        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes(), _mime(r["fichero"]))
         with lock, con() as c:
             c.execute("UPDATE docs SET lectura=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), did))
         return datos
@@ -409,7 +437,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
     def _lectura(r, releer=False):
         if r["lectura"] and not releer and not json.loads(r["lectura"]).get("error"):
             return json.loads(r["lectura"])
-        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes())
+        datos = leer_con_claude((carpeta / r["fichero"]).read_bytes(), _mime(r["fichero"]))
         if datos.get("error"):
             raise HTTPException(502, "No he podido leer el PDF: " + str(datos["error"])[:200])
         with lock, con() as c:
@@ -762,6 +790,17 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             pn = odoo.call("purchase.order", "create", cids, vals_list=[vals])
             pn = pn[0] if isinstance(pn, list) else pn
             pendiente = odoo.search_read("purchase.order", [("id", "=", pn)], ["name"], company_ids=cids)[0]["name"]
+        # para el informe: qué cambia respecto al pedido y qué pasa a pendiente
+        cambios = []
+        for l in lineas:
+            x = pls.get(int(l["po_line"])) if l.get("po_line") else None
+            if not x:
+                continue
+            ca, cn, pa, pn_ = x["product_qty"], _num(l["cantidad"]), x["price_unit"], _num(l["precio"])
+            if abs(ca - cn) > 0.0001 or abs(pa - pn_) > 0.00005 or abs((x.get("discount") or 0) - _num(l.get("descuento"))) > 0.001:
+                cambios.append({"articulo": x["product_id"][1] if x.get("product_id") else x["name"], "cant_antes": ca, "cant": cn,
+                                "precio_antes": pa, "precio": pn_, "dto_antes": x.get("discount") or 0, "dto": _num(l.get("descuento"))})
+        a_pendiente = [{"articulo": x["product_id"][1] if x.get("product_id") else x["name"], "cant": x["product_qty"]} for x in sobran]
         # 2) dejar el pedido igual que el documento
         cmds = [[2, x["id"]] for x in sobran]
         t = _impuesto(cid, 21.0)
@@ -823,6 +862,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             avisos.append(f"{len(creados)} artículos nuevos creados: revisad su precio de venta y completad las fichas (botón 📷 Fichas)")
         res = {"pedido": pod["name"], "pedido_id": po["id"], "estado": pod["state"], "recepciones": [p["name"] for p in picks], "creados": creados,
                "pendiente": pendiente, "base": pod["amount_untaxed"], "total": pod["amount_total"], "anadidas": nuevas,
+               "cambios": cambios, "a_pendiente": a_pendiente, "proveedor": odoo.search_read("res.partner", [("id", "=", partner_id)], ["name"], company_ids=cids)[0]["name"],
+               "documento": (lec.get("numero") or r["nombre"] or ""),
                "avisos": avisos, "por": u, "cuando": time.time()}
         if r["odoo_model"] == "account.move" and r["odoo_id"]:
             try:
@@ -1016,9 +1057,112 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             return out
         return guard(run)
 
+    @app.get("/compras/informe/{did}")
+    def informe(did: str, request: Request):
+        """Informe del albarán para almacén: qué se ha cuadrado y cambiado en el pedido, qué se ha recibido,
+        qué queda pendiente y qué tareas quedan por hacer. Se puede imprimir."""
+        from fastapi.responses import HTMLResponse
+        from html import escape as e
+        _, cids = ctx(request, "all")
+        with con() as c:
+            r = c.execute("SELECT * FROM docs WHERE id=?", (did,)).fetchone()
+        if not r:
+            raise HTTPException(404, "No encuentro el documento")
+        r = dict(r)
+        lec = json.loads(r["lectura"]) if r.get("lectura") else {}
+        comp = json.loads(r["compra"]) if r.get("compra") else {}
+        rec = json.loads(r["recepcion"]) if r.get("recepcion") else {}
+        n = lambda v: (f"{v:.2f}".rstrip("0").rstrip(".") if isinstance(v, (int, float)) else e(str(v)))
+        eu = lambda v: f"{(v or 0):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        eu4 = lambda v: f"{(v or 0):.4f}".rstrip("0").rstrip(".").replace(".", ",") + " €"
+        fecha = lambda t: time.strftime("%d/%m/%Y %H:%M", time.localtime(t)) if t else ""
+        tareas, hechas = [], []
+        # estado real de la entrada en Odoo
+        pendientes_rec = []
+        try:
+            if comp.get("recepciones"):
+                for p in odoo.search_read("stock.picking", [("name", "in", comp["recepciones"])], ["name", "state"], company_ids=cids):
+                    if p["state"] not in ("done", "cancel"):
+                        pendientes_rec.append(p["name"])
+            if comp.get("pedido_id"):
+                for p in odoo.search_read("stock.picking", [("purchase_id", "=", comp["pedido_id"]), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=cids):
+                    if p["name"] not in pendientes_rec:
+                        pendientes_rec.append(p["name"])
+        except Exception:
+            pass
+        if not comp:
+            tareas.append("Cuadrar el albarán con el pedido de compra (Bandeja → ⇄ Cuadrar con pedido).")
+        else:
+            hechas.append(f"Albarán cuadrado con el pedido {e(comp.get('pedido', ''))} ({fecha(comp.get('cuando'))}{', ' + e(comp.get('por', '')) if comp.get('por') else ''}).")
+        if rec:
+            hechas.append(f"Material recibido en Odoo: entrada {e(rec.get('picking', ''))} ({fecha(rec.get('cuando'))}, {e(rec.get('por', ''))}).")
+        if pendientes_rec:
+            tareas.append(f"Recibir el material en la pestaña Recepciones: {e(', '.join(pendientes_rec))}" + (" (es lo que quedó pendiente de este pedido)." if rec else "."))
+        elif comp and not rec:
+            hechas.append("La entrada de este pedido ya está recibida en Odoo.")
+        if comp.get("pendiente"):
+            tareas.append(f"Lo que no ha venido sigue pedido al proveedor en {e(comp['pendiente'])} (borrador): revisad en Compras si se reclama o se lanza.")
+        if comp.get("creados"):
+            tareas.append(f"Revisar el precio de venta y completar la ficha de {len(comp['creados'])} artículo(s) nuevo(s) (botón 📷 Fichas).")
+        if rec.get("servir"):
+            tareas.append(f"Servir {len(rec['servir'])} línea(s) que esperaban este material (Panel AC).")
+        for a in comp.get("avisos") or []:
+            if "artículos nuevos" not in a:
+                tareas.append("Revisar: " + e(a))
+        filas = lambda cab, ls: f"<table><thead><tr>{''.join(f'<th>{h}</th>' for h in cab)}</tr></thead><tbody>{''.join(ls)}</tbody></table>"
+        sec = []
+        if comp.get("cambios"):
+            ls = []
+            for x in comp["cambios"]:
+                ca = "" if abs(x["cant_antes"] - x["cant"]) < 0.0001 else f"{n(x['cant_antes'])} → <b>{n(x['cant'])}</b>"
+                pr = "" if abs(x["precio_antes"] - x["precio"]) < 0.00005 else f"{eu4(x['precio_antes'])} → <b>{eu4(x['precio'])}</b>"
+                dt_ = "" if abs((x.get("dto_antes") or 0) - (x.get("dto") or 0)) < 0.001 else f"{n(x.get('dto_antes') or 0)}% → <b>{n(x.get('dto') or 0)}%</b>"
+                ls.append(f"<tr><td>{e(x['articulo'])}</td><td>{ca or '='}</td><td>{pr or '='}</td><td>{dt_ or '='}</td></tr>")
+            sec.append("<h2>✏️ Cambios en el pedido de compra</h2>" + filas(["Artículo", "Cantidad", "Precio", "Dto."], ls))
+        if comp.get("anadidas"):
+            sec.append("<h2>➕ Añadido al pedido (venía en el albarán y no estaba pedido)</h2><ul>" + "".join(f"<li>{e(x or '')}</li>" for x in comp["anadidas"]) + "</ul>")
+        if comp.get("creados"):
+            sec.append("<h2>🆕 Artículos nuevos creados en Odoo</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in comp["creados"]) + "</ul>")
+        if comp.get("a_pendiente"):
+            sec.append(f"<h2>⏳ No ha venido (queda pedido en {e(comp.get('pendiente') or '—')})</h2>"
+                       + filas(["Artículo", "Cantidad"], [f"<tr><td>{e(x['articulo'])}</td><td>{n(x['cant'])}</td></tr>" for x in comp["a_pendiente"]]))
+        if rec.get("lineas"):
+            ls = []
+            for x in rec["lineas"]:
+                d = x["recibido"] - x["pedido"]
+                ls.append(f"<tr class=\"{'mal' if d < -0.0001 else ''}\"><td>{e(x['articulo'])}</td><td>{n(x['pedido'])}</td><td>{n(x['recibido'])}</td>"
+                          f"<td>{'' if abs(d) < 0.0001 else ('faltan ' + n(-d) if d < 0 else 'sobran ' + n(d))}</td></tr>")
+            sec.append(f"<h2>📦 Recibido en almacén ({e(rec.get('picking', ''))})</h2>" + filas(["Artículo", "Esperado", "Recibido", "Diferencia"], ls)
+                       + ("<p class='nota'>Lo que faltaba queda pendiente en una entrada nueva.</p>" if rec.get("queda_pendiente") else ""))
+        if rec.get("servir"):
+            sec.append("<h2>🚚 Ya se puede servir</h2>" + filas(["Para", "Pedido", "Artículo", "Pend."],
+                       [f"<tr><td>{e(x['quien'])}</td><td>{e(x['ref'])}</td><td>{e(x['producto'])}</td><td>{n(x['pendiente'])}</td></tr>" for x in rec["servir"]]))
+        if not comp and lec.get("lineas"):
+            sec.append("<h2>📄 Lo que trae el albarán</h2>" + filas(["Ref.", "Artículo", "Cant."],
+                       [f"<tr><td>{e(str(x.get('ref') or ''))}</td><td>{e(str(x.get('descripcion') or ''))}</td><td>{n(x.get('cantidad') or 0)}</td></tr>" for x in lec["lineas"]]))
+        html = f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Informe albarán {e(comp.get('documento') or lec.get('numero') or r['nombre'] or '')}</title><style>
+body{{font-family:Arial,Helvetica,sans-serif;color:#222;margin:0;background:#f3f1f4}}.p{{max-width:900px;margin:0 auto;background:#fff;padding:22px 28px}}
+h1{{color:#5B2D82;font-size:21px;margin:0 0 4px}}h2{{font-size:15px;color:#5B2D82;margin:22px 0 6px;border-bottom:2px solid #F39200;padding-bottom:3px}}
+.sub{{color:#666;font-size:13px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{border-bottom:1px solid #e5e1ea;padding:5px 6px;text-align:left}}
+th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-left:20px;font-size:13px}}.nota{{font-size:12px;color:#666}}
+.caja{{border-radius:8px;padding:10px 14px;margin-top:12px;font-size:14px}}.pend{{background:#fff3df;border-left:4px solid #F39200}}.ok{{background:#eaf7ee;border-left:4px solid #1F7A4D}}
+.caja li{{margin:3px 0}}.bot{{margin-top:18px}}button{{background:#5B2D82;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:14px;cursor:pointer}}
+@media print{{.bot{{display:none}}body{{background:#fff}}.p{{padding:0}}}}</style></head><body><div class="p">
+<h1>Informe de albarán · {e(comp.get('proveedor') or lec.get('proveedor') or '')}</h1>
+<div class="sub">Albarán nº <b>{e(comp.get('documento') or lec.get('numero') or '')}</b>{(' del ' + e(lec['fecha'][8:10] + '/' + lec['fecha'][5:7] + '/' + lec['fecha'][:4])) if lec.get('fecha') else ''}
+ · Pedido de compra <b>{e(comp.get('pedido') or '—')}</b>{(' · base ' + eu(comp.get('base'))) if comp.get('base') else ''}
+ · Subido por {e(r.get('usuario') or '')} el {fecha(r.get('subido'))} · <a href="/api/compras/pdf/{did}" target="_blank">ver albarán</a></div>
+<div class="caja {'pend' if tareas else 'ok'}"><b>{'⚠️ Queda pendiente por hacer:' if tareas else '✅ No queda nada pendiente con este albarán.'}</b>
+{('<ul>' + ''.join(f'<li>{t}</li>' for t in tareas) + '</ul>') if tareas else ''}</div>
+{('<div class="caja ok"><b>Hecho:</b><ul>' + ''.join(f'<li>{h}</li>' for h in hechas) + '</ul></div>') if hechas else ''}
+{''.join(sec) or '<p class="sub">Todavía no se ha cuadrado ni recibido nada de este albarán.</p>'}
+<div class="bot"><button onclick="print()">🖨 Imprimir</button></div></div></body></html>"""
+        return HTMLResponse(html)
+
     @app.post("/api/compras/recibir")
     async def recibir(request: Request, company: str = "all"):
-        _, cids = ctx(request, company)
+        u_rec, cids = ctx(request, company)
         b = await request.json()
         pid = int(b["picking_id"])
         cant = {int(k): float(v or 0) for k, v in (b.get("cantidades") or {}).items()}
@@ -1070,7 +1214,28 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                             servir.append({"quien": p["store_name"], "ref": p["picking_name"], "producto": l["product_name"], "pendiente": l["qty_pending"]})
             except Exception:
                 pass
-            return {"ok": True, "queda_pendiente": pendiente, "servir": servir}
+            # para el informe del almacén: lo pedido y lo recibido, lo que queda pendiente y lo que ya se puede servir
+            try:
+                mv = odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id", "product_uom_qty"], company_ids=c1)
+                rec = {"picking": pk["name"], "picking_id": pid, "por": u_rec, "cuando": time.time(), "albaran": b.get("albaran") or "",
+                       "lineas": [{"articulo": m["product_id"][1], "pedido": m["product_uom_qty"], "recibido": cant.get(m["id"], 0)} for m in mv],
+                       "queda_pendiente": pendiente, "servir": servir}
+                po_id = (odoo.search_read("stock.picking", [("id", "=", pid)], ["purchase_id"], company_ids=c1)[0].get("purchase_id") or [0])[0]
+                with lock, con() as c:
+                    dids = [b["doc_id"]] if b.get("doc_id") else []
+                    if not dids and po_id:
+                        for d in c.execute("SELECT id, compra FROM docs WHERE compra IS NOT NULL").fetchall():
+                            try:
+                                if json.loads(d["compra"]).get("pedido_id") == po_id:
+                                    dids.append(d["id"])
+                            except Exception:
+                                pass
+                    for d in dids:
+                        c.execute("UPDATE docs SET recepcion=? WHERE id=?", (json.dumps(rec, ensure_ascii=False), d))
+                rec_doc = dids[0] if dids else None
+            except Exception:
+                rec_doc = None
+            return {"ok": True, "queda_pendiente": pendiente, "servir": servir, "informe": rec_doc}
         return guard(run)
 
     # ---------- facturas para Mayte ----------

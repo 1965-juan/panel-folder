@@ -3,6 +3,7 @@ let CO_TAB = null, CO_RECS = [], CO_MES = new Date().toISOString().slice(0, 7), 
 const coEmpNombre = () => { const o = $('#company').selectedOptions[0]; return o ? o.textContent : ''; };
 const coDate = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
 async function coBadge() {
+  if (typeof MODS !== 'undefined' && MODS.length && !MODS.includes('facturacion')) { const b = $('#nb-co'); if (b) b.hidden = true; return null; }
   try { const f = await api(`/api/compras/facturas?company=${company}`); const n = f.filter(x => x.estado !== 'leyendo').length;
     const b = $('#nb-co'); b.textContent = n; b.hidden = !n; return f; } catch (e) { return null; }
 }
@@ -13,7 +14,14 @@ function coTab(t) {
   ({ subir: coDocs, rec: coRec, fac: coFac, recu: coRecu, ban: bnPend })[t]();
 }
 document.querySelectorAll('.co-tabs button').forEach(b => b.onclick = () => coTab(b.dataset.t));
+function coSoloAlbaranes() {   // almacén (sin facturación): solo subir albaranes y recepciones
+  const solo = MODS.length && !MODS.includes('facturacion');
+  document.querySelectorAll('.co-tabs button').forEach(b => b.hidden = solo && !['subir', 'rec'].includes(b.dataset.t));
+  const df = document.querySelector('.drop.d-fac'); if (df) df.hidden = solo;
+  return solo;
+}
 function coOpen() {
+  if (coSoloAlbaranes()) return coTab(CO_TAB && ['subir', 'rec'].includes(CO_TAB) ? CO_TAB : 'subir');
   // Mayte (solo compras) entra directamente en Facturas
   coTab(CO_TAB || (MODS.length && !MODS.includes('ac') ? 'fac' : 'subir'));
 }
@@ -73,6 +81,7 @@ async function coDocs() {
         · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
       <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
       <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Buscar o crear el proveedor del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
+        ${x.tipo === 'albaran' && (x.compra || x.recepcion) ? '<button class="lnk" data-a="informe">📄 Informe</button>' : ''}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
   };
   $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
@@ -83,6 +92,7 @@ async function coDocs() {
       if (a === 'cuadrar') return coPasar(x.id);
       if (a === 'auto') { b.disabled = true; b.textContent = 'Buscando y cuadrando…'; await jpost(`/api/compras/docs/${x.id}/auto`, {}); setTimeout(coDocs, 1500); return; }
       if (a === 'prov') { if (!confirm(`¿Crear en Odoo el proveedor «${x.proveedor}» con el CIF de la factura?`)) return; const r = await jpost(`/api/compras/docs/${x.id}/proveedor_nuevo`, {}); alertBox(`Proveedor ${r.nombre} listo. Vuelvo a cuadrar el documento…`); setTimeout(coDocs, 8000); return coDocs(); }
+      if (a === 'informe') return window.open('/compras/informe/' + x.id, '_blank');
       if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
       if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
       if (a === 'releer') { await jpost(`/api/compras/docs/${x.id}/releer`, {}); return coDocs(); }
@@ -185,6 +195,7 @@ async function coPasar(did, opts = {}) {
           ${r.pendiente ? `<br>Lo que no ha venido queda en <b>${escH(r.pendiente)}</b> (borrador).` : ''}
           ${r.anadidas.length ? `<br>Añadidas al pedido: ${r.anadidas.map(escH).join(', ')}.` : ''}
           ${r.factura ? '<br>' + escH(r.factura) : ''}${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>
+          <a class="btn" target="_blank" href="/compras/informe/${did}">📄 Informe para almacén (cambios y pendiente)</a>
           <button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`;
         $('#pc-fi').onclick = () => coFichas({ pedido_id: r.pedido_id });
         $('#pc-go').remove(); coDocs();
@@ -300,7 +311,9 @@ function coRecibirOpen(r) {
     try {
       const res = await jpost(`/api/compras/recibir?company=${company}`, { picking_id: r.id, cantidades: cant, albaran: $('#co-an').value.trim(), doc_id: CO_ALB && CO_ALB.id });
       CO_ALB = null;
-      $('#co-res').innerHTML = `<div class="ac-docs"><b>✓ Recibido en Odoo.</b> ${res.queda_pendiente ? 'Lo que faltaba queda pendiente.' : 'Pedido completo.'}</div>
+      if (res.informe) window.open('/compras/informe/' + res.informe, '_blank');
+      $('#co-res').innerHTML = `<div class="ac-docs"><b>✓ Recibido en Odoo.</b> ${res.queda_pendiente ? 'Lo que faltaba queda pendiente.' : 'Pedido completo.'}
+        ${res.informe ? `<br><a class="btn" target="_blank" href="/compras/informe/${res.informe}">📄 Ver el informe del albarán</a>` : ''}</div>
         ${res.servir.length ? `<h4>Ya se puede servir</h4><table class="co-t"><thead><tr><th>Para</th><th>Pedido</th><th>Artículo</th><th>Pend.</th></tr></thead><tbody>${res.servir.map(s => `<tr><td>${escH(s.quien)}</td><td>${escH(s.ref)}</td><td>${escH(s.producto)}</td><td>${s.pendiente}</td></tr>`).join('')}</tbody></table>
           <a class="btn" href="#ac" onclick="$('#co-drawer').hidden=true">Ir al Panel AC a servirlo</a>` : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
       $('#co-ok').remove(); coRec();

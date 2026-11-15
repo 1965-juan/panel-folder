@@ -486,3 +486,4 @@ label.tb-ok input{width:18px;height:18px}
 .d-stk .pd-b{background:#ece4f6}
 body.u-compras #v-ac input[data-loc],body.u-compras #v-ac .hueco{display:none!important}
 body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
+#v-co [hidden]{display:none!important}
