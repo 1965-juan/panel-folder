@@ -177,7 +177,9 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                                ["name"], company_ids=[E], order="id", limit=5)
         if not tpl:
             return "no encuentro la plantilla de email de facturas"
-        tid = next((x["id"] for x in tpl if "envío" in x["name"].lower() or "sending" in x["name"].lower()), tpl[0]["id"])
+        # la plantilla estándar de Odoo (account.email_template_edi_invoice: «Factura: enviando»), nunca la de autofacturación ni rectificativas
+        std = odoo.search_read("ir.model.data", [("module", "=", "account"), ("name", "=", "email_template_edi_invoice")], ["res_id"], [E], limit=1)
+        tid = std[0]["res_id"] if std else next((x["id"] for x in tpl if re.search(r"^factura: (enviando|env[ií]o)", x["name"].lower())), tpl[0]["id"])
         try:
             for f in fids:
                 odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True)
