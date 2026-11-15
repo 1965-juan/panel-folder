@@ -181,11 +181,25 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, allowed_companies,
                 vals["x_delivery_note"] = b["nota_entrega"].strip()
             r = odoo.call("sale.order", "create", [emp], vals_list=[vals])
             so_id = r[0] if isinstance(r, list) else r
-            if b.get("confirmar") and es_admin(u):   # almacén y compras siempre lo dejan en presupuesto
+            aviso = ""
+            if b.get("confirmar"):
                 odoo.call("sale.order", "action_confirm", [emp], ids=[so_id])
+                if b.get("avisar"):   # confirmación al cliente: el mismo aviso «pedido en preparación» que desde Ventas, saliendo de info@
+                    tpl = odoo.search_read("mail.template", [("model", "=", "sale.order"), ("name", "=", "Folder - Aviso pedido en preparación")], ["id"], [emp], limit=1)
+                    em = odoo.search_read("res.partner", [("id", "=", pid)], ["email"], empresas(u))
+                    if not tpl:
+                        aviso = "no encuentro la plantilla del aviso en Odoo"
+                    elif not em or not em[0].get("email"):
+                        aviso = "el cliente no tiene email: no se ha enviado la confirmación"
+                    else:
+                        try:
+                            odoo.call("mail.template", "send_mail", [emp], ids=[tpl[0]["id"]], res_id=so_id, force_send=True,
+                                      email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
+                        except Exception as e:
+                            aviso = f"no se pudo enviar la confirmación: {str(e)[:150]}"
             so = odoo.search_read("sale.order", [("id", "=", so_id)], ["name", "amount_untaxed", "amount_total", "state"], [emp])[0]
             ln = odoo.search_read("sale.order.line", [("order_id", "=", so_id)], ["product_id", "product_uom_qty", "price_unit", "discount", "price_subtotal"], [emp])
-            return {"id": so_id, "nombre": so["name"], "estado": so["state"], "base": so["amount_untaxed"], "total": so["amount_total"], "cid": emp,
+            return {"aviso": aviso, "avisado": bool(b.get("confirmar") and b.get("avisar") and not aviso), "id": so_id, "nombre": so["name"], "estado": so["state"], "base": so["amount_untaxed"], "total": so["amount_total"], "cid": emp,
                     "lineas": [{"articulo": l["product_id"][1] if l.get("product_id") else "", "cantidad": l["product_uom_qty"], "precio": l["price_unit"],
                                 "dto": l.get("discount") or 0, "subtotal": l["price_subtotal"]} for l in ln],
                     "odoo": f"{odoo_url}/odoo/sales/{so_id}"}

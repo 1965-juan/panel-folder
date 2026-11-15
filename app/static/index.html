@@ -173,8 +173,8 @@
         <table class="pe-t"><thead><tr><th>Artículo</th><th>Cant.</th><th>Precio <small class="muted">(vacío = tarifa)</small></th><th></th></tr></thead><tbody id="pe-lin"></tbody></table>
         <p id="pe-vacio" class="muted">Añade artículos con el buscador (o desde la pestaña Artículos).</p>
         <div id="pe-hbox" class="pe-hbox" hidden></div>
-        <div class="pe-bot"><button class="ac-go" id="pe-pre">💾 Crear presupuesto</button><button class="btn" id="pe-ped" hidden>✔ Crear pedido confirmado</button><button class="btn" id="pe-borra">Vaciar</button></div>
-        <p class="muted pe-ayuda">Se crea como presupuesto en Odoo. Cuando el cliente lo acepte, se pasa a pedido desde Ventas (y al cliente le llega el aviso por email).</p>
+        <label class="pe-av"><input type="checkbox" id="pe-avi" checked> Al crear el pedido, enviar la confirmación al cliente por email <small class="muted" id="pe-avi-e"></small></label>
+        <div class="pe-bot"><button class="btn" id="pe-pre">💾 Guardar como presupuesto</button><button class="ac-go" id="pe-ped">✔ Crear pedido</button><button class="btn" id="pe-borra">Vaciar</button></div>
         <div id="pe-res"></div>
       </div>
     </div>

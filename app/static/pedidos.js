@@ -14,7 +14,6 @@ async function peOpen() {
     const dis = PE_EMPS.find(e => /DISTRIPLUS/i.test(e.name));
     if (!ADMIN && dis) { sel.value = dis.id; PE.emp = dis.id; }
     $('#pe-emp-l').hidden = !ADMIN;
-    $('#pe-ped').hidden = !ADMIN;
     sel.onchange = () => { PE.emp = sel.value; peGuarda(); };
   }
   $('#pe-ref').value = PE.ref || ''; $('#pe-nota').value = PE.nota || ''; $('#pe-nent').value = PE.nent || '';
@@ -67,6 +66,8 @@ function pePinta() {
     tb.appendChild(tr);
   });
   $('#pe-vacio').hidden = !!PE.lin.length;
+  $('#pe-avi').disabled = !(PE.cli && PE.cli.email);
+  $('#pe-avi-e').textContent = PE.cli ? (PE.cli.email ? `(${PE.cli.email})` : '(el cliente no tiene email)') : '';
   const n = document.querySelector('.side nav a[data-v="pedidos"]');
   if (n) n.textContent = PE.lin.length ? `Nuevo pedido (${PE.lin.length})` : 'Nuevo pedido';
 }
@@ -110,13 +111,14 @@ async function peCrea(confirmar) {
   if (!PE.cli) return alertBox('Elige primero el cliente');
   if (!PE.lin.length) return alertBox('Añade algún artículo');
   const emp = $('#pe-emp'), nomEmp = emp.options[emp.selectedIndex]?.text || '';
-  if (!confirm(`¿${confirmar ? 'Crear el PEDIDO confirmado' : 'Crear el PRESUPUESTO'} de ${PE.cli.nombre} (${PE.lin.length} artículos) en ${nomEmp}?`)) return;
+  const avi = confirmar && $('#pe-avi').checked && PE.cli.email;
+  if (!confirm(`¿${confirmar ? 'Crear el PEDIDO' + (avi ? ' y enviar la confirmación a ' + PE.cli.email : '') : 'Guardar el PRESUPUESTO'} de ${PE.cli.nombre} (${PE.lin.length} artículos) en ${nomEmp}?`)) return;
   const bs = [$('#pe-pre'), $('#pe-ped')]; bs.forEach(b => b.disabled = true);
   try {
     const r = await jpost('/api/pedidos/crear', { empresa: +emp.value, partner_id: PE.cli.id, ref: $('#pe-ref').value, nota: $('#pe-nota').value, confirmar,
-      entrega: PE.dir || 0, nota_entrega: $('#pe-nent').value,
+      entrega: PE.dir || 0, nota_entrega: $('#pe-nent').value, avisar: confirmar && $('#pe-avi').checked && !!PE.cli.email,
       lineas: PE.lin.map(l => ({ product_id: l.product_id, cantidad: l.cantidad, precio: l.precio })) });
-    $('#pe-res').innerHTML = `<div class="pe-ok"><b>✅ ${r.estado === 'sale' ? 'Pedido' : 'Presupuesto'} ${escH(r.nombre)} creado</b> · ${escH(PE.cli.nombre)} · ${eur(r.base)} + IVA = <b>${eur(r.total)}</b>
+    $('#pe-res').innerHTML = `<div class="pe-ok"><b>✅ ${r.estado === 'sale' ? 'Pedido' : 'Presupuesto'} ${escH(r.nombre)} creado</b>${r.avisado ? ' · 📧 confirmación enviada al cliente' : ''}${r.aviso ? ' · ⚠️ ' + escH(r.aviso) : ''} · ${escH(PE.cli.nombre)} · ${eur(r.base)} + IVA = <b>${eur(r.total)}</b>
       <table class="pe-t">${r.lineas.map(l => `<tr><td>${escH(l.articulo)}</td><td>${+l.cantidad}</td><td>${eur(l.precio)}${l.dto ? ` −${l.dto}%` : ''}</td><td>${eur(l.subtotal)}</td></tr>`).join('')}</table>
       <a class="btn" target="_blank" rel="noopener" href="${r.odoo}">Abrir en Odoo ↗</a> <a class="btn" href="#ventas">Ver en Ventas</a></div>`;
     PE = { cli: null, lin: [], emp: PE.emp }; peGuarda(); $('#pe-ref').value = ''; $('#pe-nota').value = ''; $('#pe-nent').value = ''; $('#pe-hbox').hidden = true; pePinta(); peDirs();
