@@ -542,8 +542,9 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         gim = set()
         if bor:
             try:
-                for r in odoo.search_read("res.partner", [("email", "ilike", EMAIL_GIMENO), ("active", "in", [True, False])],
-                                          ["commercial_partner_id"], cids, limit=1000):
+                dom = ["|", "|", ("email", "ilike", EMAIL_GIMENO), ("category_id.name", "ilike", "e-Factura Gimeno")]
+                dom += ["|"] * (len(GIMENO_SIN_ETIQUETA) - 1) + [("name", "ilike", n) for n in GIMENO_SIN_ETIQUETA]
+                for r in odoo.search_read("res.partner", dom + [("active", "in", [True, False])], ["commercial_partner_id"], cids, limit=2000):
                     gim.add(r["commercial_partner_id"][0])
             except Exception:
                 pass
@@ -899,6 +900,8 @@ async def avisos_tpv_resolver(request: Request):
 
 # ---------- Web: favoritos («lista de deseos») con lo que compra cada cliente ----------
 EMAIL_GIMENO = "pdf-facturas@nealis.com"   # plataforma de facturas del Grupo Gimeno: esos clientes exigen la ORD
+# clientes que suben por e-Factura (Gimeno) aunque no lleven la etiqueta «e-Factura Gimeno» en Odoo
+GIMENO_SIN_ETIQUETA = ["Fobesa Medioambiente", "Nealis Hospitality", "Nealis Digital Technologies", "Fomento Castell", "Aguas de Benic"]
 WEB_ID = 1   # web Folder Castellón (Distriplus)
 
 
