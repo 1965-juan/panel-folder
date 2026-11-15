@@ -33,6 +33,7 @@ function acTienda(n) {
   if (/tienda ?1\b|^t1/.test(n)) return 'T1';
   if (/tienda ?2\b|^t2/.test(n)) return 'T2';
   if (/logipaper|tienda ?3\b|^t3|^vp/.test(n)) return 'TL';
+  if (/almac/.test(n)) return 'AC';
   return '';
 }
 // pedidos que nos hace Logipaper (cliente LOGIPAPER): van con las tiendas, en TL, no con los clientes
@@ -49,7 +50,7 @@ function acChips() {
   const gsAll = acGroups(), nTi = k => k === 'TL' ? gsAll.filter(acEsTL).length : (AC.reposicion || []).filter(p => acTienda(p.store_name) === k).length;
   const ncli = gsAll.filter(acEsCli).length;
   $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${ncli})`], ['reposicion', `Tiendas (${nt})`],
-    ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`]]
+    ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`], ['AC', `Almacén (${nTi('AC')})`]]
     .map(([k, t]) => `<button data-v="${k}" class="${ACV === k ? 'on' : ''}">${t}</button>`).join('');
   $('#ac-ver').querySelectorAll('button').forEach(b => b.onclick = () => { ACV = b.dataset.v; acRender(); });
 }
@@ -66,7 +67,7 @@ function acRender() {
   let n = 0;
   acGroups().forEach(g => {
     if (ACV === 'TL') { if (!acEsTL(g)) return; }
-    else if (['T1', 'T2'].includes(ACV)) { if (g.tipo !== 'reposicion' || acTienda(g.nombre) !== ACV) return; }
+    else if (['T1', 'T2', 'AC'].includes(ACV)) { if (g.tipo !== 'reposicion' || acTienda(g.nombre) !== ACV) return; }
     else if (ACV === 'cliente') { if (!acEsCli(g)) return; }
     else if (ACV !== 'todos' && g.tipo !== ACV) return;
     const lines = g.lines.filter(l => acPass(g, l) && acMatch(g, l, q));
