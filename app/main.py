@@ -911,6 +911,35 @@ async def web_contacto_nuevo(request: Request):
     return guard(run)
 
 
+@app.post("/api/web/invitar")
+async def web_invitar(request: Request):
+    """{partner_id, email?}: envía desde Odoo la carta de invitación a la web (la misma que va por Brevo) a esa persona."""
+    _solo_admin(request)
+    b = await request.json()
+
+    def run():
+        pid = int(b["partner_id"])
+        p = odoo.search_read("res.partner", [("id", "=", pid)], ["name", "email"], [1, 2, 3, 4, 5])
+        if not p:
+            raise HTTPException(404, "No encuentro el contacto")
+        em = (b.get("email") or p[0].get("email") or "").strip()
+        if not em:
+            raise HTTPException(400, "El contacto no tiene email")
+        html = (BASE / "plantillas" / "invitacion_web.html").read_text(encoding="utf-8")
+        r = odoo.call("mail.mail", "create", [1], vals_list=[{
+            "subject": "NUEVA WEB: ya puede pedir online en Folder Castellón", "email_to": em,
+            "email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es",
+            "body_html": html, "recipient_ids": [[6, 0, [pid]]], "auto_delete": False}])
+        mid = r[0] if isinstance(r, list) else r
+        try:
+            odoo.call("mail.mail", "send", [1], ids=[mid])
+        except Exception:
+            pass   # si no deja enviarlo ya, sale en la siguiente vuelta de la cola de correo
+        st = odoo.search_read("mail.mail", [("id", "=", mid)], ["state", "failure_reason"], [1])
+        return {"para": em, "contacto": p[0]["name"], "estado": st[0]["state"] if st else "enviado", "error": (st[0].get("failure_reason") if st else "") or ""}
+    return guard(run)
+
+
 @app.post("/api/web/favoritos")
 async def web_favoritos(request: Request):
     """{partner_id, dias=365, solo_ver}: pone en la lista de deseos de la web (de la empresa y de todos sus contactos con acceso)
