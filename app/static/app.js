@@ -14,6 +14,9 @@ async function api(path) {
 
 function showErr(msg) { const e = $('#err'); e.textContent = msg; e.hidden = !msg; }
 
+// sin ORD/nº de pedido del cliente: vacío o con nuestro propio nº de pedido (S01234) puesto por Odoo
+const faltaOrd = c => !!c.pide_ord && (!c.su_ref || /^S\d{4,}$/i.test(c.su_ref.trim()));
+
 function card(c) {
   const d = document.createElement('div');
   d.className = 'card ' + (c.estado || '') + (c.vencida ? ' vencida' : '') + (c.web ? ' web' : '');
@@ -30,7 +33,7 @@ function card(c) {
     <div class="cli"></div><div class="c3"><span class="emp"></span><span>${foot}</span></div>`;
   d.querySelector('.ref').textContent = c.ref;
   if (c.enviado || c.reclamado) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Enviado${/\d/.test(c.enviado) ? ' ' + fdate(c.enviado) : ''}</span>` : ''}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado ${fdate(c.reclamado)}</span>` : ''}</div>`);
-  if (c.borrador) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.pide_ord && !/^ORD/i.test(c.su_ref) ? '<span class="mk mk-rec">⚠ Falta la ORD (Grupo Gimeno · pdf-facturas)</span>' : `${c.su_ref ? `<span class="mk mk-env">Ref. ${escH(c.su_ref)}</span>` : ''}<span class="mk">Sin validar ni enviar</span>`}</div>`);
+  if (c.borrador) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${faltaOrd(c) ? '<span class="mk mk-rec">⚠ Falta la ORD / nº pedido del cliente (Gimeno)</span>' : `${c.su_ref ? `<span class="mk mk-env">Ref. ${escH(c.su_ref)}</span>` : ''}<span class="mk">Sin validar ni enviar</span>`}</div>`);
   if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
@@ -64,7 +67,7 @@ async function load() {
     d.borradores = d.borradores || [];
     if (verFac) fill('facturas', d.borradores, '.cards.bor');
     $('#nbor').textContent = d.borradores.length;
-    $('#tgbor').classList.toggle('hay', d.borradores.some(b => b.pide_ord && !/^ORD/i.test(b.su_ref)));
+    $('#tgbor').classList.toggle('hay', d.borradores.some(b => faltaOrd(b)));
     const sum = (l, k = 'total') => eur(l.reduce((a, c) => a + (c[k] || 0), 0));
     $('#k-pre').textContent = d.presupuestos.length; $('#k-pre-e').textContent = sum(d.presupuestos);
     $('#k-ped').textContent = d.pedidos.length; $('#k-ped-e').textContent = sum(d.pedidos);
@@ -85,7 +88,7 @@ async function openDetail(c) {
   $('#drawer').hidden = false;
   if (c.model !== 'sale.order') {
     tb.innerHTML = c.borrador
-      ? (c.pide_ord && !/^ORD/i.test(c.su_ref)
+      ? (faltaOrd(c)
         ? '<tr><td colspan="5">Factura en borrador <b>sin la ORD</b> (Grupo Gimeno · pdf-facturas). Ábrela en Odoo, pon la ORD en «Referencia del cliente», pulsa <b>Confirmar</b> y luego <b>Enviar</b>.</td></tr>'
         : '<tr><td colspan="5">Factura en borrador. Ábrela en Odoo, pulsa <b>Confirmar</b> y luego <b>Enviar</b>.</td></tr>')
       : '<tr><td colspan="5">Para ver la factura, ábrela en Odoo.</td></tr>';
