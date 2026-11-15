@@ -879,6 +879,38 @@ def web_clientes(request: Request, q: str = ""):
         "res.partner", [("is_company", "=", True), "|", ("name", "ilike", q), ("vat", "ilike", q)], ["display_name"], [1, 2, 3, 4, 5], limit=15)])
 
 
+@app.get("/api/web/contactos")
+def web_contactos(request: Request, q: str = "", empresa: int = 0):
+    """Personas (y empresas) por nombre o email, o todos los contactos de una empresa, con su email y si ya tienen acceso web."""
+    _solo_admin(request)
+    T = [1, 2, 3, 4, 5]
+    if empresa:
+        dom = [("id", "child_of", empresa)]
+    elif len(q.strip()) >= 2:
+        dom = ["|", ("name", "ilike", q), ("email", "ilike", q)]
+    else:
+        return []
+    return guard(lambda: [{"id": p["id"], "nombre": p["display_name"], "email": p.get("email") or "", "con_acceso": bool(p.get("user_ids"))}
+                          for p in odoo.search_read("res.partner", dom, ["display_name", "email", "user_ids"], T, limit=40)])
+
+
+@app.post("/api/web/contacto")
+async def web_contacto_nuevo(request: Request):
+    """{empresa_id, nombre, email}: crea una persona de contacto dentro de la empresa (para darle acceso a la web)."""
+    _solo_admin(request)
+    b = await request.json()
+
+    def run():
+        emp = int(b["empresa_id"])
+        em = (b.get("email") or "").strip().lower()
+        ya = odoo.search_read("res.partner", [("parent_id", "=", emp), ("email", "=ilike", em)], ["id", "name"], [1, 2, 3, 4, 5], limit=1) if em else []
+        if ya:
+            return {"id": ya[0]["id"], "nombre": ya[0]["name"], "nuevo": False}
+        r = odoo.call("res.partner", "create", [1], vals_list=[{"parent_id": emp, "type": "contact", "name": b["nombre"].strip(), "email": em}])
+        return {"id": r[0] if isinstance(r, list) else r, "nombre": b["nombre"], "nuevo": True}
+    return guard(run)
+
+
 @app.post("/api/web/favoritos")
 async def web_favoritos(request: Request):
     """{partner_id, dias=365, solo_ver}: pone en la lista de deseos de la web (de la empresa y de todos sus contactos con acceso)
