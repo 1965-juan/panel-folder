@@ -866,6 +866,73 @@ async def avisos_tpv_resolver(request: Request):
     return guard(run)
 
 
+# ---------- Web: favoritos («lista de deseos») con lo que compra cada cliente ----------
+WEB_ID = 1   # web Folder Castellón (Distriplus)
+
+
+@app.get("/api/web/clientes")
+def web_clientes(request: Request, q: str = ""):
+    _solo_admin(request)
+    if len(q.strip()) < 2:
+        return []
+    return guard(lambda: [{"id": p["id"], "nombre": p["display_name"]} for p in odoo.search_read(
+        "res.partner", [("is_company", "=", True), "|", ("name", "ilike", q), ("vat", "ilike", q)], ["display_name"], [1, 2, 3, 4, 5], limit=15)])
+
+
+@app.post("/api/web/favoritos")
+async def web_favoritos(request: Request):
+    """{partner_id, dias=365, solo_ver}: pone en la lista de deseos de la web (de la empresa y de todos sus contactos con acceso)
+    lo que ha comprado ese cliente en los últimos días (pedidos de venta y tickets de TPV, todas las empresas)."""
+    _solo_admin(request)
+    b = await request.json()
+    pid = int(b.get("partner_id") or 0)
+    dias = int(b.get("dias") or 365)
+    T = [1, 2, 3, 4, 5]
+
+    def run():
+        cp = odoo.search_read("res.partner", [("id", "=", pid)], ["commercial_partner_id", "name"], T)
+        if not cp:
+            raise HTTPException(404, "No encuentro el cliente")
+        com = cp[0]["commercial_partner_id"][0]
+        desde = (dt.date.today() - dt.timedelta(days=dias)).isoformat()
+        veces = {}
+        for l in odoo.search_read("sale.order.line", [("order_id.partner_id", "child_of", com), ("order_id.state", "=", "sale"),
+                                                      ("order_id.date_order", ">=", desde), ("display_type", "=", False), ("product_id", "!=", False)],
+                                  ["product_id", "order_id"], T, limit=50000):
+            veces.setdefault(l["product_id"][0], set()).add(("so", l["order_id"][0]))
+        try:
+            for l in odoo.search_read("pos.order.line", [("order_id.partner_id", "child_of", com), ("order_id.date_order", ">=", desde)],
+                                      ["product_id", "order_id"], T, limit=50000):
+                veces.setdefault(l["product_id"][0], set()).add(("pos", l["order_id"][0]))
+        except Exception:
+            pass
+        pids = list(veces)
+        prods = odoo.search_read("product.product", [("id", "in", pids), ("sale_ok", "=", True), ("type", "!=", "service")],
+                                 ["display_name", "lst_price", "product_tmpl_id"], T) if pids else []
+        tm = list({p["product_tmpl_id"][0] for p in prods})
+        pub = {t["id"] for t in odoo.search_read("product.template", [("id", "in", tm), ("is_published", "=", True)], ["id"], T)} if tm else set()
+        prods = [p for p in prods if p["product_tmpl_id"][0] in pub]
+        # quién entra en la web de esa empresa: la empresa y sus contactos con usuario
+        socios = {com} | {u["partner_id"][0] for u in odoo.search_read("res.users", [("share", "=", True), ("partner_id", "child_of", com)], ["partner_id"], T)}
+        tarifa = 16
+        try:
+            pl = odoo.search_read("res.partner", [("id", "=", com)], ["property_product_pricelist"], [1])
+            if pl and pl[0].get("property_product_pricelist"):
+                tarifa = pl[0]["property_product_pricelist"][0]
+        except Exception:
+            pass
+        ya = {(w["partner_id"][0], w["product_id"][0]) for w in odoo.search_read("product.wishlist", [("partner_id", "in", list(socios))],
+                                                                                 ["partner_id", "product_id"], [1], limit=50000)}
+        nuevos = [{"partner_id": s, "product_id": p["id"], "website_id": WEB_ID, "pricelist_id": tarifa, "price": p.get("lst_price") or 0}
+                  for s in socios for p in prods if (s, p["id"]) not in ya]
+        if nuevos and not b.get("solo_ver"):
+            for i in range(0, len(nuevos), 200):
+                odoo.call("product.wishlist", "create", [1], vals_list=nuevos[i:i + 200])
+        return {"cliente": cp[0]["name"], "comprados": len(pids), "en_web": len(prods), "accesos": len(socios),
+                "anadidos": 0 if b.get("solo_ver") else len(nuevos), "articulos": sorted(p["display_name"] for p in prods)[:200]}
+    return guard(run)
+
+
 @app.get("/api/salud")
 def salud():
     return {"ok": True, "demo": DEMO}
