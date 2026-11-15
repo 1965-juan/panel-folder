@@ -626,6 +626,36 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                               ["name", "state"], cids, order="id")
         so = odoo.search_read("sale.order", [("id", "=", oid)], ["partner_id", "state", "company_id", "invoice_status", "client_order_ref", "partner_invoice_id"], cids)[0]
         em = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["email", "commercial_partner_id"], cids) if so.get("partner_id") else []
+        # stock de cada artículo en almacén y tiendas, y lo pendiente de recibir de proveedor
+        lines_ok = [l for l in lines if not l.get("display_type") and l.get("product_id")]
+        pids = list({l["product_id"][0] for l in lines_ok})
+        if pids:
+            allowed = [c["id"] for c in allowed_companies(u)]
+            stk = {}
+            for nom, emp, loc in _ped.STOCKS:
+                if emp not in allowed:
+                    continue
+                try:
+                    for qq in odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id", "child_of", loc)], ["product_id", "quantity"],
+                                               [emp] + [c for c in allowed if c != emp], limit=5000):
+                        k = (qq["product_id"][0], nom)
+                        stk[k] = stk.get(k, 0) + qq["quantity"]
+                except Exception:
+                    pass
+            pend = {}
+            try:
+                for pl in odoo.search_read("purchase.order.line", [("product_id", "in", pids), ("order_id.state", "=", "purchase")],
+                                           ["product_id", "product_qty", "qty_received", "order_id", "partner_id", "date_planned"], allowed, limit=2000):
+                    falta = (pl.get("product_qty") or 0) - (pl.get("qty_received") or 0)
+                    if falta > 0.001:
+                        pend.setdefault(pl["product_id"][0], []).append({"po": pl["order_id"][1], "proveedor": (pl.get("partner_id") or [0, ""])[1],
+                                                                         "cantidad": round(falta, 2), "fecha": (pl.get("date_planned") or "")[:10]})
+            except Exception:
+                pass
+            for l in lines_ok:
+                p = l["product_id"][0]
+                l["stock"] = [{"donde": nom, "hay": round(stk.get((p, nom), 0), 2)} for nom, emp, loc in _ped.STOCKS if emp in allowed]
+                l["pendiente"] = pend.get(p, [])
         out = {"lineas": [l for l in lines if not l.get("display_type")], "historial": hist,
                "albaranes": [{"id": x["id"], "nombre": x["name"], "estado": x["state"]} for x in pk],
                "email": (em[0].get("email") if em else "") or "", "estado": so["state"], "facturar": False}

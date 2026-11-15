@@ -106,6 +106,12 @@ async function openDetail(c) {
       tr.innerHTML = `<td></td><td>${l.product_uom_qty}</td><td>${l.qty_delivered}</td><td>${eur(l.price_unit)}</td><td>${eur(l.price_subtotal)}</td>`;
       tr.firstChild.textContent = l.product_id ? l.product_id[1] : l.name;
       tb.appendChild(tr);
+      if (l.stock || (l.pendiente && l.pendiente.length)) {
+        const t2 = document.createElement('tr'); t2.className = 'd-stk';
+        t2.innerHTML = `<td colspan="5">${(l.stock || []).map(s => `<span class="${s.hay > 0 ? 'si' : 'no'}">${escH(s.donde)} <b>${+s.hay}</b></span>`).join('')}
+          ${(l.pendiente || []).map(p => `<span class="pd">🚚 ${+p.cantidad} de ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}${p.fecha ? ', prev. ' + fdate(p.fecha) : ''})</span>`).join('')}</td>`;
+        tb.appendChild(t2);
+      }
     });
     d.historial.forEach(h => {
       const li = document.createElement('li');
