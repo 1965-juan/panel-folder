@@ -705,7 +705,7 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
         tpl = odoo.search_read("mail.template", [("model", "=", "sale.order"), ("name", "=", PLANTILLAS_PRESU[tipo])], ["id"], [c], limit=1)
         if not tpl:
             raise HTTPException(400, f"No encuentro la plantilla «{PLANTILLAS_PRESU[tipo]}» en Odoo")
-        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True)
+        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True, email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
         if tipo == "presupuesto" and so["state"] == "draft":
             try:
                 odoo.call("sale.order", "write", [c], ids=[oid], vals={"state": "sent"})
@@ -760,11 +760,46 @@ def _enviar_factura(E, fids):
     tid = std[0]["res_id"] if std else next((x["id"] for x in tpl if re.search(r"^factura: (enviando|env[ií]o)", x["name"].lower())), tpl[0]["id"])
     try:
         for f in fids:
-            odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True)
+            odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True, email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
             odoo.call("account.move", "write", [E], ids=[f], vals={"is_move_sent": True})
     except Exception as e:
         return str(e)[:200]
     return ""
+
+
+@app.post("/api/admin/reenviar_facturas")
+async def admin_reenviar_facturas(request: Request):
+    """Solo admin. {desde, solo_ver}: facturas cuyo email a cliente falló (correo en «excepción»). Las vuelve a enviar desde info@
+    con la plantilla estándar y da por cancelados los correos fallidos (para que no se envíen dos veces)."""
+    _solo_admin(request)
+    b = await request.json()
+    T = [1, 2, 3, 4, 5]
+
+    def run():
+        mm = odoo.search_read("mail.mail", [("state", "=", "exception"), ("model", "=", "account.move"), ("create_date", ">=", b.get("desde") or "2026-10-01")],
+                              ["res_id", "failure_reason"], T, limit=500)
+        ids = sorted({m["res_id"] for m in mm})
+        mv = odoo.search_read("account.move", [("id", "in", ids), ("state", "=", "posted")], ["name", "partner_id", "amount_total", "company_id"], T)
+        em = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", [m["partner_id"][0] for m in mv if m.get("partner_id")])], ["email"], T)}
+        out = []
+        for m in mv:
+            r = {"factura": m["name"], "cliente": m["partner_id"][1] if m.get("partner_id") else "", "total": m["amount_total"],
+                 "email": em.get((m.get("partner_id") or [0])[0], "")}
+            if not b.get("solo_ver"):
+                if not r["email"]:
+                    r["estado"] = "sin email en la ficha"
+                else:
+                    err = _enviar_factura(m["company_id"][0], [m["id"]])
+                    r["estado"] = "error: " + err if err else "enviada"
+                    if not err:
+                        viejos = [x["id"] for x in mm if x["res_id"] == m["id"]]
+                        try:
+                            odoo.call("mail.mail", "write", T, ids=viejos, vals={"state": "cancel"})
+                        except Exception:
+                            pass
+            out.append(r)
+        return out
+    return guard(run)
 
 
 @app.post("/api/ventas/{oid}/accion")
@@ -896,7 +931,7 @@ async def api_confirmar(request: Request, oid: int, company: str = "all"):
                     aviso = "no encuentro la plantilla del aviso en Odoo"
                 else:
                     try:
-                        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True)
+                        odoo.call("mail.template", "send_mail", [c], ids=[tpl[0]["id"]], res_id=oid, force_send=True, email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
                     except Exception as e:
                         aviso = f"no se pudo enviar el aviso: {str(e)[:150]}"
         return {"ok": True, "pedido": so["name"], "avisado": bool(b.get("avisar")) and not aviso, "aviso": aviso}

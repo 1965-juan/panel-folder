@@ -182,7 +182,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
         tid = std[0]["res_id"] if std else next((x["id"] for x in tpl if re.search(r"^factura: (enviando|env[ií]o)", x["name"].lower())), tpl[0]["id"])
         try:
             for f in fids:
-                odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True)
+                odoo.call("mail.template", "send_mail", [E], ids=[tid], res_id=f, force_send=True, email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
                 odoo.call("account.move", "write", [E], ids=[f], vals={"is_move_sent": True})
         except Exception as e:
             return str(e)[:200]

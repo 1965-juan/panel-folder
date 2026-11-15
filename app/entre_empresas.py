@@ -284,7 +284,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                     mal.append(f"{f['name']}: el cliente no tiene email"); continue
                 try:
                     c = f["company_id"][0]
-                    odoo.call("mail.template", "send_mail", [c] + [x for x in TODAS if x != c], ids=[tid], res_id=f["id"], force_send=True)
+                    odoo.call("mail.template", "send_mail", [c] + [x for x in TODAS if x != c], ids=[tid], res_id=f["id"], force_send=True, email_values={"email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es"})
                     odoo.call("account.move", "write", [c] + [x for x in TODAS if x != c], ids=[f["id"]], vals={"is_move_sent": True})
                     ok.append(f["name"])
                 except Exception as e:
