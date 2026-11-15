@@ -1069,6 +1069,39 @@ async def web_dar_acceso(request: Request):
     return guard(run)
 
 
+@app.post("/api/web/promo")
+async def web_promo(request: Request):
+    """{porcentaje, hasta, nombre, prueba}: promoción automática en la web de Distriplus (descuento % sobre el pedido) hasta esa fecha."""
+    _solo_admin(request)
+    b = await request.json()
+    pct = float(b.get("porcentaje") or 3)
+    hasta = b.get("hasta") or f"{dt.date.today().year}-12-31"
+    nombre = b.get("nombre") or f"Web: {pct:g} % extra hasta {hasta[8:10]}/{hasta[5:7]}"
+
+    def run():
+        ya = odoo.search_read("loyalty.program", [("name", "=", nombre)], ["id", "active"], [1], limit=1)
+        if ya:
+            return {"ok": True, "id": ya[0]["id"], "ya_existia": True}
+        f = odoo.call("loyalty.program", "fields_get", [1], attributes=["type"])
+        vals = {"name": nombre, "program_type": "promotion", "trigger": "auto", "applies_on": "current", "company_id": 1,
+                "date_from": dt.date.today().isoformat(), "date_to": hasta,
+                "rule_ids": [[0, 0, {"minimum_amount": 0, "minimum_qty": 0, "reward_point_amount": 1}]],
+                "reward_ids": [[0, 0, {"reward_type": "discount", "discount": pct, "discount_mode": "percent", "discount_applicability": "order"}]]}
+        if "website_id" in f:
+            vals["website_id"] = 1
+        if "pos_ok" in f:
+            vals["pos_ok"] = False
+        if "sale_ok" in f:
+            vals["sale_ok"] = False      # no en pedidos hechos desde Odoo
+        if "ecommerce_ok" in f:
+            vals["ecommerce_ok"] = True  # solo pedidos de la web
+        if b.get("prueba"):
+            return {"ok": True, "vals": {k: v for k, v in vals.items() if k not in ("rule_ids", "reward_ids")}, "campos": [k for k in ("website_id", "pos_ok", "sale_ok", "ecommerce_ok") if k in f]}
+        r = odoo.call("loyalty.program", "create", [1], vals_list=[vals])
+        return {"ok": True, "id": r[0] if isinstance(r, list) else r}
+    return guard(run)
+
+
 EXCLUIR_WEB = ("PEDIDO ESCOLAR", "CONSUMIDOR", "CLIENTE CONTADO", "CLIENTES VARIOS", "VARIOS", "CLIENTE TPV", "CLIENTE GENERICO", "CLIENTE GENÉRICO")
 
 
