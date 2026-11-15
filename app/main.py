@@ -812,7 +812,7 @@ async def admin_reintentar_correos(request: Request):
 
     def run():
         mm = odoo.search_read("mail.mail", [("state", "=", "exception"), ("model", "=", b.get("model") or "sale.order"),
-                                            ("create_date", ">=", b.get("desde") or "2026-10-01")],
+                                            ("create_date", ">=", b.get("desde") or "2026-10-01")] + ([("subject", "ilike", b["asunto"])] if b.get("asunto") else []),
                               ["res_id", "subject", "create_date", "email_to", "recipient_ids"], T, limit=1000, order="create_date desc")
         vistos, enviar, dup = set(), [], []
         for m in mm:
