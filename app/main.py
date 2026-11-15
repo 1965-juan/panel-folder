@@ -994,6 +994,81 @@ def web_clientes_activos(request: Request, dias: int = 90):
     return guard(run)
 
 
+_cache_web = {}
+
+
+def _grupo_portal():
+    if "portal" not in _cache_web:
+        x = odoo.search_read("ir.model.data", [("module", "=", "base"), ("name", "=", "group_portal")], ["res_id"], [1])
+        _cache_web["portal"] = x[0]["res_id"]
+        f = odoo.call("res.users", "fields_get", [1], attributes=["type"])
+        _cache_web["campo_grupos"] = "group_ids" if "group_ids" in f else "groups_id"
+    return _cache_web["portal"], _cache_web["campo_grupos"]
+
+
+def _etiqueta(nombre):
+    t = odoo.search_read("res.partner.category", [("name", "=ilike", nombre)], ["id"], [1], limit=1)
+    if t:
+        return t[0]["id"]
+    r = odoo.call("res.partner.category", "create", [1], vals_list=[{"name": nombre}])
+    return r[0] if isinstance(r, list) else r
+
+
+@app.post("/api/web/dar_acceso")
+async def web_dar_acceso(request: Request):
+    """{items:[{id, email, corregir_email}], etiqueta, prueba}: crea el acceso a la web (usuario portal en Distriplus) SIN mandar el email de Odoo
+    (la invitación va aparte, p. ej. por Brevo) y marca al cliente con la etiqueta. Cada cliente entra con «Restablecer contraseña»."""
+    _solo_admin(request)
+    b = await request.json()
+    items = b.get("items") or []
+    prueba = bool(b.get("prueba"))
+    T = [1, 2, 3, 4, 5]
+    rx = re.compile(r"[^@\s;,/]+@[^@\s;,/]+\.[A-Za-z]{2,}")
+
+    def run():
+        portal, campo = _grupo_portal()
+        tag = _etiqueta(b.get("etiqueta") or "WEB") if not prueba else None
+        ids = [int(i["id"]) for i in items]
+        ps = {p["id"]: p for p in odoo.search_read("res.partner", [("id", "in", ids)], ["name", "email", "user_ids", "active", "category_id"],
+                                                     T, limit=5000, context={"active_test": False})}
+        emails = [i["email"].strip().lower() for i in items]
+        usados = {u["login"].lower(): u for u in odoo.search_read("res.users", [("login", "in", emails)], ["login", "partner_id"], T,
+                                                                   limit=5000, context={"active_test": False})}
+        res = []
+        for it in items:
+            pid, em = int(it["id"]), it["email"].strip().lower()
+            p = ps.get(pid)
+            r = {"id": pid, "email": em, "cliente": p["name"] if p else "?"}
+            if not p:
+                r["estado"] = "no existe en Odoo"
+            elif not rx.fullmatch(em):
+                r["estado"] = "email no válido"
+            elif p.get("user_ids"):
+                r["estado"] = "ya tenía acceso"
+            elif em in usados:
+                r["estado"] = f"email ya usado por {usados[em]['partner_id'][1]}"
+            else:
+                r["estado"] = "acceso creado"
+                if not prueba:
+                    try:
+                        if it.get("corregir_email"):
+                            odoo.call("res.partner", "write", T, ids=[pid], vals={"email": em})
+                        odoo.call("res.users", "create", [1], vals_list=[{"name": p["name"], "login": em, "partner_id": pid, "company_id": 1,
+                                                                          "company_ids": [[6, 0, [1]]], campo: [[6, 0, [portal]]]}],
+                                  context={"no_reset_password": True})
+                        usados[em] = {"partner_id": [pid, p["name"]]}
+                    except Exception as e:
+                        r["estado"] = "error: " + str(e)[:160]
+            if tag and p and r["estado"] in ("acceso creado", "ya tenía acceso") and tag not in (p.get("category_id") or []):
+                try:
+                    odoo.call("res.partner", "write", T, ids=[pid], vals={"category_id": [[4, tag]]})
+                except Exception:
+                    pass
+            res.append(r)
+        return res
+    return guard(run)
+
+
 EXCLUIR_WEB = ("PEDIDO ESCOLAR", "CONSUMIDOR", "CLIENTE CONTADO", "CLIENTES VARIOS", "VARIOS", "CLIENTE TPV", "CLIENTE GENERICO", "CLIENTE GENÉRICO")
 
 
