@@ -710,6 +710,29 @@ def _ventas_ocultas():
         return set()
 
 
+@app.get("/api/admin/campos")
+def admin_campos(request: Request, model: str, q: str = ""):
+    """Solo admin: campos de un modelo de Odoo (para localizar campos a medida, selecciones, etc.)."""
+    _solo_admin(request)
+
+    def run():
+        f = odoo.call(model, "fields_get", [1], attributes=["string", "type", "selection", "relation", "required"])
+        out = {}
+        for k, v in f.items():
+            if q and q.lower() not in (k + " " + (v.get("string") or "")).lower() and not k.startswith("x_"):
+                continue
+            out[k] = {"t": v.get("type"), "s": v.get("string"), "rel": v.get("relation"), "sel": v.get("selection"), "req": v.get("required")}
+        return out
+    return guard(run)
+
+
+@app.get("/api/admin/leer")
+def admin_leer(request: Request, model: str, dominio: str = "[]", campos: str = "", empresas: str = "1,2,3,4,5", limite: int = 50):
+    """Solo admin: lectura rápida de Odoo para revisar configuración."""
+    _solo_admin(request)
+    return guard(lambda: odoo.search_read(model, json.loads(dominio), [c for c in campos.split(",") if c], [int(x) for x in empresas.split(",")], limit=limite))
+
+
 @app.post("/api/ventas/{oid}/accion")
 async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     """{accion}: 'cancelar' (presupuesto o pedido sin servir: se cancela en Odoo, se puede recuperar),
