@@ -349,6 +349,7 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     document.querySelectorAll('.side nav a[data-m]').forEach(a => a.hidden = !MODS.includes(a.dataset.m));
     $('#usr-btn').hidden = !(ADMIN || yo.viendo_como);
     window.YO = yo;
+    document.body.classList.toggle('u-compras', yo.usuario === 'compras');   // compras no reparte stock en el Panel AC
     // aviso de versión nueva del panel (se actualiza en el NAS para todos; aquí basta con recargar)
     (() => { const v0 = yo.version; let avisado = false;
       const mira = async () => { if (avisado || document.hidden) return;

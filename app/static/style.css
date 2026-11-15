@@ -484,3 +484,4 @@ label.tb-ok input{width:18px;height:18px}
 .d-np{margin-top:8px}.d-np summary{cursor:pointer;color:var(--purple);font-size:12px}.d-npq{margin-top:5px;padding:5px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box}.d-nps a{display:block;padding:4px 6px;font-size:12px}.d-npf{margin-top:6px}
 #v-ventas [hidden],.drawer .d-npf[hidden]{display:none!important}
 .d-stk .pd-b{background:#ece4f6}
+body.u-compras #v-ac input[data-loc],body.u-compras #v-ac .hueco{display:none!important}
