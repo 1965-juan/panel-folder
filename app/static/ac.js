@@ -35,6 +35,9 @@ function acTienda(n) {
   if (/logipaper|tienda ?3\b|^t3|^vp/.test(n)) return 'TL';
   return '';
 }
+// pedidos que nos hace Logipaper (cliente LOGIPAPER): van con las tiendas, en TL, no con los clientes
+const acEsTL = g => g.tipo === 'reposicion' ? acTienda(g.nombre) === 'TL' : /logipaper/i.test(g.nombre || '');
+const acEsCli = g => g.tipo === 'cliente' && !/logipaper/i.test(g.nombre || '');
 function acChips() {
   const gs = acGroups(), cnt = {};
   AC_FILTROS.forEach(([k]) => cnt[k] = 0);
@@ -43,8 +46,9 @@ function acChips() {
   $('#ac-f').innerHTML = AC_FILTROS.map(([k, t]) => `<button data-f="${k}" class="${ACF === k ? 'on' : ''}">${t} (${cnt[k] || 0})</button>`).join('');
   $('#ac-f').querySelectorAll('button').forEach(b => b.onclick = () => { ACF = b.dataset.f; acRender(); });
   const nc = (AC.orders || []).length, nt = (AC.reposicion || []).length;
-  const nTi = k => (AC.reposicion || []).filter(p => acTienda(p.store_name) === k).length;
-  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${nc})`], ['reposicion', `Tiendas (${nt})`],
+  const gsAll = acGroups(), nTi = k => k === 'TL' ? gsAll.filter(acEsTL).length : (AC.reposicion || []).filter(p => acTienda(p.store_name) === k).length;
+  const ncli = gsAll.filter(acEsCli).length;
+  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${ncli})`], ['reposicion', `Tiendas (${nt})`],
     ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`]]
     .map(([k, t]) => `<button data-v="${k}" class="${ACV === k ? 'on' : ''}">${t}</button>`).join('');
   $('#ac-ver').querySelectorAll('button').forEach(b => b.onclick = () => { ACV = b.dataset.v; acRender(); });
@@ -61,7 +65,9 @@ function acRender() {
   const tb = box.querySelector('tbody');
   let n = 0;
   acGroups().forEach(g => {
-    if (['T1', 'T2', 'TL'].includes(ACV)) { if (g.tipo !== 'reposicion' || acTienda(g.nombre) !== ACV) return; }
+    if (ACV === 'TL') { if (!acEsTL(g)) return; }
+    else if (['T1', 'T2'].includes(ACV)) { if (g.tipo !== 'reposicion' || acTienda(g.nombre) !== ACV) return; }
+    else if (ACV === 'cliente') { if (!acEsCli(g)) return; }
     else if (ACV !== 'todos' && g.tipo !== ACV) return;
     const lines = g.lines.filter(l => acPass(g, l) && acMatch(g, l, q));
     if (!lines.length) return;
