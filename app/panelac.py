@@ -33,6 +33,11 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             d["orders"] = [o for o in d.get("orders", []) if not (extra.get(o["order_id"]) and (extra[o["order_id"]].get("company_id") or [1])[0] != 1
                                                                  and (extra[o["order_id"]].get("partner_id") or [0])[0] in propias())]
             quitar_pedidos_entre_empresas(d)
+            # lo ya servido no se enseña: en pedidos servidos en parte (clientes y tiendas) solo quedan las líneas con algo pendiente
+            for k in ("orders", "reposicion"):
+                for o in d.get(k, []):
+                    o["lines"] = [l for l in o.get("lines", []) if (l.get("qty_pending") or 0) > 0.0001 or l.get("pending_print_docs")]
+                d[k] = [o for o in d.get(k, []) if o.get("lines")]
             d["odoo_url"] = odoo_url
             return d
         return guard(run)
