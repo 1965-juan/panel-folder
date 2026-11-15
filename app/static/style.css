@@ -479,3 +479,4 @@ label.tb-ok input{width:18px;height:18px}
 .d-stk .lnk{font-size:12px;margin-left:4px}.d-pv{margin:6px 0 2px;padding:8px;background:#f6f1fb;border-radius:8px;font-size:13px}.d-pvl{display:flex;flex-direction:column;gap:3px;margin:4px 0 8px}.d-pv .d-pvq{width:70px;padding:4px;border:1px solid #ccc;border-radius:6px}
 .pe-hbox{margin-top:10px;padding:10px;background:#faf8fc;border:1px solid #eee;border-radius:8px;max-height:420px;overflow:auto}.pe-hh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pe-hh input{padding:5px;border:1px solid #ccc;border-radius:6px}#pe-hist{margin-top:4px}.pe-ayuda{font-size:12px;margin-top:6px}
 .pe-av{display:flex;gap:6px;align-items:center;font-size:13px;margin-top:12px}
+#v-pe [hidden],#v-ar [hidden]{display:none!important}
