@@ -167,3 +167,6 @@ $('#ar-q').oninput = peDebounce(async () => {
 }, 400);
 
 pePinta();
+
+// si el panel se abrió directamente en #pedidos o #articulos antes de cargar este archivo
+if (location.hash.startsWith('#pedidos')) peOpen(); else if (location.hash.startsWith('#articulos')) arOpen();
