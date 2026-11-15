@@ -292,7 +292,9 @@ body.sin .s{{display:none}}
             l = ls[0]
             tm = odoo.search_read("product.product", [("id", "=", l["product_id"][0])], ["product_tmpl_id"], company_ids=[EMPRESA])[0]["product_tmpl_id"][0]
             part = l["partner_id"][0]
-            ya = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "=", tm), ("partner_id", "=", part)], ["id"], company_ids=[EMPRESA], limit=1)
+            # se busca en todas las empresas: si ya existe (aunque sea de otra empresa) se actualiza, no se duplica
+            ya = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "=", tm), ("partner_id", "=", part)], ["id"], company_ids=TODAS, limit=1,
+                                  order="company_id desc")
             if ya:
                 odoo.call("product.supplierinfo", "write", [EMPRESA], ids=[ya[0]["id"]], vals={"price": l["price_unit"]})
             else:

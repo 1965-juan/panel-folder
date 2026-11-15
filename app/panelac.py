@@ -186,6 +186,15 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                 est["po_lines"] = [x for x in est["po_lines"] if x.get("partner_id") not in propias()]  # fuera los de Logipaper a Distriplus
             prov = odoo.call_kw("sale.order", "get_supplier_info", [product_id], company_ids=cids)
             # Logipaper sí puede salir como proveedor (se le pide a Tienda Logipaper y va a su columna de Compras)
+            if isinstance(prov, list):   # el mismo proveedor dos veces en la ficha (de dos empresas): sale una vez, con su mejor precio
+                uno = {}
+                for x in prov:
+                    if not isinstance(x, dict):
+                        continue
+                    k = x.get("partner_id")
+                    if k not in uno or (x.get("price") or 9e9) < (uno[k].get("price") or 9e9):
+                        uno[k] = x
+                prov = list(uno.values())
             return {"estado": est, "proveedores": prov}
         return guard(run)
 
