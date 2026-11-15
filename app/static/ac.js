@@ -27,6 +27,14 @@ function acMatch(g, l, q) {
   if (!q) return true;
   return [g.ref, g.nombre, g.o.ref_cliente, l.product_name, l.product_code, l.product_barcode].some(t => String(t || '').toLowerCase().includes(q));
 }
+// tienda de cada pedido de reposición, para los botones T1 / T2 / TL
+function acTienda(n) {
+  n = String(n || '').toLowerCase();
+  if (/tienda ?1\b|^t1/.test(n)) return 'T1';
+  if (/tienda ?2\b|^t2/.test(n)) return 'T2';
+  if (/logipaper|tienda ?3\b|^t3|^vp/.test(n)) return 'TL';
+  return '';
+}
 function acChips() {
   const gs = acGroups(), cnt = {};
   AC_FILTROS.forEach(([k]) => cnt[k] = 0);
@@ -35,7 +43,9 @@ function acChips() {
   $('#ac-f').innerHTML = AC_FILTROS.map(([k, t]) => `<button data-f="${k}" class="${ACF === k ? 'on' : ''}">${t} (${cnt[k] || 0})</button>`).join('');
   $('#ac-f').querySelectorAll('button').forEach(b => b.onclick = () => { ACF = b.dataset.f; acRender(); });
   const nc = (AC.orders || []).length, nt = (AC.reposicion || []).length;
-  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${nc})`], ['reposicion', `Tiendas (${nt})`]]
+  const nTi = k => (AC.reposicion || []).filter(p => acTienda(p.store_name) === k).length;
+  $('#ac-ver').innerHTML = '<span class="muted">Ver:</span>' + [['todos', `Todos (${nc + nt})`], ['cliente', `Clientes (${nc})`], ['reposicion', `Tiendas (${nt})`],
+    ['T1', `T1 (${nTi('T1')})`], ['T2', `T2 (${nTi('T2')})`], ['TL', `TL (${nTi('TL')})`]]
     .map(([k, t]) => `<button data-v="${k}" class="${ACV === k ? 'on' : ''}">${t}</button>`).join('');
   $('#ac-ver').querySelectorAll('button').forEach(b => b.onclick = () => { ACV = b.dataset.v; acRender(); });
 }
@@ -51,7 +61,8 @@ function acRender() {
   const tb = box.querySelector('tbody');
   let n = 0;
   acGroups().forEach(g => {
-    if (ACV !== 'todos' && g.tipo !== ACV) return;
+    if (['T1', 'T2', 'TL'].includes(ACV)) { if (g.tipo !== 'reposicion' || acTienda(g.nombre) !== ACV) return; }
+    else if (ACV !== 'todos' && g.tipo !== ACV) return;
     const lines = g.lines.filter(l => acPass(g, l) && acMatch(g, l, q));
     if (!lines.length) return;
     n++;
