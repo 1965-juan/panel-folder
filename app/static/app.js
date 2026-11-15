@@ -183,8 +183,40 @@ async function loadWeb(badgeOnly) {
       <div class="cli">${escH(o.cliente)}</div><div class="c3"><span>${o.estado === 'sale' ? 'Confirmado' : 'Pendiente de confirmar'}</span><span>${fdate(o.fecha)}</span></div>`, `${ODOO}/odoo/sale.order/${o.id}`));
     fillW('w-car', d.carritos, o => simple(`<div class="c1"><span class="ref">${escH(o.cliente)}</span><b>${eur(o.total)}</b></div>
       <div class="msg">${o.lineas.map(escH).join('<br>')}</div><div class="c3"><span>${escH(o.ref)}</span><span>${fdate(o.fecha)}</span></div>`, `${ODOO}/odoo/sale.order/${o.id}`));
+    if (ADMIN && !(window.YO && YO.viendo_como)) webClientes();
   } catch (e) { showErr(e.message); }
 }
+async function webClientes() {
+  $('#wc-sec').hidden = false; $('#wc-t').innerHTML = '<p class="muted">Cargando…</p>';
+  let L; try { L = await api('/api/web/clientes_activos'); } catch (e) { $('#wc-t').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
+  const activos = L.filter(x => x.ultimo).length;
+  $('#wc-info').textContent = `${L.length} con acceso · ${activos} han entrado alguna vez · últimos 90 días`;
+  $('#wc-t').innerHTML = L.length ? `<table class="co-t wc-t"><thead><tr><th>Cliente</th><th>Último acceso</th><th class="num">Entradas</th><th>Ha mirado</th><th class="num">Favoritos</th><th>Carrito</th><th></th></tr></thead><tbody>
+    ${L.map(x => `<tr><td><b>${escH(x.empresa)}</b>${x.contacto !== x.empresa ? `<br><small class="muted">${escH(x.contacto)}</small>` : ''}<br><small class="muted">alta ${fdate(x.alta)}</small></td>
+      <td>${x.ultimo ? fdate(x.ultimo.slice(0, 10)) + ' ' + x.ultimo.slice(11, 16) : '<span class="muted">nunca</span>'}</td>
+      <td class="num">${x.entradas}</td>
+      <td><small>${x.vistos.map(escH).join('<br>') || '<span class="muted">—</span>'}</small></td>
+      <td class="num">${x.favoritos || (x.ultimo ? '<span class="tag-new">0</span>' : '0')}</td>
+      <td>${x.carrito ? `<a class="lnk" target="_blank" href="${ODOO}/odoo/sale.order/${x.carrito.id}">${escH(x.carrito.ref)} · ${eur(x.carrito.total)}</a>` : ''}</td>
+      <td><button class="btn" data-fv="${x.empresa_id}">⭐ Cargar favoritos</button></td></tr>`).join('')}</tbody></table>` : '<p class="empty">Ningún cliente con acceso todavía</p>';
+  $('#wc-t').querySelectorAll('[data-fv]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Cargando…';
+    try { const r = await jpost('/api/web/favoritos', { partner_id: +b.dataset.fv }); alertBox(`${r.cliente}: ${r.anadidos} favoritos nuevos (${r.en_web} artículos comprados en la web)`); webClientes(); }
+    catch (e) { alertBox(e.message); b.disabled = false; b.textContent = '⭐ Cargar favoritos'; }
+  });
+}
+(() => {
+  const inp = $('#wc-q'); if (!inp) return; let t;
+  inp.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
+    const q = inp.value.trim(); if (q.length < 2) return $('#wc-sug').innerHTML = '';
+    const r = await api(`/api/web/clientes?q=${encodeURIComponent(q)}`).catch(() => []);
+    $('#wc-sug').innerHTML = r.map(p => `<a href="#" data-id="${p.id}">${escH(p.nombre)}</a>`).join('') || '<small class="muted">Nada</small>';
+    $('#wc-sug').querySelectorAll('a').forEach(a => a.onclick = async e => { e.preventDefault();
+      if (!confirm(`¿Cargar en la web los favoritos de ${a.textContent} (lo comprado en los últimos 12 meses)?`)) return;
+      try { const x = await jpost('/api/web/favoritos', { partner_id: +a.dataset.id }); alertBox(`${x.cliente}: ${x.anadidos} favoritos añadidos (${x.en_web} artículos)`); $('#wc-sug').innerHTML = ''; inp.value = ''; webClientes(); }
+      catch (er) { alertBox(er.message); } });
+  }, 300); };
+})();
 function route() {
   let v = ({ '#web': 'web', '#whatsapp': 'whatsapp', '#ac': 'ac', '#compras': 'compras', '#facturacion': 'facturacion', '#correo': 'correo', '#vencimientos': 'vencimientos', '#etiquetas': 'etiquetas', '#tablero': 'tablero', '#tienda': 'tienda' })[location.hash.split('?')[0]] || 'ventas';
   if (!location.hash && MODS.includes('compras') && !MODS.includes('ac')) v = 'compras';

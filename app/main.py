@@ -933,6 +933,67 @@ async def web_favoritos(request: Request):
     return guard(run)
 
 
+@app.get("/api/web/clientes_activos")
+def web_clientes_activos(request: Request, dias: int = 90):
+    """Clientes con acceso a la web: cuándo entran, cuántas veces, qué miran, si tienen carrito a medias y favoritos cargados."""
+    _solo_admin(request)
+    T = [1, 2, 3, 4, 5]
+
+    def run():
+        desde = (dt.datetime.now() - dt.timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
+        us = odoo.search_read("res.users", [("share", "=", True), ("active", "=", True)], ["partner_id", "login", "login_date", "create_date"], T, limit=5000)
+        if not us:
+            return []
+        uids = [u["id"] for u in us]
+        logs = {}
+        try:
+            for l in odoo.search_read("res.users.log", [("create_uid", "in", uids), ("create_date", ">=", desde)], ["create_uid"], T, limit=50000):
+                logs[l["create_uid"][0]] = logs.get(l["create_uid"][0], 0) + 1
+        except Exception:
+            pass
+        pids = [u["partner_id"][0] for u in us]
+        pinfo = {p["id"]: p for p in odoo.search_read("res.partner", [("id", "in", pids)], ["commercial_partner_id", "name"], T)}
+        vis, vistos = {}, {}
+        try:
+            vv = odoo.search_read("website.visitor", [("partner_id", "in", pids)], ["partner_id", "visit_count", "last_connection_datetime"], T, limit=5000)
+            for v in vv:
+                vis[v["partner_id"][0]] = v
+            if vv:
+                for t in odoo.search_read("website.track", [("visitor_id", "in", [v["id"] for v in vv]), ("product_id", "!=", False), ("visit_datetime", ">=", desde)],
+                                          ["visitor_id", "product_id"], T, limit=20000, order="visit_datetime desc"):
+                    pid = next((v["partner_id"][0] for v in vv if v["id"] == t["visitor_id"][0]), None)
+                    if pid:
+                        lst = vistos.setdefault(pid, [])
+                        nm = t["product_id"][1]
+                        if nm not in lst:
+                            lst.append(nm)
+        except Exception:
+            pass
+        fav = {}
+        try:
+            for w in odoo.search_read("product.wishlist", [("partner_id", "in", pids)], ["partner_id"], [1], limit=100000):
+                fav[w["partner_id"][0]] = fav.get(w["partner_id"][0], 0) + 1
+        except Exception:
+            pass
+        car = {}
+        for o in odoo.search_read("sale.order", [("website_id", "!=", False), ("state", "=", "draft"), ("partner_id", "in", pids), ("amount_total", ">", 0)],
+                                  ["partner_id", "amount_total", "name"], T, limit=1000):
+            car[o["partner_id"][0]] = {"id": o["id"], "ref": o["name"], "total": o["amount_total"]}
+        out = []
+        for u in us:
+            p = u["partner_id"][0]
+            com = pinfo.get(p, {}).get("commercial_partner_id") or [p, u["partner_id"][1]]
+            v = vis.get(p, {})
+            out.append({"user_id": u["id"], "partner_id": p, "empresa_id": com[0], "empresa": com[1], "contacto": u["partner_id"][1],
+                        "alta": (u.get("create_date") or "")[:10], "ultimo": (u.get("login_date") or "")[:16],
+                        "entradas": logs.get(u["id"], 0), "visitas": v.get("visit_count") or 0,
+                        "ultima_visita": (v.get("last_connection_datetime") or "")[:16], "vistos": vistos.get(p, [])[:8],
+                        "favoritos": fav.get(p, 0), "carrito": car.get(p)})
+        out.sort(key=lambda x: x["ultimo"] or "", reverse=True)
+        return out
+    return guard(run)
+
+
 EXCLUIR_WEB = ("PEDIDO ESCOLAR", "CONSUMIDOR", "CLIENTE CONTADO", "CLIENTES VARIOS", "VARIOS", "CLIENTE TPV", "CLIENTE GENERICO", "CLIENTE GENÉRICO")
 
 

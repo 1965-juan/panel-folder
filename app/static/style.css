@@ -447,3 +447,10 @@ label.tb-ok input{width:18px;height:18px}
 .card .marcas{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 2px}.card .mk{font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px}.mk-env{background:#e7f0fb;color:#1f5a99}.mk-rec{background:#fdf0e1;color:#9a5a0b}
 .d-acc .marcas{display:flex;gap:6px;flex-wrap:wrap}.d-acc .mk{font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:#eee}
 .d-acc .d-del{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed #ddd}
+
+.wc-sec{margin-top:18px;background:var(--card,#fff);border-radius:12px;padding:14px 16px}
+.wc-h{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px}.wc-h h2{margin:0;font-size:17px}
+.wc-add{margin-left:auto;position:relative;font-size:13px}.wc-add input{padding:5px 8px;border-radius:8px;border:1px solid #ccc;min-width:200px}
+#wc-sug{position:absolute;right:0;top:100%;background:var(--card,#fff);box-shadow:0 6px 18px rgba(0,0,0,.15);border-radius:8px;z-index:20;min-width:260px}
+#wc-sug a{display:block;padding:6px 10px}#wc-sug a:hover{background:#f3eef9}
+.wc-t td{vertical-align:top}.wc-t{overflow-x:auto;display:block}
