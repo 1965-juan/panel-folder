@@ -1030,10 +1030,10 @@ async def web_dar_acceso(request: Request):
         tag = _etiqueta(b.get("etiqueta") or "WEB") if not prueba else None
         ids = [int(i["id"]) for i in items]
         ps = {p["id"]: p for p in odoo.search_read("res.partner", [("id", "in", ids)], ["name", "email", "user_ids", "active", "category_id"],
-                                                     T, limit=5000, context={"active_test": False})}
+                                                     T, limit=5000)}
         emails = [i["email"].strip().lower() for i in items]
-        usados = {u["login"].lower(): u for u in odoo.search_read("res.users", [("login", "in", emails)], ["login", "partner_id"], T,
-                                                                   limit=5000, context={"active_test": False})}
+        usados = {u["login"].lower(): u for u in odoo.search_read("res.users", [("login", "in", emails), ("active", "in", [True, False])],
+                                                                   ["login", "partner_id"], T, limit=5000)}
         res = []
         for it in items:
             pid, em = int(it["id"]), it["email"].strip().lower()
