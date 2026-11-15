@@ -835,6 +835,51 @@ async def admin_reenviar_facturas(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/po_ajustar")
+async def admin_po_ajustar(request: Request):
+    """Solo admin. Ajusta un pedido de compra en borrador para que cuadre con el carrito del proveedor:
+    {po_id, cambios:[{line_id, qty?, price?}], quitar:[line_id], anadir:[{product_id, qty, price}], ficha:[{product_id, price, ref?}]}.
+    'ficha' pone ese precio de compra al proveedor del pedido en la ficha del artículo (lo crea si no está)."""
+    _solo_admin(request)
+    b = await request.json()
+
+    def run():
+        po = odoo.search_read("purchase.order", [("id", "=", int(b["po_id"]))], ["name", "state", "partner_id", "company_id"], [1, 2, 3, 4, 5])
+        if not po:
+            raise HTTPException(404, "No encuentro el pedido")
+        po = po[0]
+        if po["state"] not in ("draft", "sent"):
+            raise HTTPException(400, f"{po['name']} ya no está en borrador")
+        c, part = po["company_id"][0], po["partner_id"][0]
+        for x in b.get("cambios") or []:
+            v = {}
+            if x.get("qty") is not None:
+                v["product_qty"] = float(x["qty"])
+            if x.get("price") is not None:
+                v["price_unit"] = float(x["price"])
+            if v:
+                odoo.call("purchase.order.line", "write", [c], ids=[int(x["line_id"])], vals=v)
+        if b.get("quitar"):
+            odoo.call("purchase.order.line", "unlink", [c], ids=[int(i) for i in b["quitar"]])
+        for x in b.get("anadir") or []:
+            odoo.call("purchase.order.line", "create", [c], vals_list=[{"order_id": po["id"], "product_id": int(x["product_id"]),
+                                                                        "product_qty": float(x["qty"]), "price_unit": float(x["price"])}])
+        for x in b.get("ficha") or []:
+            tm = odoo.search_read("product.product", [("id", "=", int(x["product_id"]))], ["product_tmpl_id"], [c])[0]["product_tmpl_id"][0]
+            ya = odoo.search_read("product.supplierinfo", [("product_tmpl_id", "=", tm), ("partner_id", "=", part)], ["id"], [1, 2, 3, 4, 5])
+            v = {"price": float(x["price"])}
+            if x.get("ref"):
+                v["product_code"] = x["ref"]
+            if ya:
+                odoo.call("product.supplierinfo", "write", [c], ids=[y["id"] for y in ya], vals=v)
+            else:
+                odoo.call("product.supplierinfo", "create", [c], vals_list=[dict(v, partner_id=part, product_tmpl_id=tm, min_qty=0, company_id=c)])
+        ls = odoo.search_read("purchase.order.line", [("order_id", "=", po["id"]), ("display_type", "=", False)],
+                              ["product_id", "product_qty", "price_unit", "price_subtotal"], [c])
+        return {"pedido": po["name"], "lineas": [[l["product_id"][1], l["product_qty"], l["price_unit"], l["price_subtotal"]] for l in ls]}
+    return guard(run)
+
+
 @app.post("/api/admin/limpiar_proveedores")
 async def admin_limpiar_proveedores(request: Request):
     """Solo admin. {solo_ver}: 1) borra las líneas de proveedor repetidas en las fichas de artículos (mismo artículo, proveedor, empresa,
