@@ -8,7 +8,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import Response, HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -931,6 +931,71 @@ async def web_favoritos(request: Request):
         return {"cliente": cp[0]["name"], "comprados": len(pids), "en_web": len(prods), "accesos": len(socios),
                 "anadidos": 0 if b.get("solo_ver") else len(nuevos), "articulos": sorted(p["display_name"] for p in prods)[:200]}
     return guard(run)
+
+
+EXCLUIR_WEB = ("PEDIDO ESCOLAR", "CONSUMIDOR", "CLIENTE CONTADO", "CLIENTES VARIOS", "VARIOS", "CLIENTE TPV", "CLIENTE GENERICO", "CLIENTE GENÉRICO")
+
+
+@app.get("/web/candidatos.csv")
+def web_candidatos(request: Request, dias: int = 365):
+    """Clientes de Distriplus o Logipaper con compras en el último año, para invitarlos a la web (Excel/CSV)."""
+    _solo_admin(request)
+    import csv, io
+    T = [1, 2, 3, 4, 5]
+
+    def run():
+        desde = (dt.date.today() - dt.timedelta(days=dias)).isoformat()
+        propias = {c["partner_id"][0] for c in odoo.search_read("res.company", [], ["partner_id"], T)}
+        ac = {}
+
+        def suma(pid, emp, imp, fecha):
+            a = ac.setdefault(pid, {"emp": set(), "n": 0, "imp": 0.0, "ult": ""})
+            a["emp"].add(emp); a["n"] += 1; a["imp"] += imp or 0; a["ult"] = max(a["ult"], fecha or "")
+        for o in odoo.search_read("sale.order", [("state", "=", "sale"), ("company_id", "in", [1, 4]), ("date_order", ">=", desde)],
+                                  ["partner_id", "company_id", "amount_untaxed", "date_order"], T, limit=50000):
+            suma(o["partner_id"][0], o["company_id"][0], o["amount_untaxed"], (o["date_order"] or "")[:10])
+        try:
+            for o in odoo.search_read("pos.order", [("partner_id", "!=", False), ("company_id", "in", [1, 4]), ("date_order", ">=", desde),
+                                                    ("state", "!=", "cancel")], ["partner_id", "company_id", "amount_total", "amount_tax", "date_order"], T, limit=50000):
+                suma(o["partner_id"][0], o["company_id"][0], (o["amount_total"] or 0) - (o["amount_tax"] or 0), (o["date_order"] or "")[:10])
+        except Exception:
+            pass
+        ps = {p["id"]: p for p in odoo.search_read("res.partner", [("id", "in", list(ac))], ["commercial_partner_id"], T, limit=50000)} if ac else {}
+        com = {}
+        for pid, a in ac.items():
+            c = (ps.get(pid, {}).get("commercial_partner_id") or [pid])[0]
+            x = com.setdefault(c, {"emp": set(), "n": 0, "imp": 0.0, "ult": ""})
+            x["emp"] |= a["emp"]; x["n"] += a["n"]; x["imp"] += a["imp"]; x["ult"] = max(x["ult"], a["ult"])
+        datos = {p["id"]: p for p in odoo.search_read("res.partner", [("id", "in", list(com))],
+                                                      ["name", "vat", "email", "phone", "city", "is_company", "active"], T, limit=50000)} if com else {}
+        accesos = {}
+        for u in odoo.search_read("res.users", [("share", "=", True)], ["partner_id", "login_date", "login"], T, limit=10000):
+            pc = odoo.search_read("res.partner", [("id", "=", u["partner_id"][0])], ["commercial_partner_id"], T)
+            if pc:
+                accesos.setdefault(pc[0]["commercial_partner_id"][0], []).append(u)
+        filas = []
+        for c, x in com.items():
+            d = datos.get(c)
+            if not d or c in propias or any(k in (d["name"] or "").upper() for k in EXCLUIR_WEB):
+                continue
+            em = (d.get("email") or "").strip()
+            ok = bool(re.fullmatch(r"[^@\s;,]+@[^@\s;,]+\.[A-Za-z]{2,}", em))
+            us = accesos.get(c, [])
+            filas.append([d["name"], d.get("vat") or "", em, "sí" if ok else ("falta" if not em else "revisar"), d.get("phone") or "", d.get("city") or "",
+                          " + ".join({1: "Distriplus", 4: "Logipaper"}[e] for e in sorted(x["emp"])), x["n"], round(x["imp"], 2), x["ult"],
+                          "sí" if us else "no", max((u.get("login_date") or "")[:10] for u in us) if us else "", c])
+        filas.sort(key=lambda f: -f[8])
+        return filas
+    filas = guard(run)
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Cliente", "CIF", "Email", "Email válido", "Teléfono", "Población", "Empresa", "Nº pedidos/tickets", "Importe último año (sin IVA)",
+                "Última compra", "Ya tiene acceso web", "Último acceso web", "ID Odoo"])
+    for f in filas:
+        f = list(f); f[8] = f"{f[8]:.2f}".replace(".", ",")
+        w.writerow(f)
+    return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="clientes_web_{dt.date.today().isoformat()}.csv"'})
 
 
 @app.get("/api/salud")
