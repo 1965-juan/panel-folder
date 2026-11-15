@@ -185,8 +185,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             if isinstance(est, dict) and isinstance(est.get("po_lines"), list):
                 est["po_lines"] = [x for x in est["po_lines"] if x.get("partner_id") not in propias()]  # fuera los de Logipaper a Distriplus
             prov = odoo.call_kw("sale.order", "get_supplier_info", [product_id], company_ids=cids)
-            if isinstance(prov, list):
-                prov = [x for x in prov if not (isinstance(x, dict) and x.get("partner_id") in propias())]
+            # Logipaper sí puede salir como proveedor (se le pide a Tienda Logipaper y va a su columna de Compras)
             return {"estado": est, "proveedores": prov}
         return guard(run)
 
