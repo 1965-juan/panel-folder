@@ -538,7 +538,21 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             "origen": r.get("invoice_origin") or "", "su_ref": r.get("ref") or "", "borrador": True,
             "cid": r["company_id"][0] if r.get("company_id") else None, "vencida": False,
         } for r in bor]
-        borradores.sort(key=lambda c: (bool(c["su_ref"]), c["fecha"]))   # primero las que no tienen la ORD
+        # la ORD solo la piden las empresas del Grupo Gimeno: son los clientes que ya tienen alguna factura con referencia «ORD…»
+        gim = set()
+        if bor:
+            try:
+                for r in odoo.search_read("account.move", [("move_type", "=", "out_invoice"), ("state", "=", "posted"), ("ref", "=ilike", "ORD%")],
+                                          ["commercial_partner_id"], cids, limit=5000):
+                    gim.add(r["commercial_partner_id"][0])
+            except Exception:
+                pass
+            pc = {p["id"]: p["commercial_partner_id"][0] for p in odoo.search_read(
+                "res.partner", [("id", "in", list({r["partner_id"][0] for r in bor if r.get("partner_id")}))], ["commercial_partner_id"], cids)}
+            for c, r in zip(borradores, bor):
+                com = pc.get(r["partner_id"][0]) if r.get("partner_id") else None
+                c["pide_ord"] = com in gim or "gimeno" in c["cliente"].lower()
+        borradores.sort(key=lambda c: (not (c.get("pide_ord") and not c["su_ref"]), c["fecha"]))   # primero las de Gimeno sin ORD
         # marcas de lo hecho con cada presupuesto: enviado al cliente y reclamado (sin confirmar)
         pids = [c["id"] for c in presu + caduc]
         if pids:
