@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#3A1F73">
+<title>Inventario · Panel Folder</title>
+<style>
+:root{--bg:#f6f5f2;--ink:#1f1b2e;--muted:#6b6778;--line:#e4e1da;--or:#F39A2B;--pu:#3A1F73;--red:#C8102E;--gr:#1F7A4D}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+header{background:linear-gradient(90deg,#3A1F73,#5B2E9E);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header b{font-size:18px}header .sp{flex:1}header a,header button{color:#fff;background:rgba(255,255,255,.15);border:0;border-radius:8px;padding:7px 10px;font:inherit;font-size:14px;text-decoration:none}
+main{padding:12px;max-width:900px;margin:0 auto}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+h2{font-size:17px;margin:4px 0 10px}
+.muted{color:var(--muted);font-size:14px}
+button.big,.big{display:block;width:100%;padding:14px;border:0;border-radius:10px;background:var(--or);color:#fff;font:inherit;font-weight:700;font-size:17px;margin-top:8px}
+button.sec{background:#fff;color:var(--pu);border:1px solid var(--pu)}
+button.pu{background:var(--pu)}
+button.rd{background:var(--red)}
+select,input{font:inherit;padding:11px;border:1px solid var(--line);border-radius:10px;width:100%;background:#fff}
+label{display:block;margin:8px 0 4px;font-size:14px;color:var(--muted)}
+.rc{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.rc:first-child{border-top:0}.rc .t{flex:1}.rc .t small{display:block;color:var(--muted)}
+.bdg{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;font-weight:700;background:#eee}
+.b-ab{background:#fff2df;color:#a85b00}.b-ce{background:#ece6f7;color:var(--pu)}.b-ap{background:#e2f3ea;color:var(--gr)}
+#scan{font-size:22px;padding:14px;border:3px solid var(--or);text-align:center;letter-spacing:.05em}
+#scan:focus{outline:none;border-color:var(--pu)}
+.modos{display:flex;gap:6px;margin-bottom:8px}.modos button{flex:1;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;font-weight:600}
+.modos button.on{background:var(--pu);color:#fff;border-color:var(--pu)}
+#ult{margin-top:10px;padding:12px;border-radius:10px;font-size:17px;min-height:58px;background:#f2f0ec}
+#ult.ok{background:#e2f3ea}#ult.ko{background:#fde8eb}#ult.ub{background:#ece6f7}
+#ult .n{font-weight:700}#ult .q{font-size:26px;font-weight:800;float:right;margin-left:10px}
+.qty{display:flex;gap:6px;align-items:center;margin-top:8px}.qty input{font-size:22px;text-align:center}.qty button{width:auto;margin:0;padding:12px 16px}
+.kp{display:flex;gap:8px;margin:10px 0}.kp div{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}.kp b{display:block;font-size:22px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:7px 5px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--muted);text-transform:uppercase}td.n{text-align:right;white-space:nowrap}
+td input{width:70px;padding:6px;text-align:right}
+.ko td{background:#fde8eb}.pos{color:var(--gr);font-weight:700}.neg{color:var(--red);font-weight:700}
+.sug{background:#fff;border:1px solid var(--line);border-radius:10px;max-height:300px;overflow:auto}.sug a{display:block;padding:9px 10px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.err{background:#fde8eb;color:#7a0b1c;padding:10px;border-radius:10px;margin:8px 0}
+[hidden]{display:none!important}
+.flash{animation:fl .35s}@keyframes fl{from{transform:scale(1.03)}to{transform:none}}
+</style>
+</head>
+<body>
+<header><b>📦 Inventario</b><span id="hu" class="muted" style="color:#ddd;font-size:13px"></span><span class="sp"></span><a href="/" id="volver">← Panel</a></header>
+<main>
+  <!-- inicio: recuentos -->
+  <section id="v-ini">
+    <div class="card">
+      <h2>Empezar un recuento</h2>
+      <label>Dónde se cuenta</label><select id="n-ub"></select>
+      <label>Nombre (zona, estantería…)</label><input id="n-nom" placeholder="p. ej. Pasillo 3 · carpetas">
+      <button class="big" id="n-go">▶ Empezar a contar</button>
+      <p class="muted">Los recuentos son <b>parciales</b>: solo se ajusta lo que contéis. Lo que no se cuente se queda como está en Odoo.</p>
+    </div>
+    <div class="card"><h2>Recuentos</h2><div id="lista"><p class="muted">Cargando…</p></div></div>
+  </section>
+
+  <!-- escaneo -->
+  <section id="v-esc" hidden>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px"><h2 style="flex:1" id="e-tit"></h2><span class="bdg b-ab" id="e-ub"></span></div>
+      <div class="modos"><button data-m="rapido" class="on">⚡ Rápido (+1)</button><button data-m="normal">📝 Con cantidad</button></div>
+      <input id="scan" inputmode="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Escanea aquí">
+      <div class="qty" id="qbox" hidden><input id="qty" type="number" inputmode="decimal" min="0" step="1" value="1"><button class="big pu" id="qok">OK</button></div>
+      <div id="ult" class="muted">Escanea un artículo. Cada lectura suma 1.</div>
+      <div class="row" style="margin-top:8px"><button class="big sec" id="kb">⌨️ Teclear código</button><button class="big sec" id="bnom">🔎 Sin código</button></div>
+      <div id="bus" hidden><input id="bq" placeholder="Buscar por nombre o referencia" style="margin-top:8px"><div class="sug" id="bres"></div></div>
+    </div>
+    <div class="kp"><div><b id="k-ref">0</b><span class="muted">artículos</span></div><div><b id="k-uds">0</b><span class="muted">unidades</span></div><div><b id="k-nf">0</b><span class="muted">no encontrados</span></div></div>
+    <div class="card"><h2>Contado</h2><table><thead><tr><th>Artículo</th><th class="n">Uds</th></tr></thead><tbody id="e-lin"></tbody></table></div>
+    <button class="big pu" id="e-fin">✅ Terminar recuento (pasa a revisión)</button>
+    <button class="big sec" id="e-salir">← Volver a la lista (sigue abierto)</button>
+  </section>
+
+  <!-- revisión / diferencias -->
+  <section id="v-rev" hidden>
+    <div class="card"><h2 id="r-tit"></h2><div id="r-info" class="muted"></div></div>
+    <div id="r-body"></div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = n => (+n).toLocaleString('es-ES', { maximumFractionDigits: 3 });
+const eur = n => (+n).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+const fecha = t => t ? new Date(t * 1000).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+async function api(p, b) {
+  const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  if (r.status === 401) { location.href = '/entrar'; throw new Error('Sesión caducada'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || `Error ${r.status}`);
+  return j;
+}
+let INI = null, R = null, LIN = [], modo = localStorage.getItem('inv-modo') || 'rapido';
+const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar', 'b-ce'], aplicado: ['Aplicado en Odoo', 'b-ap'] };
+function vista(v) { ['ini', 'esc', 'rev'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
+
+/* ---------- lista ---------- */
+async function inicio() {
+  vista('ini'); history.replaceState(null, '', '/inventario');
+  try { INI = await api('/api/inv/inicio'); } catch (e) { $('#lista').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
+  $('#hu').textContent = INI.usuario;
+  $('#n-ub').innerHTML = INI.ubicaciones.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
+  $('#n-ub').disabled = INI.ubicaciones.length < 2;
+  $('#lista').innerHTML = INI.recuentos.length ? INI.recuentos.map(r => `<div class="rc"><div class="t"><b>${escH(r.nombre)}</b>
+      <small>${escH(r.ubic_nombre)} · ${r.refs} art. · ${num(r.uds)} uds · ${fecha(r.cuando)}</small></div>
+      <span class="bdg ${ESTADO[r.estado][1]}">${ESTADO[r.estado][0]}</span>
+      <button class="big ${r.estado === 'abierto' ? '' : 'pu'}" style="width:auto;margin:0;padding:9px 12px" data-r="${r.id}" data-e="${r.estado}">${r.estado === 'abierto' ? 'Seguir' : 'Ver'}</button></div>`).join('')
+    : '<p class="muted">Todavía no hay recuentos.</p>';
+  $('#lista').querySelectorAll('[data-r]').forEach(b => b.onclick = () => b.dataset.e === 'abierto' ? abrir(+b.dataset.r) : revisar(+b.dataset.r));
+}
+$('#n-go').onclick = async () => {
+  try { const r = await api('/api/inv/nuevo', { ubic: $('#n-ub').value, nombre: $('#n-nom').value }); $('#n-nom').value = ''; abrir(r.id); }
+  catch (e) { alert(e.message); }
+};
+
+/* ---------- escaneo ---------- */
+async function abrir(id) {
+  const d = await api(`/api/inv/r/${id}`).catch(e => { alert(e.message); return null; }); if (!d) return;
+  R = d.recuento; LIN = d.lineas;
+  if (R.estado !== 'abierto') return revisar(id);
+  history.replaceState(null, '', `/inventario#${id}`);
+  vista('esc'); $('#e-tit').textContent = R.nombre; $('#e-ub').textContent = R.ubic_nombre;
+  pintaModo(); pinta(); foco();
+}
+function pintaModo() {
+  document.querySelectorAll('.modos button').forEach(b => b.classList.toggle('on', b.dataset.m === modo));
+  $('#qbox').hidden = true;
+}
+document.querySelectorAll('.modos button').forEach(b => b.onclick = () => { modo = b.dataset.m; try { localStorage.setItem('inv-modo', modo); } catch (e) { } pintaModo(); foco(); });
+function foco() { if (!$('#v-esc').hidden && $('#qbox').hidden && $('#bus').hidden) setTimeout(() => $('#scan').focus(), 30); }
+function pinta() {
+  const nf = LIN.filter(l => !l.product_id);
+  $('#k-ref').textContent = LIN.length; $('#k-uds').textContent = num(LIN.reduce((a, l) => a + l.cant, 0)); $('#k-nf').textContent = nf.length;
+  $('#e-lin').innerHTML = LIN.map(l => `<tr class="${l.product_id ? '' : 'ko'}"><td>${l.product_id ? escH(l.nombre) : `<b>No encontrado:</b> ${escH(l.codigo)}<br><a href="#" data-asig="${l.id}">asignar artículo</a>`}
+    ${l.ref ? `<br><small class="muted">${escH(l.ref)}</small>` : ''}</td>
+    <td class="n"><input type="number" inputmode="decimal" min="0" value="${+l.cant}" data-l="${l.id}"></td></tr>`).join('');
+  $('#e-lin').querySelectorAll('[data-l]').forEach(i => i.onchange = async () => {
+    try { await api(`/api/inv/r/${R.id}/linea`, { id: +i.dataset.l, cant: i.value }); await recarga(); } catch (e) { alert(e.message); }
+    foco();
+  });
+  $('#e-lin').querySelectorAll('[data-asig]').forEach(a => a.onclick = e => { e.preventDefault(); buscador(+a.dataset.asig); });
+}
+async function recarga() { const d = await api(`/api/inv/r/${R.id}`); LIN = d.lineas; pinta(); }
+let pend = null;
+async function leer(cod, cant) {
+  cod = cod.trim(); if (!cod) return;
+  const U = $('#ult');
+  try {
+    const r = await api(`/api/inv/r/${R.id}/leer`, { codigo: cod, cant });
+    if (r.ubicacion) {
+      U.className = r.ok ? 'ub' : 'ko'; U.innerHTML = `${r.ok ? '📍' : '⚠️'} <span class="n">${escH(r.msg)}</span>`; pita(r.ok); return;
+    }
+    U.className = r.ok ? 'ok' : 'ko';
+    U.innerHTML = r.ok ? `<span class="q">${num(r.total)}</span><span class="n">${escH(r.nombre)}</span><br><small class="muted">${escH(r.codigo)} · +${num(r.sumado)}${r.caja ? ' (caja)' : ''}</small>`
+      : `<span class="q">${num(r.total)}</span><span class="n">⚠️ Código no encontrado en Odoo</span><br><small>${escH(r.codigo)} · se guarda igual; luego asigna el artículo</small>`;
+    U.classList.remove('flash'); void U.offsetWidth; U.classList.add('flash');
+    pita(r.ok);
+    await recarga();
+  } catch (e) { U.className = 'ko'; U.textContent = '⚠️ ' + e.message; pita(false); }
+}
+let actx = null;
+function pita(ok) {
+  try { navigator.vibrate && navigator.vibrate(ok ? 40 : [120, 60, 120]); } catch (e) { }
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = ok ? 1200 : 300; g.gain.value = .08;
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + (ok ? .07 : .25));
+  } catch (e) { }
+}
+// el lector de la PDA escribe el código y pulsa Enter (modo teclado)
+$('#scan').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const c = $('#scan').value.trim(); $('#scan').value = '';
+  if (!c) return;
+  if (modo === 'rapido') { leer(c, 1); return; }
+  pend = c; $('#qbox').hidden = false; $('#ult').className = ''; $('#ult').innerHTML = `Código <b>${escH(c)}</b>: ¿cuántas unidades?`;
+  $('#qty').value = 1; setTimeout(() => { $('#qty').focus(); $('#qty').select(); }, 30);
+});
+const qok = () => { const q = $('#qty').value; $('#qbox').hidden = true; if (pend) leer(pend, q); pend = null; foco(); };
+$('#qok').onclick = qok;
+$('#qty').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); qok(); } });
+// si se pierde el foco (toque en la pantalla), vuelve al campo de escaneo
+document.addEventListener('click', e => { if (!e.target.closest('input,select,button,a,textarea')) foco(); });
+$('#kb').onclick = () => { const s = $('#scan'); s.inputMode = s.inputMode === 'none' ? 'text' : 'none'; s.blur(); setTimeout(() => s.focus(), 50); $('#kb').textContent = s.inputMode === 'none' ? '⌨️ Teclear código' : '⌨️ Ocultar teclado'; };
+let asig = null;
+function buscador(lid) {
+  asig = lid || null; $('#bus').hidden = false; $('#bq').value = ''; $('#bres').innerHTML = '';
+  $('#bq').placeholder = asig ? 'Busca el artículo de ese código' : 'Buscar por nombre o referencia'; $('#bq').focus();
+}
+$('#bnom').onclick = () => $('#bus').hidden ? buscador() : ($('#bus').hidden = true, foco());
+let tm;
+$('#bq').oninput = () => {
+  clearTimeout(tm); tm = setTimeout(async () => {
+    const q = $('#bq').value.trim(); if (q.length < 2) { $('#bres').innerHTML = ''; return; }
+    const r = await api(`/api/inv/buscar?q=${encodeURIComponent(q)}`).catch(() => []);
+    $('#bres').innerHTML = r.length ? r.map(p => `<a href="#" data-p="${p.id}"><b>${escH(p.nombre)}</b><br><small class="muted">${escH(p.ref)} ${escH(p.ean)}</small></a>`).join('') : '<p class="muted" style="padding:8px">Nada</p>';
+    $('#bres').querySelectorAll('[data-p]').forEach(a => a.onclick = async ev => {
+      ev.preventDefault(); const p = r.find(x => x.id === +a.dataset.p);
+      try {
+        if (asig) await api(`/api/inv/r/${R.id}/linea`, { id: asig, product_id: p.id });
+        else { const q = prompt(`¿Cuántas unidades de ${p.nombre}?`, '1'); if (q === null) return; await api(`/api/inv/r/${R.id}/manual`, { product_id: p.id, cant: q }); }
+        $('#bus').hidden = true; await recarga(); foco();
+      } catch (e) { alert(e.message); }
+    });
+  }, 300);
+};
+$('#e-salir').onclick = () => inicio();
+$('#e-fin').onclick = async () => {
+  if (!LIN.length) { alert('No hay nada contado'); return; }
+  if (LIN.some(l => !l.product_id) && !confirm('Hay códigos no encontrados sin asignar: esos no se ajustarán. ¿Terminar igualmente?')) return;
+  if (!confirm(`¿Terminar el recuento «${R.nombre}»? Pasará a revisión del administrador.`)) return;
+  try { await api(`/api/inv/r/${R.id}/estado`, { accion: 'cerrar' }); alert('Recuento terminado. ¡Gracias!'); inicio(); } catch (e) { alert(e.message); }
+};
+
+/* ---------- revisión (diferencias con Odoo) ---------- */
+async function revisar(id) {
+  vista('rev'); history.replaceState(null, '', `/inventario#${id}`);
+  $('#r-body').innerHTML = '<p class="muted">Comparando con el stock de Odoo…</p>';
+  let d; try { d = await api(`/api/inv/r/${id}/diferencias`); } catch (e) { $('#r-body').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
+  const r = d.recuento;
+  $('#r-tit').innerHTML = `${escH(r.nombre)} <span class="bdg ${ESTADO[r.estado][1]}">${ESTADO[r.estado][0]}</span>`;
+  $('#r-info').innerHTML = `${escH(d.ubic_nombre)} · empezado por ${escH(r.usuario)} ${fecha(r.cuando)}${r.cerrado ? ` · terminado ${fecha(r.cerrado)}` : ''}${r.aplicado ? ` · aplicado ${fecha(r.aplicado)} por ${escH(r.aplicado_por)}` : ''}`;
+  const S = d.resumen, res = d.resultado;
+  let h = `<div class="kp"><div><b>${S.refs}</b><span class="muted">contados</span></div><div><b>${S.con_dif}</b><span class="muted">con diferencia</span></div><div><b>${eur(S.valor)}</b><span class="muted">valor dif.</span></div></div>`;
+  if (res) h += `<div class="card"><b>Resultado en Odoo:</b> ${res.ajustados} ajustados · ${res.sin_cambio} ya cuadraban${res.errores.length ? `<div class="err">${res.errores.map(x => `${escH(x.producto)}: ${escH(x.error)}`).join('<br>')}</div>` : ''}</div>`;
+  const solo = localStorage.getItem('inv-solodif') !== '0';
+  h += `<div class="card"><label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" id="r-sd" style="width:auto" ${solo ? 'checked' : ''}> Solo los que tienen diferencia</label>
+    <table><thead><tr><th>Artículo</th><th class="n">Odoo</th><th class="n">Contado</th><th class="n">Dif.</th></tr></thead><tbody>
+    ${d.lineas.filter(l => !solo || Math.abs(l.dif) > 0.0001).map(l => `<tr><td>${escH(l.nombre)}${l.ref ? `<br><small class="muted">${escH(l.ref)}</small>` : ''}</td>
+      <td class="n">${num(l.teorico)}</td><td class="n"><b>${num(l.cant)}</b></td><td class="n ${l.dif > 0 ? 'pos' : l.dif < 0 ? 'neg' : ''}">${l.dif > 0 ? '+' : ''}${num(l.dif)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Todo cuadra</td></tr>'}
+    </tbody></table></div>`;
+  if (d.sin_articulo.length) h += `<div class="card"><b>⚠️ Códigos no encontrados (no se ajustan):</b><br>${d.sin_articulo.map(l => `${escH(l.codigo)} × ${num(l.cant)}`).join(' · ')}</div>`;
+  h += `<a class="big sec" style="text-align:center;text-decoration:none" href="/api/inv/r/${id}/excel">📥 Descargar Excel</a>`;
+  if (r.estado !== 'aplicado') {
+    if (d.admin && r.estado === 'cerrado') h += `<button class="big" id="r-apl">✅ Aplicar en Odoo (${S.con_dif} ajustes)</button>`;
+    if (r.estado === 'cerrado') h += `<button class="big sec" id="r-reab">↺ Reabrir para seguir contando</button>`;
+    if (r.estado === 'cerrado' && !d.admin) h += `<p class="muted">Pendiente de que el administrador lo revise y lo aplique en Odoo.</p>`;
+    h += `<button class="big rd" id="r-del">🗑 Borrar recuento</button>`;
+  }
+  h += `<button class="big sec" id="r-vol">← Volver</button>`;
+  $('#r-body').innerHTML = h;
+  $('#r-sd').onchange = () => { try { localStorage.setItem('inv-solodif', $('#r-sd').checked ? '1' : '0'); } catch (e) { } revisar(id); };
+  $('#r-vol').onclick = () => inicio();
+  const ap = $('#r-apl'); if (ap) ap.onclick = async () => {
+    if (!confirm(`¿Ajustar ya el stock en Odoo de ${S.con_dif} artículos en ${d.ubic_nombre}? Solo se tocan los contados.`)) return;
+    ap.disabled = true; ap.textContent = 'Aplicando en Odoo…';
+    try { const x = await api(`/api/inv/r/${id}/aplicar`, {}); alert(`Hecho: ${x.ajustados} artículos ajustados${x.errores.length ? `, ${x.errores.length} con error` : ''}`); revisar(id); }
+    catch (e) { alert(e.message); ap.disabled = false; ap.textContent = 'Aplicar en Odoo'; }
+  };
+  const rb = $('#r-reab'); if (rb) rb.onclick = async () => { await api(`/api/inv/r/${id}/estado`, { accion: 'reabrir' }).catch(e => alert(e.message)); abrir(id); };
+  const dl = $('#r-del'); if (dl) dl.onclick = async () => { if (!confirm('¿Borrar este recuento y todo lo contado?')) return; await api(`/api/inv/r/${id}/estado`, { accion: 'borrar' }).catch(e => alert(e.message)); inicio(); };
+}
+const h0 = +location.hash.slice(1);
+h0 ? abrir(h0) : inicio();
+</script>
+</body>
+</html>

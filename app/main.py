@@ -37,11 +37,11 @@ ADMIN = "administrador"
 PERFILES = {
     ADMIN: {"empresas": ["*"], "modulos": None},
     "contabilidad": {"empresas": ["*"], "modulos": None},   # ve lo mismo que el administrador
-    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "pedidos", "articulos", "ac", "compras", "tablero", "etiquetas"], "sin_facturas": True},
+    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "pedidos", "articulos", "ac", "compras", "tablero", "etiquetas", "inventario"], "sin_facturas": True},
     "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "pedidos", "articulos", "ac", "tablero"], "sin_facturas": True},
-    "tienda1": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T1", "nombre": "TIENDA 1"},
-    "tienda2": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas"], "tienda": "T2", "nombre": "TIENDA 2"},
-    "tiendalogipaper": {"empresas": ["LOGIPAPER"], "modulos": ["tienda", "etiquetas"], "tienda": "T3", "nombre": "TIENDA LOGIPAPER"},
+    "tienda1": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas", "inventario"], "tienda": "T1", "nombre": "TIENDA 1"},
+    "tienda2": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas", "inventario"], "tienda": "T2", "nombre": "TIENDA 2"},
+    "tiendalogipaper": {"empresas": ["LOGIPAPER"], "modulos": ["tienda", "etiquetas", "inventario"], "tienda": "T3", "nombre": "TIENDA LOGIPAPER"},
 }
 
 
@@ -63,7 +63,7 @@ def sin_facturas(u):
 
 
 TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda",
-                 "pedidos", "articulos"]
+                 "pedidos", "articulos", "inventario"]
 
 
 def modulos_de(u):
@@ -1721,3 +1721,20 @@ from . import pedidos as _ped  # noqa: E402
 
 _ped.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL,
            allowed_companies=allowed_companies, nombre_usuario=nombre_usuario, es_admin=es_admin)
+
+
+# ---------- inventarios con la PDA (almacén y tiendas) ----------
+from . import inventario as _inv  # noqa: E402
+
+_inv.setup(app, odoo=odoo, current_user=current_user, guard=guard, es_admin=es_admin, data_dir=DATA, nombre_usuario=nombre_usuario)
+
+
+@app.get("/inventario", response_class=HTMLResponse)
+def inventario_page(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/entrar")
+    if "inventario" not in modulos_de(current_user(request)):
+        return RedirectResponse("/")
+    html = (BASE / "static" / "inventario.html").read_text()
+    html = re.sub(r'(/static/[\w.-]+\.(?:js|css))"', lambda m: f'{m.group(1)}?v={VERSION}"', html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
