@@ -802,6 +802,44 @@ async def admin_reenviar_facturas(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/reintentar_correos")
+async def admin_reintentar_correos(request: Request):
+    """Solo admin. {model, desde, solo_ver}: vuelve a mandar, tal cual se generaron (mismo asunto, texto y adjuntos), los correos de ese
+    modelo que fallaron, pero saliendo desde info@ (respuestas a info@). Si hay varios fallidos del mismo documento y asunto, va el último."""
+    _solo_admin(request)
+    b = await request.json()
+    T = [1, 2, 3, 4, 5]
+
+    def run():
+        mm = odoo.search_read("mail.mail", [("state", "=", "exception"), ("model", "=", b.get("model") or "sale.order"),
+                                            ("create_date", ">=", b.get("desde") or "2026-10-01")],
+                              ["res_id", "subject", "create_date", "email_to", "recipient_ids"], T, limit=1000, order="create_date desc")
+        vistos, enviar, dup = set(), [], []
+        for m in mm:
+            k = (m["res_id"], m.get("subject"))
+            (dup if k in vistos else enviar).append(m["id"])
+            vistos.add(k)
+        out = {"a_enviar": len(enviar), "duplicados": len(dup), "asuntos": [m["subject"] for m in mm if m["id"] in enviar][:80]}
+        if b.get("solo_ver"):
+            return out
+        if dup:
+            odoo.call("mail.mail", "write", T, ids=dup, vals={"state": "cancel"})
+        odoo.call("mail.mail", "write", T, ids=enviar, vals={"email_from": "Folder Castellón <info@foldercastellon.es>",
+                                                             "reply_to": "info@foldercastellon.es", "state": "outgoing", "failure_reason": False})
+        for i in range(0, len(enviar), 10):
+            try:
+                odoo.call("mail.mail", "send", T, ids=enviar[i:i + 10])
+            except Exception:
+                pass
+        st = odoo.search_read("mail.mail", [("id", "in", enviar)], ["state", "failure_reason", "subject"], T, limit=1000)
+        out["resultado"] = {}
+        for x in st:
+            out["resultado"][x["state"]] = out["resultado"].get(x["state"], 0) + 1
+        out["fallos"] = [f"{x['subject']}: {(x.get('failure_reason') or '')[:120]}" for x in st if x["state"] == "exception"][:30]
+        return out
+    return guard(run)
+
+
 @app.post("/api/ventas/{oid}/accion")
 async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     """{accion}: 'cancelar' (presupuesto o pedido sin servir: se cancela en Odoo, se puede recuperar),
