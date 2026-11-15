@@ -483,3 +483,4 @@ label.tb-ok input{width:18px;height:18px}
 .pe-ord{font-size:12px}.pe-ord a{margin:0 3px;color:var(--purple)}.pe-ord a.on{font-weight:700;text-decoration:none;background:#ece4f6;border-radius:5px;padding:1px 5px}
 .d-np{margin-top:8px}.d-np summary{cursor:pointer;color:var(--purple);font-size:12px}.d-npq{margin-top:5px;padding:5px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box}.d-nps a{display:block;padding:4px 6px;font-size:12px}.d-npf{margin-top:6px}
 #v-ventas [hidden],.drawer .d-npf[hidden]{display:none!important}
+.d-stk .pd-b{background:#ece4f6}

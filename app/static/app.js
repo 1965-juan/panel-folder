@@ -109,7 +109,9 @@ async function openDetail(c) {
       if (l.stock || (l.pendiente && l.pendiente.length)) {
         const t2 = document.createElement('tr'); t2.className = 'd-stk';
         t2.innerHTML = `<td colspan="5">${(l.stock || []).map(s => `<span class="${s.hay > 0 ? 'si' : 'no'}">${escH(s.donde)} <b>${+s.hay}</b></span>`).join('')}
-          ${(l.pendiente || []).map(p => `<span class="pd">🚚 ${+p.cantidad} de ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}${p.fecha ? ', prev. ' + fdate(p.fecha) : ''})</span>`).join('')}
+          ${(l.pendiente || []).map(p => p.borrador
+            ? `<span class="pd pd-b" title="Está en el pedido en borrador del proveedor: falta lanzarlo desde Compras">🛒 ${+p.cantidad} pedido a ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}, sin lanzar)</span>`
+            : `<span class="pd">🚚 ${+p.cantidad} de ${escH(p.proveedor.split(' ').slice(0, 2).join(' '))} (${escH(p.po)}${p.fecha ? ', prev. ' + fdate(p.fecha) : ''})</span>`).join('')}
           ${d.estado === 'sale' && l.product_id ? '<a href="#" class="lnk d-pv-t">🛒 Pedir a proveedor</a><div class="d-pv" hidden></div>' : ''}</td>`;
         tb.appendChild(t2);
         const tg = t2.querySelector('.d-pv-t');

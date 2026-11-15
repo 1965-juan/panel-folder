@@ -644,12 +644,14 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                     pass
             pend = {}
             try:
-                for pl in odoo.search_read("purchase.order.line", [("product_id", "in", pids), ("order_id.state", "=", "purchase")],
-                                           ["product_id", "product_qty", "qty_received", "order_id", "partner_id", "date_planned"], allowed, limit=2000):
+                # también lo que está en el borrador del proveedor (pedido desde el Panel AC o Compras y aún sin lanzar)
+                for pl in odoo.search_read("purchase.order.line", [("product_id", "in", pids), ("order_id.state", "in", ["draft", "sent", "to approve", "purchase"])],
+                                           ["product_id", "product_qty", "qty_received", "order_id", "partner_id", "date_planned", "state"], allowed, limit=2000):
                     falta = (pl.get("product_qty") or 0) - (pl.get("qty_received") or 0)
                     if falta > 0.001:
                         pend.setdefault(pl["product_id"][0], []).append({"po": pl["order_id"][1], "proveedor": (pl.get("partner_id") or [0, ""])[1],
-                                                                         "cantidad": round(falta, 2), "fecha": (pl.get("date_planned") or "")[:10]})
+                                                                         "cantidad": round(falta, 2), "fecha": (pl.get("date_planned") or "")[:10],
+                                                                         "borrador": pl.get("state") not in ("purchase", "done")})
             except Exception:
                 pass
             for l in lines_ok:
