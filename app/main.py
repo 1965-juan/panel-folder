@@ -835,6 +835,39 @@ async def admin_reenviar_facturas(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/limpiar_proveedores")
+async def admin_limpiar_proveedores(request: Request):
+    """Solo admin. {solo_ver}: 1) borra las líneas de proveedor repetidas en las fichas de artículos (mismo artículo, proveedor, empresa,
+    cantidad mínima y variante), dejando la primera; 2) pone FOLDER PAPELERIAS como proveedor preferido (el primero) donde esté."""
+    _solo_admin(request)
+    b = await request.json()
+    T = [1, 2, 3, 4, 5]
+    FOLDER = 7007
+
+    def run():
+        si = odoo.search_read("product.supplierinfo", [], ["partner_id", "product_tmpl_id", "company_id", "min_qty", "product_id", "sequence"], T, limit=200000)
+        grupos = {}
+        for x in si:
+            k = (x["product_tmpl_id"][0], x["partner_id"][0], (x.get("company_id") or [0])[0], x.get("min_qty") or 0, (x.get("product_id") or [0])[0])
+            grupos.setdefault(k, []).append(x)
+        borrar = []
+        for v in grupos.values():
+            if len(v) > 1:
+                v.sort(key=lambda x: (x.get("sequence") or 0, x["id"]))
+                borrar += [x["id"] for x in v[1:]]
+        folder = [x["id"] for x in si if x["partner_id"][0] == FOLDER and x["id"] not in set(borrar) and (x.get("sequence") or 0) != 0]
+        out = {"repetidas": len(borrar), "folder_a_preferido": len(folder)}
+        if b.get("solo_ver"):
+            return out
+        for i in range(0, len(borrar), 500):
+            odoo.call("product.supplierinfo", "unlink", T, ids=borrar[i:i + 500])
+        for i in range(0, len(folder), 2000):
+            odoo.call("product.supplierinfo", "write", T, ids=folder[i:i + 2000], vals={"sequence": 0})
+        out["hecho"] = True
+        return out
+    return guard(run)
+
+
 @app.post("/api/admin/reintentar_correos")
 async def admin_reintentar_correos(request: Request):
     """Solo admin. {model, desde, solo_ver}: vuelve a mandar, tal cual se generaron (mismo asunto, texto y adjuntos), los correos de ese
