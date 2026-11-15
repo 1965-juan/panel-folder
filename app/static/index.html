@@ -158,18 +158,23 @@
     <div class="pe-grid">
       <div class="pe-box">
         <h3>1 · Cliente</h3>
-        <label class="pe-l">Empresa que vende <select id="pe-emp"></select></label>
+        <label class="pe-l" id="pe-emp-l">Empresa que vende <select id="pe-emp"></select></label>
         <div class="pe-bus"><input id="pe-cq" type="search" placeholder="Buscar cliente por nombre, NIF, email…" autocomplete="off"><div id="pe-csug" class="pe-sug"></div></div>
         <div id="pe-cli" class="pe-cli muted">Ningún cliente elegido</div>
-        <label class="pe-l">Ref. / nº de pedido del cliente <input id="pe-ref" placeholder="opcional"></label>
-        <label class="pe-l">Observaciones <textarea id="pe-nota" rows="2" placeholder="opcional (salen en el presupuesto)"></textarea></label>
+        <label class="pe-l" id="pe-dir-l" hidden>Dirección de entrega <select id="pe-dir"></select></label>
+        <label class="pe-l">ORD / nº de pedido del cliente <input id="pe-ref" placeholder="si el cliente lo da"></label>
+        <label class="pe-l">Observaciones de entrega <textarea id="pe-nent" rows="2" placeholder="horario, persona de contacto, muelle…"></textarea></label>
+        <label class="pe-l">Observaciones del presupuesto <textarea id="pe-nota" rows="2" placeholder="opcional (salen en el presupuesto)"></textarea></label>
+        <button class="btn" id="pe-hist" hidden>📜 Ver lo que ha comprado (12 meses)</button>
       </div>
       <div class="pe-box">
         <h3>2 · Artículos</h3>
         <div class="pe-bus"><input id="pe-aq" type="search" placeholder="Buscar artículo por nombre, ref. Folder, ref. fabricante o código de barras…" autocomplete="off"><div id="pe-asug" class="pe-sug"></div></div>
         <table class="pe-t"><thead><tr><th>Artículo</th><th>Cant.</th><th>Precio <small class="muted">(vacío = tarifa)</small></th><th></th></tr></thead><tbody id="pe-lin"></tbody></table>
         <p id="pe-vacio" class="muted">Añade artículos con el buscador (o desde la pestaña Artículos).</p>
-        <div class="pe-bot"><button class="btn" id="pe-pre">💾 Guardar como presupuesto</button><button class="ac-go" id="pe-ped">✔ Crear pedido</button><button class="btn" id="pe-borra">Vaciar</button></div>
+        <div id="pe-hbox" class="pe-hbox" hidden></div>
+        <div class="pe-bot"><button class="ac-go" id="pe-pre">💾 Crear presupuesto</button><button class="btn" id="pe-ped" hidden>✔ Crear pedido confirmado</button><button class="btn" id="pe-borra">Vaciar</button></div>
+        <p class="muted pe-ayuda">Se crea como presupuesto en Odoo. Cuando el cliente lo acepte, se pasa a pedido desde Ventas (y al cliente le llega el aviso por email).</p>
         <div id="pe-res"></div>
       </div>
     </div>

@@ -1640,4 +1640,4 @@ _tab.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, 
 from . import pedidos as _ped  # noqa: E402
 
 _ped.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, odoo_url=ODOO_URL,
-           allowed_companies=allowed_companies, nombre_usuario=nombre_usuario)
+           allowed_companies=allowed_companies, nombre_usuario=nombre_usuario, es_admin=es_admin)

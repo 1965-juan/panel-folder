@@ -1,12 +1,14 @@
 """Nuevo pedido (presupuesto o pedido de cliente hecho desde el panel, como en Odoo) y buscador de Artículos
 (stock por tienda, precios y proveedores). Pensado para almacén y compras."""
+import datetime as dt
+
 from fastapi import Request, HTTPException
 
 # ubicaciones de stock que se enseñan: (nombre, empresa, ubicación)
 STOCKS = [("Almacén", 1, 8), ("Tienda 1", 1, 34), ("Tienda 2", 1, 40), ("T. Logipaper", 4, 46)]
 
 
-def setup(app, *, odoo, current_user, scope, guard, odoo_url, allowed_companies, nombre_usuario):
+def setup(app, *, odoo, current_user, scope, guard, odoo_url, allowed_companies, nombre_usuario, es_admin):
 
     def empresas(u):
         return [c["id"] for c in allowed_companies(u)]
@@ -77,6 +79,74 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, allowed_companies,
             return [{"id": p["id"], "nombre": p["display_name"], "email": p.get("email") or "", "nif": p.get("vat") or "", "ciudad": p.get("city") or ""} for p in ps]
         return guard(run)
 
+    @app.get("/api/pedidos/cliente/{pid}")
+    def cliente(pid: int, request: Request):
+        """Direcciones de entrega del cliente (como en Odoo) para elegir a dónde va el pedido."""
+        u = current_user(request)
+
+        def run():
+            cids = empresas(u)
+            p = odoo.search_read("res.partner", [("id", "=", pid)], ["commercial_partner_id", "display_name"], cids)
+            if not p:
+                raise HTTPException(404, "No encuentro el cliente")
+            com = p[0]["commercial_partner_id"][0]
+            ds = odoo.search_read("res.partner", [("id", "child_of", com), ("active", "=", True)],
+                                  ["display_name", "type", "street", "street2", "zip", "city"], cids, limit=60, order="type,name")
+            dirs = []
+            for d in ds:
+                if d["id"] != com and d.get("type") != "delivery" and not d.get("street"):
+                    continue
+                txt = ", ".join(x for x in [d.get("street"), d.get("street2"), " ".join(y for y in [d.get("zip"), d.get("city")] if y)] if x)
+                dirs.append({"id": d["id"], "nombre": d["display_name"], "direccion": txt, "entrega": d.get("type") == "delivery", "principal": d["id"] == com})
+            dirs.sort(key=lambda d: (not d["entrega"], not d["principal"], d["nombre"]))
+            return {"direcciones": dirs}
+        return guard(run)
+
+    @app.get("/api/pedidos/historico/{pid}")
+    def historico(pid: int, request: Request, dias: int = 365):
+        """Lo que ha comprado el cliente (pedidos confirmados y tickets de TPV) en los últimos días, artículo a artículo."""
+        u = current_user(request)
+
+        def run():
+            cids = empresas(u)
+            p = odoo.search_read("res.partner", [("id", "=", pid)], ["commercial_partner_id"], cids)
+            if not p:
+                raise HTTPException(404, "No encuentro el cliente")
+            com = p[0]["commercial_partner_id"][0]
+            desde = (dt.date.today() - dt.timedelta(days=dias)).isoformat()
+            ag = {}
+
+            def suma(prod, qty, precio, fecha, doc):
+                a = ag.setdefault(prod[0], {"product_id": prod[0], "nombre": prod[1], "veces": 0, "cantidad": 0, "ultima": "", "precio": 0, "docs": set()})
+                if doc not in a["docs"]:
+                    a["docs"].add(doc); a["veces"] += 1
+                a["cantidad"] += qty or 0
+                if fecha >= a["ultima"]:
+                    a["ultima"], a["precio"] = fecha, precio or 0
+            for l in odoo.search_read("sale.order.line", [("order_id.partner_id", "child_of", com), ("order_id.state", "=", "sale"), ("order_id.date_order", ">=", desde),
+                                                         ("display_type", "=", False), ("product_id", "!=", False), ("product_id.type", "!=", "service")],
+                                      ["product_id", "product_uom_qty", "price_unit", "order_id", "create_date"], cids, limit=20000):
+                suma(l["product_id"], l["product_uom_qty"], l["price_unit"], (l.get("create_date") or "")[:10], ("so", l["order_id"][0]))
+            try:
+                for l in odoo.search_read("pos.order.line", [("order_id.partner_id", "child_of", com), ("order_id.date_order", ">=", desde)],
+                                          ["product_id", "qty", "price_unit", "order_id", "create_date"], cids, limit=20000):
+                    if l.get("product_id"):
+                        suma(l["product_id"], l["qty"], l["price_unit"], (l.get("create_date") or "")[:10], ("pos", l["order_id"][0]))
+            except Exception:
+                pass
+            out = sorted(ag.values(), key=lambda a: (-a["veces"], a["nombre"]))[:300]
+            refs = {r["id"]: r for r in odoo.search_read("product.product", [("id", "in", [a["product_id"] for a in out]), ("sale_ok", "=", True)],
+                                                         ["default_code", "lst_price", "name"], cids, limit=1000)} if out else {}
+            res = []
+            for a in out:
+                r = refs.get(a["product_id"])
+                if not r:   # ya no se vende o archivado
+                    continue
+                res.append({"product_id": a["product_id"], "nombre": r["name"], "ref": r.get("default_code") or "", "veces": a["veces"],
+                            "cantidad": round(a["cantidad"], 2), "ultima": a["ultima"], "precio": a["precio"], "pvp": r.get("lst_price") or 0})
+            return {"articulos": res, "dias": dias}
+        return guard(run)
+
     @app.post("/api/pedidos/crear")
     async def crear(request: Request):
         """{empresa, partner_id, lineas:[{product_id, cantidad, precio?}], ref, nota, confirmar}: crea el presupuesto en Odoo
@@ -105,9 +175,13 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, allowed_companies,
                 vals["client_order_ref"] = b["ref"].strip()
             if (b.get("nota") or "").strip():
                 vals["note"] = b["nota"].strip()
+            if int(b.get("entrega") or 0):
+                vals["partner_shipping_id"] = int(b["entrega"])
+            if (b.get("nota_entrega") or "").strip():
+                vals["x_delivery_note"] = b["nota_entrega"].strip()
             r = odoo.call("sale.order", "create", [emp], vals_list=[vals])
             so_id = r[0] if isinstance(r, list) else r
-            if b.get("confirmar"):
+            if b.get("confirmar") and es_admin(u):   # almacén y compras siempre lo dejan en presupuesto
                 odoo.call("sale.order", "action_confirm", [emp], ids=[so_id])
             so = odoo.search_read("sale.order", [("id", "=", so_id)], ["name", "amount_untaxed", "amount_total", "state"], [emp])[0]
             ln = odoo.search_read("sale.order.line", [("order_id", "=", so_id)], ["product_id", "product_uom_qty", "price_unit", "discount", "price_subtotal"], [emp])

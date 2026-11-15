@@ -10,15 +10,51 @@ async function peOpen() {
     const sel = $('#pe-emp'); sel.innerHTML = '';
     PE_EMPS.forEach(e => { const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; sel.appendChild(o); });
     if (PE.emp && PE_EMPS.some(e => e.id == PE.emp)) sel.value = PE.emp;
+    // almacén y compras venden siempre con DISTRIPLUS: no se pregunta
+    const dis = PE_EMPS.find(e => /DISTRIPLUS/i.test(e.name));
+    if (!ADMIN && dis) { sel.value = dis.id; PE.emp = dis.id; }
+    $('#pe-emp-l').hidden = !ADMIN;
+    $('#pe-ped').hidden = !ADMIN;
     sel.onchange = () => { PE.emp = sel.value; peGuarda(); };
   }
-  $('#pe-ref').value = PE.ref || ''; $('#pe-nota').value = PE.nota || '';
-  pePinta();
+  $('#pe-ref').value = PE.ref || ''; $('#pe-nota').value = PE.nota || ''; $('#pe-nent').value = PE.nent || '';
+  pePinta(); peDirs();
 }
+
+// direcciones de entrega del cliente elegido (la de entrega primero, como en Odoo)
+async function peDirs() {
+  const l = $('#pe-dir-l'), sel = $('#pe-dir');
+  $('#pe-hist').hidden = !PE.cli; if (!PE.cli) { $('#pe-hbox').hidden = true; }
+  if (!PE.cli) { l.hidden = true; return; }
+  try {
+    const d = await api(`/api/pedidos/cliente/${PE.cli.id}`);
+    sel.innerHTML = d.direcciones.map(x => `<option value="${x.id}">${escH((x.entrega ? '🚚 ' : '') + x.nombre + (x.direccion ? ' — ' + x.direccion : ''))}</option>`).join('');
+    if (PE.dir && d.direcciones.some(x => x.id == PE.dir)) sel.value = PE.dir; else PE.dir = d.direcciones[0] ? d.direcciones[0].id : null;
+    l.hidden = d.direcciones.length < 2;
+    sel.onchange = () => { PE.dir = +sel.value; peGuarda(); };
+  } catch (e) { l.hidden = true; }
+}
+
+// histórico de compras del cliente: un clic lo añade al presupuesto
+$('#pe-hist').onclick = async () => {
+  const bx = $('#pe-hbox');
+  if (!bx.hidden) { bx.hidden = true; return; }
+  bx.hidden = false; bx.innerHTML = '<p class="muted">Cargando lo que ha comprado…</p>';
+  try {
+    const d = await api(`/api/pedidos/historico/${PE.cli.id}`), r = d.articulos;
+    if (!r.length) { bx.innerHTML = '<p class="muted">No ha comprado nada en los últimos 12 meses.</p>'; return; }
+    bx.innerHTML = `<div class="pe-hh"><b>Lo que ha comprado en 12 meses</b> <input id="pe-hq" type="search" placeholder="filtrar…"> <a href="#" class="lnk" id="pe-hx">cerrar</a></div>
+      <table class="pe-t">${r.map((a, i) => `<tr data-n="${escH((a.nombre + ' ' + a.ref).toLowerCase())}"><td><b>${escH(a.nombre)}</b><br><small class="muted">${escH(a.ref)} · ${a.veces} ${a.veces === 1 ? 'vez' : 'veces'} · ${+a.cantidad} ud. · último ${fdate(a.ultima)} a ${eur(a.precio)}</small></td>
+        <td><button class="btn" data-i="${i}">＋</button></td></tr>`).join('')}</table>`;
+    bx.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { peAnade({ id: r[+b.dataset.i].product_id, nombre: r[+b.dataset.i].nombre, ref: r[+b.dataset.i].ref, pvp: r[+b.dataset.i].pvp }); b.textContent = '✔'; });
+    $('#pe-hx').onclick = e => { e.preventDefault(); bx.hidden = true; };
+    $('#pe-hq').oninput = e => { const q = e.target.value.toLowerCase(); bx.querySelectorAll('tr[data-n]').forEach(tr => tr.hidden = q && !tr.dataset.n.includes(q)); };
+  } catch (e) { bx.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+};
 
 function pePinta() {
   $('#pe-cli').innerHTML = PE.cli ? `<b>${escH(PE.cli.nombre)}</b>${PE.cli.nif ? ' · ' + escH(PE.cli.nif) : ''}${PE.cli.email ? `<br><small class="muted">${escH(PE.cli.email)}</small>` : ''} <a href="#" id="pe-cx" class="lnk">cambiar</a>` : '<span class="muted">Ningún cliente elegido</span>';
-  const cx = $('#pe-cx'); if (cx) cx.onclick = e => { e.preventDefault(); PE.cli = null; peGuarda(); pePinta(); $('#pe-cq').focus(); };
+  const cx = $('#pe-cx'); if (cx) cx.onclick = e => { e.preventDefault(); PE.cli = null; PE.dir = null; peGuarda(); pePinta(); peDirs(); $('#pe-cq').focus(); };
   const tb = $('#pe-lin'); tb.innerHTML = '';
   PE.lin.forEach((l, i) => {
     const tr = document.createElement('tr');
@@ -51,7 +87,7 @@ $('#pe-cq').oninput = peDebounce(async () => {
   try {
     const r = await api(`/api/pedidos/clientes?q=${encodeURIComponent(q)}`);
     box.innerHTML = r.map((c, i) => `<a href="#" data-i="${i}"><b>${escH(c.nombre)}</b> <small class="muted">${escH([c.nif, c.ciudad].filter(Boolean).join(' · '))}</small></a>`).join('') || '<small class="muted">Ningún cliente con ese nombre</small>';
-    box.querySelectorAll('a').forEach(a => a.onclick = e => { e.preventDefault(); PE.cli = r[+a.dataset.i]; peGuarda(); box.innerHTML = ''; $('#pe-cq').value = ''; pePinta(); });
+    box.querySelectorAll('a').forEach(a => a.onclick = e => { e.preventDefault(); PE.cli = r[+a.dataset.i]; PE.dir = null; peGuarda(); box.innerHTML = ''; $('#pe-cq').value = ''; pePinta(); peDirs(); });
   } catch (e) { box.innerHTML = `<small class="err">${escH(e.message)}</small>`; }
 });
 
@@ -67,21 +103,23 @@ $('#pe-aq').oninput = peDebounce(async () => {
 $('#pe-aq').onkeydown = e => { if (e.key === 'Escape') { $('#pe-asug').innerHTML = ''; } };
 $('#pe-ref').onchange = e => { PE.ref = e.target.value; peGuarda(); };
 $('#pe-nota').onchange = e => { PE.nota = e.target.value; peGuarda(); };
+$('#pe-nent').onchange = e => { PE.nent = e.target.value; peGuarda(); };
 $('#pe-borra').onclick = () => { if (!PE.lin.length && !PE.cli) return; if (!confirm('¿Vaciar el pedido que estás haciendo?')) return; PE = { cli: null, lin: [], emp: PE.emp }; peGuarda(); peOpen(); $('#pe-res').innerHTML = ''; };
 
 async function peCrea(confirmar) {
   if (!PE.cli) return alertBox('Elige primero el cliente');
   if (!PE.lin.length) return alertBox('Añade algún artículo');
   const emp = $('#pe-emp'), nomEmp = emp.options[emp.selectedIndex]?.text || '';
-  if (!confirm(`¿${confirmar ? 'Crear el PEDIDO' : 'Guardar el PRESUPUESTO'} de ${PE.cli.nombre} (${PE.lin.length} artículos) en ${nomEmp}?`)) return;
+  if (!confirm(`¿${confirmar ? 'Crear el PEDIDO confirmado' : 'Crear el PRESUPUESTO'} de ${PE.cli.nombre} (${PE.lin.length} artículos) en ${nomEmp}?`)) return;
   const bs = [$('#pe-pre'), $('#pe-ped')]; bs.forEach(b => b.disabled = true);
   try {
     const r = await jpost('/api/pedidos/crear', { empresa: +emp.value, partner_id: PE.cli.id, ref: $('#pe-ref').value, nota: $('#pe-nota').value, confirmar,
+      entrega: PE.dir || 0, nota_entrega: $('#pe-nent').value,
       lineas: PE.lin.map(l => ({ product_id: l.product_id, cantidad: l.cantidad, precio: l.precio })) });
     $('#pe-res').innerHTML = `<div class="pe-ok"><b>✅ ${r.estado === 'sale' ? 'Pedido' : 'Presupuesto'} ${escH(r.nombre)} creado</b> · ${escH(PE.cli.nombre)} · ${eur(r.base)} + IVA = <b>${eur(r.total)}</b>
       <table class="pe-t">${r.lineas.map(l => `<tr><td>${escH(l.articulo)}</td><td>${+l.cantidad}</td><td>${eur(l.precio)}${l.dto ? ` −${l.dto}%` : ''}</td><td>${eur(l.subtotal)}</td></tr>`).join('')}</table>
       <a class="btn" target="_blank" rel="noopener" href="${r.odoo}">Abrir en Odoo ↗</a> <a class="btn" href="#ventas">Ver en Ventas</a></div>`;
-    PE = { cli: null, lin: [], emp: PE.emp }; peGuarda(); $('#pe-ref').value = ''; $('#pe-nota').value = ''; pePinta();
+    PE = { cli: null, lin: [], emp: PE.emp }; peGuarda(); $('#pe-ref').value = ''; $('#pe-nota').value = ''; $('#pe-nent').value = ''; $('#pe-hbox').hidden = true; pePinta(); peDirs();
   } catch (e) { alertBox(e.message); }
   bs.forEach(b => b.disabled = false);
 }
