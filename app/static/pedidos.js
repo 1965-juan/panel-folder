@@ -12,8 +12,9 @@ async function peOpen() {
     if (PE.emp && PE_EMPS.some(e => e.id == PE.emp)) sel.value = PE.emp;
     // almacén y compras venden siempre con DISTRIPLUS: no se pregunta
     const dis = PE_EMPS.find(e => /DISTRIPLUS/i.test(e.name));
-    if (!ADMIN && dis) { sel.value = dis.id; PE.emp = dis.id; }
-    $('#pe-emp-l').hidden = !ADMIN;
+    const soloDis = !ADMIN || ['almacen', 'compras'].includes((window.YO || {}).usuario);
+    if (soloDis && dis) { sel.value = dis.id; PE.emp = dis.id; }
+    $('#pe-emp-l').hidden = soloDis;
     sel.onchange = () => { PE.emp = sel.value; peGuarda(); };
   }
   $('#pe-ref').value = PE.ref || ''; $('#pe-nota').value = PE.nota || ''; $('#pe-nent').value = PE.nent || '';
@@ -40,14 +41,30 @@ $('#pe-hist').onclick = async () => {
   if (!bx.hidden) { bx.hidden = true; return; }
   bx.hidden = false; bx.innerHTML = '<p class="muted">Cargando lo que ha comprado…</p>';
   try {
-    const d = await api(`/api/pedidos/historico/${PE.cli.id}`), r = d.articulos;
+    const d = await api(`/api/pedidos/historico/${PE.cli.id}`);
+    // una sola fila por referencia: la de la última compra (sumando veces y unidades)
+    const por = {};
+    d.articulos.forEach(a => { const k = a.ref || ('#' + a.product_id), x = por[k];
+      if (!x) por[k] = { ...a };
+      else { x.veces += a.veces; x.cantidad += a.cantidad; if (a.ultima > x.ultima) Object.assign(x, { product_id: a.product_id, nombre: a.nombre, ultima: a.ultima, precio: a.precio, pvp: a.pvp }); } });
+    const r = Object.values(por);
     if (!r.length) { bx.innerHTML = '<p class="muted">No ha comprado nada en los últimos 12 meses.</p>'; return; }
-    bx.innerHTML = `<div class="pe-hh"><b>Lo que ha comprado en 12 meses</b> <input id="pe-hq" type="search" placeholder="filtrar…"> <a href="#" class="lnk" id="pe-hx">cerrar</a></div>
-      <table class="pe-t">${r.map((a, i) => `<tr data-n="${escH((a.nombre + ' ' + a.ref).toLowerCase())}"><td><b>${escH(a.nombre)}</b><br><small class="muted">${escH(a.ref)} · ${a.veces} ${a.veces === 1 ? 'vez' : 'veces'} · ${+a.cantidad} ud. · último ${fdate(a.ultima)} a ${eur(a.precio)}</small></td>
-        <td><button class="btn" data-i="${i}">＋</button></td></tr>`).join('')}</table>`;
-    bx.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { peAnade({ id: r[+b.dataset.i].product_id, nombre: r[+b.dataset.i].nombre, ref: r[+b.dataset.i].ref, pvp: r[+b.dataset.i].pvp }); b.textContent = '✔'; });
+    let orden = 'az';
+    const pinta = () => {
+      const l = r.slice().sort(orden === 'az' ? (a, b) => a.nombre.localeCompare(b.nombre, 'es') : orden === 'veces' ? (a, b) => b.veces - a.veces || a.nombre.localeCompare(b.nombre, 'es') : (a, b) => b.ultima.localeCompare(a.ultima));
+      const q = ($('#pe-hq') ? $('#pe-hq').value : '').toLowerCase();
+      bx.querySelector('table').innerHTML = l.map(a => `<tr data-n="${escH((a.nombre + ' ' + a.ref).toLowerCase())}" ${q && !(a.nombre + ' ' + a.ref).toLowerCase().includes(q) ? 'hidden' : ''}><td><b>${escH(a.nombre)}</b><br><small class="muted">${escH(a.ref)} · ${a.veces} ${a.veces === 1 ? 'vez' : 'veces'} · ${+a.cantidad} ud. · último ${fdate(a.ultima)} a ${eur(a.precio)}</small></td>
+        <td><button class="btn" data-p="${a.product_id}">${PE.lin.some(x => x.product_id === a.product_id) ? '✔' : '＋'}</button></td></tr>`).join('');
+      bx.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { const a = r.find(x => x.product_id === +b.dataset.p); peAnade({ id: a.product_id, nombre: a.nombre, ref: a.ref, pvp: a.pvp }); b.textContent = '✔'; });
+      bx.querySelectorAll('[data-o]').forEach(b => b.classList.toggle('on', b.dataset.o === orden));
+    };
+    bx.innerHTML = `<div class="pe-hh"><b>Lo que ha comprado en 12 meses (${r.length})</b> <input id="pe-hq" type="search" placeholder="filtrar…">
+      <span class="pe-ord">Ordenar: <a href="#" data-o="az">A-Z</a> <a href="#" data-o="veces">más pedidos</a> <a href="#" data-o="ultima">más recientes</a></span> <a href="#" class="lnk" id="pe-hx">cerrar</a></div>
+      <table class="pe-t"></table>`;
+    bx.querySelectorAll('[data-o]').forEach(b => b.onclick = e => { e.preventDefault(); orden = b.dataset.o; pinta(); });
     $('#pe-hx').onclick = e => { e.preventDefault(); bx.hidden = true; };
-    $('#pe-hq').oninput = e => { const q = e.target.value.toLowerCase(); bx.querySelectorAll('tr[data-n]').forEach(tr => tr.hidden = q && !tr.dataset.n.includes(q)); };
+    $('#pe-hq').oninput = () => pinta();
+    pinta();
   } catch (e) { bx.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
 };
 

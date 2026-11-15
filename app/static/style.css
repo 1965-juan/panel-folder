@@ -480,3 +480,4 @@ label.tb-ok input{width:18px;height:18px}
 .pe-hbox{margin-top:10px;padding:10px;background:#faf8fc;border:1px solid #eee;border-radius:8px;max-height:420px;overflow:auto}.pe-hh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pe-hh input{padding:5px;border:1px solid #ccc;border-radius:6px}#pe-hist{margin-top:4px}.pe-ayuda{font-size:12px;margin-top:6px}
 .pe-av{display:flex;gap:6px;align-items:center;font-size:13px;margin-top:12px}
 #v-pe [hidden],#v-ar [hidden]{display:none!important}
+.pe-ord{font-size:12px}.pe-ord a{margin:0 3px;color:var(--purple)}.pe-ord a.on{font-weight:700;text-decoration:none;background:#ece4f6;border-radius:5px;padding:1px 5px}
