@@ -1401,6 +1401,11 @@ async def web_contacto_nuevo(request: Request):
         ya = odoo.search_read("res.partner", [("parent_id", "=", emp), ("email", "=ilike", em)], ["id", "name"], [1, 2, 3, 4, 5], limit=1) if em else []
         if ya:
             return {"id": ya[0]["id"], "nombre": ya[0]["name"], "nuevo": False}
+        # contacto suelto con ese email (p. ej. se registró él solo en la web): se mete en la empresa en vez de duplicarlo
+        suelto = odoo.search_read("res.partner", [("parent_id", "=", False), ("is_company", "=", False), ("email", "=ilike", em)], ["id", "name"], [1, 2, 3, 4, 5], limit=1) if em else []
+        if suelto:
+            odoo.call("res.partner", "write", [1], ids=[suelto[0]["id"]], vals={"parent_id": emp, "type": "contact", "name": b["nombre"].strip() or suelto[0]["name"]})
+            return {"id": suelto[0]["id"], "nombre": b["nombre"], "nuevo": False, "unido": True}
         r = odoo.call("res.partner", "create", [1], vals_list=[{"parent_id": emp, "type": "contact", "name": b["nombre"].strip(), "email": em}])
         return {"id": r[0] if isinstance(r, list) else r, "nombre": b["nombre"], "nuevo": True}
     return guard(run)
