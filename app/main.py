@@ -1988,6 +1988,16 @@ async def admin_compra_directa(request: Request):
                 vals = {"name": l["nombre"][:120], "purchase_ok": True, "sale_ok": True, "type": "consu", "company_id": c,
                         "standard_price": coste, "list_price": pvp, "is_published": False,
                         "seller_ids": [[0, 0, {"partner_id": part, "product_code": l.get("ref") or False, "price": coste, "company_id": c}]]}
+                if l.get("descripcion"):
+                    vals["description_sale"] = l["descripcion"][:500]
+                if l.get("foto_url"):
+                    try:
+                        import base64, httpx
+                        rr = httpx.get(l["foto_url"], timeout=30, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+                        if rr.status_code == 200 and rr.headers.get("content-type", "").startswith("image"):
+                            vals["image_1920"] = base64.b64encode(rr.content).decode()
+                    except Exception:
+                        pass
                 if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], [1, 2, 3, 4, 5], limit=1):
                     vals["default_code"] = l["ref"]
                 for f, v in (("is_storable", True), ("available_in_pos", False)):
@@ -2001,7 +2011,7 @@ async def admin_compra_directa(request: Request):
                 tm = odoo.call("product.template", "create", [c], vals_list=[vals])
                 tm = tm[0] if isinstance(tm, list) else tm
                 pid = odoo.search_read("product.product", [("product_tmpl_id", "=", tm)], ["id"], [c])[0]["id"]
-                out.append({"creado": vals["name"], "product_id": pid, "coste": coste, "pvp": pvp})
+                out.append({"creado": vals["name"], "product_id": pid, "coste": coste, "pvp": pvp, "foto": "image_1920" in vals})
             lineas.append([0, 0, {"product_id": int(pid), "product_qty": float(l["cant"]), "price_unit": coste}])
         po = odoo.call("purchase.order", "create", [c], vals_list=[{"partner_id": part, "company_id": c, "partner_ref": b.get("partner_ref") or False,
                                                                     "origin": b.get("origen") or False, "order_line": lineas}])
