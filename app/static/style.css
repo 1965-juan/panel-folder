@@ -488,3 +488,4 @@ body.u-compras #v-ac input[data-loc],body.u-compras #v-ac .hueco{display:none!im
 body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 #v-co [hidden]{display:none!important}
 #v-ti .ti-cols[hidden],#v-ti .ti-repo[hidden]{display:none!important}
+.co-falta{background:#fff7ea;border:1px solid #f3c88a;border-radius:8px;padding:8px 12px;margin:8px 0}.co-falta label{display:block;margin:4px 0;cursor:pointer}

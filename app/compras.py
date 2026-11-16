@@ -706,7 +706,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                               "precio": x["price_unit"]} for x in pls if x["id"] not in usados]
         return info
 
-    def aplicar_cuadre(r, cids, u, partner_id, po_id, lineas):
+    def aplicar_cuadre(r, cids, u, partner_id, po_id, lineas, no_vienen="pendiente"):
         """Deja el pedido igual que el documento, crea lo nuevo con EAN, pasa lo que no viene a pendiente, confirma y enlaza la factura."""
         did = r["id"]
         lec = json.loads(r["lectura"]) if r["lectura"] else {}
@@ -780,7 +780,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         # 1) lo que no viene -> pedido "Pendiente de Pxxxxx" (antes de quitarlo del original)
         sobran = [x for k, x in pls.items() if k not in usados]
         pendiente = None
-        if sobran:
+        if sobran and no_vienen != "cancelar":
             vals = {"partner_id": partner_id, "company_id": cid, "origin": f"Pendiente de {po['name']}",
                     "order_line": [[0, 0, {"product_id": x["product_id"][0], "name": x["name"], "product_qty": x["product_qty"], "price_unit": x["price_unit"],
                                            "discount": x.get("discount") or 0, ftax: [[6, 0, x.get(ftax) or []]],
@@ -1012,7 +1012,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         if not partner_id or not lineas:
             raise HTTPException(400, "Falta el proveedor o no hay líneas identificadas")
 
-        return guard(lambda: aplicar_cuadre(r, cids, u, partner_id, po_id, lineas))
+        nv = "cancelar" if b.get("no_vienen") == "cancelar" else "pendiente"
+        return guard(lambda: aplicar_cuadre(r, cids, u, partner_id, po_id, lineas, nv))
 
     @app.delete("/api/compras/docs/{did}")
     def borrar_doc(did: str, request: Request):
@@ -1124,7 +1125,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         if comp.get("creados"):
             sec.append("<h2>🆕 Artículos nuevos creados en Odoo</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in comp["creados"]) + "</ul>")
         if comp.get("a_pendiente"):
-            sec.append(f"<h2>⏳ No ha venido (queda pedido en {e(comp.get('pendiente') or '—')})</h2>"
+            sec.append((f"<h2>⏳ No ha venido (queda pedido en {e(comp.get('pendiente'))})</h2>" if comp.get("pendiente") else "<h2>✖ No ha venido y se ha cancelado (no se vuelve a pedir)</h2>")
                        + filas(["Artículo", "Cantidad"], [f"<tr><td>{e(x['articulo'])}</td><td>{n(x['cant'])}</td></tr>" for x in comp["a_pendiente"]]))
         if rec.get("lineas"):
             ls = []
@@ -1133,7 +1134,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 ls.append(f"<tr class=\"{'mal' if d < -0.0001 else ''}\"><td>{e(x['articulo'])}</td><td>{n(x['pedido'])}</td><td>{n(x['recibido'])}</td>"
                           f"<td>{'' if abs(d) < 0.0001 else ('faltan ' + n(-d) if d < 0 else 'sobran ' + n(d))}</td></tr>")
             sec.append(f"<h2>📦 Recibido en almacén ({e(rec.get('picking', ''))})</h2>" + filas(["Artículo", "Esperado", "Recibido", "Diferencia"], ls)
-                       + ("<p class='nota'>Lo que faltaba queda pendiente en una entrada nueva.</p>" if rec.get("queda_pendiente") else ""))
+                       + ("<p class='nota'>Lo que faltaba queda pendiente en una entrada nueva.</p>" if rec.get("queda_pendiente")
+                          else "<p class='nota'>Lo que faltaba se ha cancelado: no queda pendiente de recibir.</p>" if rec.get("cancelado") else ""))
         if rec.get("servir"):
             sec.append("<h2>🚚 Ya se puede servir</h2>" + filas(["Para", "Pedido", "Artículo", "Pend."],
                        [f"<tr><td>{e(x['quien'])}</td><td>{e(x['ref'])}</td><td>{e(x['producto'])}</td><td>{n(x['pendiente'])}</td></tr>" for x in rec["servir"]]))
@@ -1186,8 +1188,11 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 wctx = dict(res.get("context") or {}, allowed_company_ids=c1)
                 w = odoo.call("stock.backorder.confirmation", "create", None, vals_list=[{}], context=wctx)
                 w = w[0] if isinstance(w, list) else w
-                odoo.call("stock.backorder.confirmation", "process", None, ids=[w], context=wctx)
-                pendiente = True
+                if b.get("faltan") == "cancelar":   # lo que falta no vendrá: se cancela, no queda pendiente
+                    odoo.call("stock.backorder.confirmation", "process_cancel_backorder", None, ids=[w], context=wctx)
+                else:
+                    odoo.call("stock.backorder.confirmation", "process", None, ids=[w], context=wctx)
+                    pendiente = True
             elif isinstance(res, dict) and res.get("res_model"):
                 raise HTTPException(400, f"Odoo pide confirmar algo más ({res.get('name')}). Termínalo en Odoo.")
             # adjuntar el PDF del albarán a la recepción
@@ -1219,7 +1224,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 mv = odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id", "product_uom_qty"], company_ids=c1)
                 rec = {"picking": pk["name"], "picking_id": pid, "por": u_rec, "cuando": time.time(), "albaran": b.get("albaran") or "",
                        "lineas": [{"articulo": m["product_id"][1], "pedido": m["product_uom_qty"], "recibido": cant.get(m["id"], 0)} for m in mv],
-                       "queda_pendiente": pendiente, "servir": servir}
+                       "queda_pendiente": pendiente, "cancelado": b.get("faltan") == "cancelar", "servir": servir}
                 po_id = (odoo.search_read("stock.picking", [("id", "=", pid)], ["purchase_id"], company_ids=c1)[0].get("purchase_id") or [0])[0]
                 with lock, con() as c:
                     dids = [b["doc_id"]] if b.get("doc_id") else []

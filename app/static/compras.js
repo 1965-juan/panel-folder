@@ -73,7 +73,7 @@ async function coDocs() {
       gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
       ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
       fichas: `<button class="lnk" data-a="fichas">📷 Fichas</button>`, auto: `<button class="ac-go" data-a="auto">🤖 Terminar automático</button>`, releer: `<button class="lnk" data-a="releer">volver a leer</button>`,
-      descartar: `<button class="lnk del" data-a="descartar">descartar</button>` };
+      descartar: `<button class="lnk del" data-a="descartar">🗑 Eliminar</button>` };
     return `<div class="bj-card p-${x.paso}" data-id="${x.id}"><div class="bj-1"><span>${tipo}</span><b>${escH(x.proveedor || x.nombre)}</b>
         <span class="bdg ${pc}">${pt}</span></div>
       <div class="bj-2">${x.numero ? 'Nº ' + escH(x.numero) : ''} ${x.fecha ? '· ' + coDate(x.fecha) : ''} ${x.total ? '· <b>' + eu2(x.total) + '</b>' : ''}
@@ -82,6 +82,7 @@ async function coDocs() {
       <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
       <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Buscar o crear el proveedor del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
         ${x.tipo === 'albaran' && (x.compra || x.recepcion) ? '<button class="lnk" data-a="informe">📄 Informe</button>' : ''}
+        ${(x.acciones || []).includes('descartar') ? '' : '<button class="lnk del" data-a="descartar">🗑 Eliminar</button>'}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
   };
   $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
@@ -96,7 +97,7 @@ async function coDocs() {
       if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
       if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
       if (a === 'releer') { await jpost(`/api/compras/docs/${x.id}/releer`, {}); return coDocs(); }
-      if (a === 'descartar') { if (!confirm('¿Descartar este documento de la bandeja? (no borra nada de Odoo)')) return; await fetch('/api/compras/docs/' + x.id, { method: 'DELETE' }); return coDocs(); }
+      if (a === 'descartar') { if (!confirm('¿Eliminar este documento de la bandeja? (por ejemplo si se subió uno que no era). No borra nada de Odoo.')) return; await fetch('/api/compras/docs/' + x.id, { method: 'DELETE' }); return coDocs(); }
       if (a === 'recibido' && !confirm('¿Confirmas que el material de esta factura ha llegado? Quedará apuntado a tu nombre.')) return;
       if (a === 'gasto' || a === 'recibido' || a === 'quitar_marca') { await jpost(`/api/compras/facturas/${x.odoo_id}/marcar`, { tipo: a === 'quitar_marca' ? '' : a }); return coDocs(); }
       if (a === 'ok') { b.disabled = true; b.textContent = 'Contabilizando…'; await jpost(`/api/compras/facturas/${x.odoo_id}/ok?company=${company}`, {}); alertBox('Factura contabilizada'); coBadge(); return coDocs(); }
@@ -160,7 +161,8 @@ async function coPasar(did, opts = {}) {
         <td class="${ec}">${et}</td></tr>`; }).join('')}
       </tbody></table>
       ${d.no_vienen && d.no_vienen.length ? `<h4>En el pedido pero no vienen en el documento (${d.no_vienen.length})</h4>
-        <p class="muted">Se pasan a un pedido nuevo en borrador "Pendiente de ${escH(po.name)}" y se quitan de ${escH(po.name)}.</p>
+        <div class="co-falta"><label><input type="radio" name="pc-nv" value="pendiente" checked> <b>Dejarlo pendiente</b>: se pasa a un pedido nuevo en borrador «Pendiente de ${escH(po.name)}» para reclamarlo o lanzarlo</label>
+          <label><input type="radio" name="pc-nv" value="cancelar"> <b>No vendrá: cancelarlo</b> (se quita del pedido y no se vuelve a pedir)</label></div>
         <table class="co-t pc-t"><tbody>${d.no_vienen.map(x => `<tr><td>${escH(x.producto)}</td><td>${x.cantidad}</td><td>${x.precio}</td></tr>`).join('')}</tbody></table>` : ''}
       <p>Base con lo identificado: <b>${eu(base)}</b> · base del documento: <b>${eu((+lec.base || 0) - (+lec.portes || 0))}</b>${Math.abs(base - ((+lec.base || 0) - (+lec.portes || 0))) > 0.03 ? ' <span class="err-t" style="display:inline">no cuadra todavía</span>' : ' ✓'}</p>
       ${faltan ? `<p class="pc-aviso">Quedan <b>${faltan}</b> líneas sin identificar: búscalas en Odoo, márcalas como nuevas (solo si de verdad no existen en Odoo) o "no meter". O pulsa «🤖 Terminar automático» en la bandeja para que las busque en la web del fabricante.</p>` : ''}
@@ -189,7 +191,7 @@ async function coPasar(did, opts = {}) {
       if (!confirm(`¿Cuadrar ${po ? po.name : 'un pedido nuevo'} con este documento y confirmarlo?`)) return;
       $('#pc-go').disabled = true; $('#pc-go').textContent = 'Cuadrando en Odoo…';
       try {
-        const r = await jpost(`/api/compras/docs/${did}/cuadrar/aplicar`, { partner_id: prov.id, pedido_id: po ? po.id : 0, lineas: L });
+        const r = await jpost(`/api/compras/docs/${did}/cuadrar/aplicar`, { partner_id: prov.id, pedido_id: po ? po.id : 0, lineas: L, no_vienen: (db.querySelector('input[name=pc-nv]:checked') || {}).value });
         $('#pc-res').innerHTML = `<div class="ac-docs"><b>✓ ${escH(r.pedido)} cuadrado y confirmado</b> (base ${eu(r.base)}, total ${eu(r.total)}).<br>
           Entrada para almacén: <b>${escH(r.recepciones.join(', ') || '—')}</b> → pestaña Recepciones.
           ${r.pendiente ? `<br>Lo que no ha venido queda en <b>${escH(r.pendiente)}</b> (borrador).` : ''}
@@ -300,7 +302,9 @@ function coRecibirOpen(r) {
     <div class="co-q"><button class="lnk" id="co-todo">Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button></div>
     <table class="co-t"><thead><tr><th>Artículo</th><th>Pedido</th><th>Ha llegado</th></tr></thead><tbody>${r.lineas.map(l => `<tr><td></td><td>${l.pedido}</td>
       <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="${l.pedido}"></td></tr>`).join('')}</tbody></table>
-    <p class="muted">Lo que no llegue se queda pendiente en una recepción nueva, como hace Odoo.</p>
+    <div class="co-falta"><b>Lo que no haya llegado:</b>
+      <label><input type="radio" name="co-f" value="pendiente" checked> Queda <b>pendiente de recibir</b> (vendrá más tarde: sale una entrada nueva en Recepciones)</label>
+      <label><input type="radio" name="co-f" value="cancelar"> <b>No vendrá: cancelarlo</b> (no queda nada pendiente de este pedido)</label></div>
     <button id="co-ok" class="ac-go">✓ Recibir en Odoo</button><div id="co-res"></div>`;
   db.querySelectorAll('tbody tr').forEach((tr, i) => tr.firstChild.textContent = r.lineas[i].producto);
   $('#co-todo').onclick = () => db.querySelectorAll('input[data-m]').forEach((i, k) => i.value = r.lineas[k].pedido);
@@ -309,10 +313,10 @@ function coRecibirOpen(r) {
     const cant = {}; db.querySelectorAll('input[data-m]').forEach(i => cant[i.dataset.m] = parseFloat(i.value) || 0);
     $('#co-ok').disabled = true; $('#co-ok').textContent = 'Recibiendo…';
     try {
-      const res = await jpost(`/api/compras/recibir?company=${company}`, { picking_id: r.id, cantidades: cant, albaran: $('#co-an').value.trim(), doc_id: CO_ALB && CO_ALB.id });
+      const res = await jpost(`/api/compras/recibir?company=${company}`, { picking_id: r.id, cantidades: cant, albaran: $('#co-an').value.trim(), doc_id: CO_ALB && CO_ALB.id, faltan: (db.querySelector('input[name=co-f]:checked') || {}).value });
       CO_ALB = null;
       if (res.informe) window.open('/compras/informe/' + res.informe, '_blank');
-      $('#co-res').innerHTML = `<div class="ac-docs"><b>✓ Recibido en Odoo.</b> ${res.queda_pendiente ? 'Lo que faltaba queda pendiente.' : 'Pedido completo.'}
+      $('#co-res').innerHTML = `<div class="ac-docs"><b>✓ Recibido en Odoo.</b> ${res.queda_pendiente ? 'Lo que faltaba queda pendiente de recibir.' : 'No queda nada pendiente de esta entrada.'}
         ${res.informe ? `<br><a class="btn" target="_blank" href="/compras/informe/${res.informe}">📄 Ver el informe del albarán</a>` : ''}</div>
         ${res.servir.length ? `<h4>Ya se puede servir</h4><table class="co-t"><thead><tr><th>Para</th><th>Pedido</th><th>Artículo</th><th>Pend.</th></tr></thead><tbody>${res.servir.map(s => `<tr><td>${escH(s.quien)}</td><td>${escH(s.ref)}</td><td>${escH(s.producto)}</td><td>${s.pendiente}</td></tr>`).join('')}</tbody></table>
           <a class="btn" href="#ac" onclick="$('#co-drawer').hidden=true">Ir al Panel AC a servirlo</a>` : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
