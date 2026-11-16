@@ -719,8 +719,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         for l in lineas:
             if l.get("product_id") or not l.get("crear"):
                 continue
-            ean = re.sub(r"\D", "", str(l.get("ean") or ""))
             ia = l.get("ia") or {}
+            # EAN: el del documento o, si no trae, el que encontró la búsqueda en la web del fabricante
+            ean = re.sub(r"\D", "", str(l.get("ean") or "")) or (re.sub(r"\D", "", str(ia.get("ean") or "")) if ia.get("seguro") else "")
             if len(ean) >= 8:
                 ya = odoo.search_read("product.product", [("barcode", "=", ean)], ["display_name"], company_ids=TODAS, limit=1)
                 if ya:
@@ -747,6 +748,14 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 vals["default_code"] = cod
             if ia.get("seguro") and ia.get("descripcion"):
                 vals["description_sale"] = ia["descripcion"][:300]
+            # que las tiendas lo puedan vender en el TPV y se sepa de qué proveedor es
+            if _tiene_campo("product.product", "available_in_pos", 1):
+                vals["available_in_pos"] = True
+            if _tiene_campo("product.product", "x_studio_proveedor", 1):
+                try:
+                    vals["x_studio_proveedor"] = odoo.search_read("res.partner", [("id", "=", partner_id)], ["name"], company_ids=TODAS)[0]["name"][:60]
+                except Exception:
+                    pass
             pid = odoo.call("product.product", "create", [1], vals_list=[vals])
             l["product_id"] = pid[0] if isinstance(pid, list) else pid
             l["producto"] = vals["name"]
