@@ -103,9 +103,18 @@ async function openDetail(c) {
     const d = await api(`/api/ventas/${c.id}?company=${company}`);
     dAcciones(c, d);
     tb.innerHTML = '';
+    const edita = ['draft', 'sent', 'sale'].includes(d.estado);
     d.lineas.forEach(l => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td></td><td>${l.product_uom_qty}</td><td>${l.qty_delivered}</td><td>${eur(l.price_unit)}</td><td>${eur(l.price_subtotal)}</td>`;
+      const fija = l.is_downpayment || l.product_type === 'service' && (l.price_unit || 0) < 0;
+      if (edita && !fija) {
+        const bloq = (l.qty_delivered || 0) > 0 || (l.qty_invoiced || 0) > 0;
+        tr.innerHTML = `<td></td><td><input class="d-ed" type="number" step="any" min="${l.qty_delivered || 0}" value="${l.product_uom_qty}" data-k="cantidad" style="width:62px"></td><td>${l.qty_delivered}</td>
+          <td><input class="d-ed" type="number" step="0.0001" min="0" value="${l.price_unit}" data-k="precio" style="width:74px" ${(l.qty_invoiced || 0) > 0 ? 'disabled' : ''}>${l.discount ? `<small class="muted"> -${l.discount}%</small>` : ''}</td>
+          <td>${eur(l.price_subtotal)} ${bloq ? '' : `<a href="#" class="d-del-l" title="Quitar del pedido">✕</a>`}</td>`;
+        tr.querySelectorAll('.d-ed').forEach(i => i.onchange = () => dLinea(c, { accion: i.dataset.k, line_id: l.id, qty: i.value, price: i.value }));
+        const x = tr.querySelector('.d-del-l'); if (x) x.onclick = e => { e.preventDefault(); if (confirm(`¿Quitar «${l.product_id ? l.product_id[1] : l.name}» del pedido?`)) dLinea(c, { accion: 'quitar', line_id: l.id }); };
+      } else tr.innerHTML = `<td></td><td>${l.product_uom_qty}</td><td>${l.qty_delivered}</td><td>${eur(l.price_unit)}</td><td>${eur(l.price_subtotal)}</td>`;
       tr.firstChild.textContent = l.product_id ? l.product_id[1] : l.name;
       tb.appendChild(tr);
       if (l.stock || (l.pendiente && l.pendiente.length)) {
@@ -120,6 +129,19 @@ async function openDetail(c) {
         if (tg) tg.onclick = e => { e.preventDefault(); const bx = t2.querySelector('.d-pv'); bx.hidden = !bx.hidden; if (!bx.hidden && !bx.dataset.ok) dPedirProv(bx, c, l); };
       }
     });
+    if (edita) {
+      const tr = document.createElement('tr'); tr.className = 'd-add';
+      tr.innerHTML = `<td colspan="5"><input class="d-aq" placeholder="＋ Añadir artículo: nombre, referencia o código de barras" autocomplete="off" style="width:100%"><div class="d-as"></div></td>`;
+      tb.appendChild(tr);
+      let ta; const inp = tr.querySelector('.d-aq'), box = tr.querySelector('.d-as');
+      inp.oninput = () => { clearTimeout(ta); ta = setTimeout(async () => {
+        const q = inp.value.trim(); if (q.length < 2) return box.innerHTML = '';
+        try { const r = (await api(`/api/articulos?q=${encodeURIComponent(q)}`)).articulos || [];
+          box.innerHTML = r.slice(0, 12).map(p => `<div class="d-ao"><span><b>${escH(p.nombre)}</b> <small class="muted">${escH(p.ref)} · ${p.stock.map(s => `${escH(s.donde)} ${+s.hay}`).join(' · ')}</small></span>
+            <span><input type="number" min="1" step="any" value="1" style="width:56px"> <b>${eur(p.pvp)}</b> <button class="ac-go" data-p="${p.id}">Añadir</button></span></div>`).join('') || '<small class="muted">Nada</small>';
+          box.querySelectorAll('[data-p]').forEach(bt => bt.onclick = () => dLinea(c, { accion: 'anadir', product_id: +bt.dataset.p, qty: bt.parentElement.querySelector('input').value }));
+        } catch (e) { box.innerHTML = `<small class="err">${escH(e.message)}</small>`; } }, 300); };
+    }
     d.historial.forEach(h => {
       const li = document.createElement('li');
       li.innerHTML = '<span class="muted"></span> <b></b> <span></span>';
@@ -129,6 +151,13 @@ async function openDetail(c) {
       $('#d-hist').appendChild(li);
     });
   } catch (e) { tb.innerHTML = `<tr><td colspan="5">${e.message}</td></tr>`; }
+}
+
+// cambios en las líneas del pedido (como en Odoo) y se vuelve a pintar con lo que queda en Odoo
+async function dLinea(c, b) {
+  try { const r = await jpost(`/api/ventas/${c.id}/lineas?company=${company}`, b); if (r.mensaje) alertBox(r.mensaje); }
+  catch (e) { alertBox(e.message); }
+  openDetail(c); load();
 }
 
 // el PDF del albarán se abre en la empresa del pedido (si no, Odoo da «403 registros ultrasecretos» con otra empresa activa)

@@ -630,7 +630,7 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
             raise HTTPException(404, "No encontrado")
         lines = odoo.search_read("sale.order.line", [("order_id", "=", oid)],
                                  ["product_id", "name", "product_uom_qty", "qty_delivered", "qty_invoiced",
-                                  "price_unit", "price_subtotal", "display_type"], cids, order="sequence,id")
+                                  "price_unit", "discount", "price_subtotal", "display_type", "is_downpayment", "product_type"], cids, order="sequence,id")
         msgs = odoo.search_read("mail.message", [("model", "=", "sale.order"), ("res_id", "=", oid)],
                                 ["date", "author_id", "body", "subtype_id", "tracking_value_ids"], cids,
                                 order="date desc", limit=60)
@@ -694,6 +694,68 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                             "account.journal", [("type", "=", "sale"), ("company_id", "=", c)], ["name"], [c], order="sequence,id")]})
         return out
 
+    return guard(run)
+
+
+@app.post("/api/ventas/{oid}/lineas")
+async def api_editar_lineas(request: Request, oid: int, company: str = "all"):
+    """Editar el pedido/presupuesto como en Odoo: {accion: anadir|cantidad|precio|quitar, line_id?, product_id?, qty?, price?, discount?}."""
+    u = current_user(request)
+    b = await request.json()
+    acc = b.get("accion")
+    if acc not in ("anadir", "cantidad", "precio", "quitar"):
+        raise HTTPException(400, "Acción no válida")
+    num = lambda v: float(str(v).replace(",", "."))
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "state", "company_id", "locked"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        so = so[0]
+        c = so["company_id"][0]
+        if so["state"] not in ("draft", "sent", "sale") or so.get("locked"):
+            raise HTTPException(400, f"{so['name']} está cerrado o cancelado: no se puede cambiar")
+        if acc == "anadir":
+            pid, q = int(b.get("product_id") or 0), num(b.get("qty") or 1)
+            if not pid or q <= 0:
+                raise HTTPException(400, "Elige el artículo y la cantidad")
+            v = {"order_id": oid, "product_id": pid, "product_uom_qty": q}
+            if b.get("price") not in (None, ""):
+                v["price_unit"] = num(b["price"])
+            odoo.call("sale.order.line", "create", [c], vals_list=[v])
+            return {"ok": True, "mensaje": "Artículo añadido" + (" (se añade también al albarán pendiente)" if so["state"] == "sale" else "")}
+        lid = int(b.get("line_id") or 0)
+        l = odoo.search_read("sale.order.line", [("id", "=", lid), ("order_id", "=", oid)], ["product_uom_qty", "qty_delivered", "qty_invoiced", "name"], [c])
+        if not l:
+            raise HTTPException(404, "Esa línea ya no está en el pedido")
+        l = l[0]
+        if acc == "cantidad":
+            q = num(b.get("qty"))
+            if q < (l.get("qty_delivered") or 0):
+                raise HTTPException(400, f"Ya se han servido {l['qty_delivered']:g}: no se puede poner menos")
+            if q <= 0 and so["state"] != "sale":
+                odoo.call("sale.order.line", "unlink", [c], ids=[lid])
+            else:
+                odoo.call("sale.order.line", "write", [c], ids=[lid], vals={"product_uom_qty": q})
+        elif acc == "precio":
+            v = {}
+            if b.get("price") not in (None, ""):
+                v["price_unit"] = num(b["price"])
+            if b.get("discount") not in (None, ""):
+                v["discount"] = num(b["discount"])
+            if (l.get("qty_invoiced") or 0) > 0:
+                raise HTTPException(400, "Esa línea ya está facturada: el precio se cambia en la factura")
+            if v:
+                odoo.call("sale.order.line", "write", [c], ids=[lid], vals=v)
+        else:   # quitar
+            if (l.get("qty_delivered") or 0) > 0 or (l.get("qty_invoiced") or 0) > 0:
+                raise HTTPException(400, "Esa línea ya está servida o facturada: no se puede quitar")
+            if so["state"] == "sale":   # en un pedido confirmado Odoo no deja borrar la línea: se deja a 0 (se cancela en el albarán)
+                odoo.call("sale.order.line", "write", [c], ids=[lid], vals={"product_uom_qty": 0})
+            else:
+                odoo.call("sale.order.line", "unlink", [c], ids=[lid])
+        return {"ok": True}
     return guard(run)
 
 

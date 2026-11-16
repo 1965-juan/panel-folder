@@ -490,3 +490,7 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 #v-ti .ti-cols[hidden],#v-ti .ti-repo[hidden]{display:none!important}
 .co-falta{background:#fff7ea;border:1px solid #f3c88a;border-radius:8px;padding:8px 12px;margin:8px 0}.co-falta label{display:block;margin:4px 0;cursor:pointer}
 .card.carrito{border-left:4px solid #C8102E;background:#fff6f7;opacity:.92}
+#d-lines .d-ed{padding:3px 5px;border:1px solid #ddd;border-radius:6px;font:inherit}
+#d-lines .d-del-l{color:#C8102E;text-decoration:none;margin-left:6px;font-weight:700}
+#d-lines .d-add td{padding-top:8px}
+#d-lines .d-as .d-ao{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #eee}
