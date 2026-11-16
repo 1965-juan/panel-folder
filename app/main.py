@@ -1856,3 +1856,29 @@ def admin_ocultas(request: Request):
                  "factura": r.get("invoice_status"), "total": r.get("amount_total"), "fecha": (r.get("date_order") or "")[:10], "web": bool(r.get("website_id")),
                  "oculto": oc.get(r["id"], "")} for r in so]
     return guard(run)
+
+
+@app.post("/api/admin/odoo_accion")
+async def admin_odoo_accion(request: Request):
+    """Solo admin. Acciones de limpieza permitidas: cancelar pedidos de compra en borrador y archivar artículos duplicados.
+    {model, metodo, ids}"""
+    _solo_admin(request)
+    b = await request.json()
+    permitidas = {("purchase.order", "button_cancel"), ("product.product", "action_archive"), ("product.template", "action_archive")}
+    if (b.get("model"), b.get("metodo")) not in permitidas:
+        raise HTTPException(400, "Acción no permitida")
+    ids = [int(i) for i in b.get("ids") or []]
+    if not ids:
+        raise HTTPException(400, "Faltan ids")
+
+    def run():
+        if b["model"] == "purchase.order":
+            ps = odoo.search_read("purchase.order", [("id", "in", ids)], ["name", "state", "company_id"], [1, 2, 3, 4, 5])
+            if any(p["state"] not in ("draft", "sent", "to approve") for p in ps):
+                raise HTTPException(400, "Solo se cancelan pedidos de compra en borrador")
+            for p in ps:
+                odoo.call("purchase.order", "button_cancel", [p["company_id"][0]], ids=[p["id"]])
+            return {"ok": True, "hecho": [p["name"] for p in ps]}
+        odoo.call(b["model"], b["metodo"], [1, 2, 3, 4, 5], ids=ids)
+        return {"ok": True, "hecho": ids}
+    return guard(run)
