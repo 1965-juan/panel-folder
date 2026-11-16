@@ -848,8 +848,10 @@ async def admin_po_ajustar(request: Request):
         if not po:
             raise HTTPException(404, "No encuentro el pedido")
         po = po[0]
-        if po["state"] not in ("draft", "sent"):
-            raise HTTPException(400, f"{po['name']} ya no está en borrador")
+        if po["state"] not in ("draft", "sent", "purchase"):
+            raise HTTPException(400, f"{po['name']} no se puede ajustar (estado {po['state']})")
+        if po["state"] == "purchase" and b.get("quitar"):
+            raise HTTPException(400, "En un pedido confirmado no se quitan líneas: pon la cantidad a 0 o déjalo pendiente al recibir")
         c, part = po["company_id"][0], po["partner_id"][0]
         for x in b.get("cambios") or []:
             v = {}

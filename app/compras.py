@@ -684,6 +684,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             res_c = [(l,) + _identificar(l, prov["id"], cids, pls_c) for l in lineas_doc]
             sc = sum(1 for x in res_c if x[1] in ids_c)
             if sc and sc >= max(1, len(lineas_doc) // 2) and (mejor is None or sc > mejor[0]):
+                if sc < len(lineas_doc):   # el albarán trae cosas que no están en ese pedido: no se da por cuadrado solo
+                    info["confirmado_parcial"] = {"name": p["name"], "coinciden": sc, "lineas_doc": len(lineas_doc)}
+                    continue
                 pk = odoo.search_read("stock.picking", [("id", "in", p["picking_ids"]), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=cids) if p["picking_ids"] else []
                 info["confirmado"] = {"id": p["id"], "name": p["name"], "recepciones": [x["name"] for x in pk], "coinciden": sc, "lineas_doc": len(lineas_doc)}
         if mejor is None:  # sin pedido abierto: identificar igualmente para crear uno con lo identificado
@@ -902,6 +905,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 return
             if not info.get("proveedor"):
                 return nota("No encuentro el proveedor en Odoo: pulsa Cuadrar y elígelo")
+            if not info.get("confirmado") and info.get("confirmado_parcial"):
+                cp = info["confirmado_parcial"]
+                return nota(f"Parece del pedido ya confirmado {cp['name']}, pero solo coinciden {cp['coinciden']} de {cp['lineas_doc']} líneas "
+                            f"(trae artículos que no están en el pedido). Avisad a compras/Juan para ajustar {cp['name']} antes de recibirlo.")
             if info.get("confirmado"):
                 cf = info["confirmado"]
                 comp = {"pedido": cf["name"], "pedido_id": cf["id"], "recepciones": cf["recepciones"], "ya_estaba": True, "auto": True}
