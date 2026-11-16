@@ -1931,7 +1931,8 @@ async def admin_odoo_accion(request: Request):
     {model, metodo, ids}"""
     _solo_admin(request)
     b = await request.json()
-    permitidas = {("purchase.order", "button_cancel"), ("product.product", "action_archive"), ("product.template", "action_archive")}
+    permitidas = {("purchase.order", "button_cancel"), ("product.product", "action_archive"), ("product.template", "action_archive"),
+                  ("stock.picking", "action_cancel")}
     if (b.get("model"), b.get("metodo")) not in permitidas:
         raise HTTPException(400, "Acción no permitida")
     ids = [int(i) for i in b.get("ids") or []]
@@ -1946,8 +1947,69 @@ async def admin_odoo_accion(request: Request):
             for p in ps:
                 odoo.call("purchase.order", "button_cancel", [p["company_id"][0]], ids=[p["id"]])
             return {"ok": True, "hecho": [p["name"] for p in ps]}
+        if b["model"] == "stock.picking":
+            ps = odoo.search_read("stock.picking", [("id", "in", ids)], ["name", "state", "company_id"], [1, 2, 3, 4, 5])
+            if any(p["state"] in ("done", "cancel") for p in ps):
+                raise HTTPException(400, "Solo se anulan albaranes sin validar")
+            for p in ps:
+                odoo.call("stock.picking", "action_cancel", [p["company_id"][0]], ids=[p["id"]])
+            return {"ok": True, "hecho": [p["name"] for p in ps]}
         odoo.call(b["model"], b["metodo"], [1, 2, 3, 4, 5], ids=ids)
         return {"ok": True, "hecho": ids}
+    return guard(run)
+
+
+@app.post("/api/admin/compra_directa")
+async def admin_compra_directa(request: Request):
+    """Solo admin. Crea artículos nuevos y un pedido de compra en una empresa concreta (p.ej. INGRAF):
+    {company, partner_id, partner_ref, confirmar, margen (100 = PVP el doble del coste),
+     lineas:[{nombre, ref, cant, coste, pvp?, product_id?}]}. Los artículos nuevos quedan solo en esa empresa y sin publicar en la web."""
+    _solo_admin(request)
+    b = await request.json()
+    c = int(b["company"])
+    part = int(b["partner_id"])
+    margen = float(b.get("margen", 100))
+
+    campos = {}
+
+    def tiene(m, f):
+        if m not in campos:
+            campos[m] = set(odoo.call(m, "fields_get", [c], attributes=["type"]).keys())
+        return f in campos[m]
+
+    def run():
+        out = []
+        lineas = []
+        for l in b["lineas"]:
+            coste = float(l["coste"])
+            pid = l.get("product_id")
+            if not pid:
+                pvp = float(l["pvp"]) if l.get("pvp") is not None else round(coste * (1 + margen / 100), 4)
+                vals = {"name": l["nombre"][:120], "purchase_ok": True, "sale_ok": True, "type": "consu", "company_id": c,
+                        "standard_price": coste, "list_price": pvp, "is_published": False,
+                        "seller_ids": [[0, 0, {"partner_id": part, "product_code": l.get("ref") or False, "price": coste, "company_id": c}]]}
+                if l.get("ref") and not odoo.search_read("product.product", [("default_code", "=", l["ref"])], ["id"], [1, 2, 3, 4, 5], limit=1):
+                    vals["default_code"] = l["ref"]
+                for f, v in (("is_storable", True), ("available_in_pos", False)):
+                    if tiene("product.template", f):
+                        vals[f] = v
+                if tiene("product.template", "x_studio_proveedor"):
+                    try:
+                        vals["x_studio_proveedor"] = odoo.search_read("res.partner", [("id", "=", part)], ["name"], [1, 2, 3, 4, 5])[0]["name"][:60]
+                    except Exception:
+                        pass
+                tm = odoo.call("product.template", "create", [c], vals_list=[vals])
+                tm = tm[0] if isinstance(tm, list) else tm
+                pid = odoo.search_read("product.product", [("product_tmpl_id", "=", tm)], ["id"], [c])[0]["id"]
+                out.append({"creado": vals["name"], "product_id": pid, "coste": coste, "pvp": pvp})
+            lineas.append([0, 0, {"product_id": int(pid), "product_qty": float(l["cant"]), "price_unit": coste}])
+        po = odoo.call("purchase.order", "create", [c], vals_list=[{"partner_id": part, "company_id": c, "partner_ref": b.get("partner_ref") or False,
+                                                                    "origin": b.get("origen") or False, "order_line": lineas}])
+        po = po[0] if isinstance(po, list) else po
+        if b.get("confirmar"):
+            odoo.call("purchase.order", "button_confirm", [c], ids=[po])
+        r = odoo.search_read("purchase.order", [("id", "=", po)], ["name", "state", "amount_untaxed", "amount_total", "picking_ids"], [c])[0]
+        return {"pedido": r, "articulos": out}
     return guard(run)
 
 
