@@ -443,6 +443,7 @@ def so_card(r, kind):
     return {
         "id": r["id"], "model": "sale.order", "ref": r["name"],
         "cliente": r["partner_id"][1] if r.get("partner_id") else "",
+        "pid": r["partner_id"][0] if r.get("partner_id") else None,
         "fecha": (r.get("date_order") or "")[:10],
         "caduca": r.get("validity_date") or "",
         "total": r.get("amount_total") or 0,
@@ -477,7 +478,7 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         today = dt.date.today().isoformat()
         so = odoo.search_read("sale.order", cd + cli + [("state", "in", ["draft", "sent", "sale"])],
                               SO_FIELDS, cids, limit=600, order="date_order desc")
-        presu, caduc, pedidos, albaranes = [], [], [], []
+        presu, caduc, pedidos, albaranes, carritos = [], [], [], [], []
         # pedidos ya cobrados en el TPV («recuperar» el pedido en la tienda): están cerrados aunque Odoo los deje como pedido
         cobrado_tpv = {}
         vivos = [r["id"] for r in so if r["state"] == "sale" and r.get("invoice_status") != "invoiced"]
@@ -511,6 +512,8 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                     c = so_card(r, "pedido"); c["entrega"] = "partial"; pedidos.append(c); continue
                 if por_fact <= 0.001:
                     continue
+            if r["state"] == "draft" and r.get("website_id"):   # carrito de la web sin terminar: no es un presupuesto nuestro
+                carritos.append(so_card(r, "carrito")); continue
             if r["state"] in ("draft", "sent"):
                 if r.get("validity_date") and r["validity_date"] < today:
                     caduc.append(so_card(r, "caducado"))
@@ -564,7 +567,16 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["pide_ord"] = com in gim
         borradores.sort(key=lambda c: (not (c.get("pide_ord") and (not c["su_ref"] or re.fullmatch(r"S\d{4,}", c["su_ref"].strip(), re.I))), c["fecha"]))   # primero las de Gimeno sin ORD
         # marcas de lo hecho con cada presupuesto: enviado al cliente y reclamado (sin confirmar)
-        pids = [c["id"] for c in presu + caduc]
+        # carritos: quién es (visitante sin identificar o cliente con email) y si ya se le ha escrito
+        if carritos:
+            ppid = list({c["pid"] for c in carritos if c.get("pid")})
+            ems = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", ppid)], ["email"], cids)} if ppid else {}
+            for c in carritos:
+                c["anonimo"] = "public user" in (c["cliente"] or "").lower() or "usuario público" in (c["cliente"] or "").lower() or not c.get("pid")
+                c["email"] = "" if c["anonimo"] else ems.get(c.get("pid"), "")
+                if c["anonimo"]:
+                    c["cliente"] = "Visitante sin identificar"
+        pids = [c["id"] for c in presu + caduc + carritos]
         if pids:
             try:
                 msgs = odoo.search_read("mail.message", [("model", "=", "sale.order"), ("res_id", "in", pids), ("message_type", "in", ["email", "comment", "email_outgoing"]),
@@ -575,16 +587,20 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             for m in msgs:
                 sj = (m.get("subject") or "").lower()
                 d = (m.get("date") or "")[:10]
-                if "seguimos adelante" in sj or "seguimiento de su presupuesto" in sj:
+                if "carrito sin terminar" in sj:
+                    marca.setdefault(m["res_id"], {})["ayuda"] = d
+                elif "seguimos adelante" in sj or "seguimiento de su presupuesto" in sj:
                     marca.setdefault(m["res_id"], {})["reclamado"] = d
                 elif "presupuesto" in sj or "quotation" in sj or "cotizaci" in sj:
                     marca.setdefault(m["res_id"], {})["enviado"] = d
             st = {r["id"]: r["state"] for r in so}
+            for c in carritos:
+                c["avisado"] = marca.get(c["id"], {}).get("ayuda", "")
             for c in presu + caduc:
                 mk = marca.get(c["id"], {})
                 c["enviado"] = mk.get("enviado") or ("sí" if st.get(c["id"]) == "sent" else "")
                 c["reclamado"] = mk.get("reclamado", "")
-        out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
+        out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos, "carritos": carritos,
                "albaranes": albaranes, "facturas": facturas, "borradores": borradores}
         ocul = _ventas_ocultas_t()
         wd = {r["id"]: r.get("write_date") or "" for r in so}
@@ -728,6 +744,8 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
     except Exception:
         b = {}
     tipo = b.get("tipo") or ""
+    if tipo == "carrito":
+        return guard(lambda: _email_carrito(u, oid, company))
     if tipo not in PLANTILLAS_PRESU:
         raise HTTPException(400, "Tipo de email no válido")
 
@@ -753,6 +771,57 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
         return {"ok": True, "pedido": so["name"], "email": em[0]["email"]}
 
     return guard(run)
+
+
+def _email_carrito(u, oid, company):
+    """Carrito de la web sin terminar: email al cliente ofreciendo ayuda para completarlo. Queda anotado en el pedido."""
+    cids, cd = scope(u, company)
+    so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "state", "company_id", "partner_id", "amount_total", "website_id"], cids)
+    if not so or so[0]["state"] != "draft":
+        raise HTTPException(404, "Ese carrito ya no está sin terminar")
+    so = so[0]
+    c = so["company_id"][0]
+    p = odoo.search_read("res.partner", [("id", "=", so["partner_id"][0])], ["name", "email"], [c] + [x for x in cids if x != c])
+    if not p or not p[0].get("email") or "public" in (p[0]["name"] or "").lower():
+        raise HTTPException(400, "Es un visitante sin identificar o no tiene email: no se le puede escribir")
+    p = p[0]
+    ls = odoo.search_read("sale.order.line", [("order_id", "=", oid), ("display_type", "=", False)], ["name", "product_uom_qty", "price_total"], [c], limit=60)
+    e = lambda t: str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    filas = "".join(f"<tr><td style='padding:4px 8px;border-bottom:1px solid #eee'>{e(l['name'].splitlines()[0])}</td>"
+                    f"<td style='padding:4px 8px;border-bottom:1px solid #eee;text-align:right'>{l['product_uom_qty']:g}</td></tr>"
+                    for l in ls if (l.get("product_uom_qty") or 0) > 0)
+    tabla = (f"<p>Esto es lo que tiene en el carrito:</p><table style='border-collapse:collapse;font-size:14px;margin:8px 0 14px'>"
+             f"<tr><th style='text-align:left;padding:4px 8px;background:#f4f1fa;color:#3A1F73'>Artículo</th><th style='padding:4px 8px;background:#f4f1fa;color:#3A1F73'>Cant.</th></tr>{filas}</table>") if filas else \
+        "<p>Vemos que empezó a preparar un pedido, pero el carrito se quedó vacío.</p>"
+    nom = e((p["name"] or "").split(",")[-1].strip())
+    html = f"""<div style="font-family:Arial,Helvetica,sans-serif;color:#1f1b2e;max-width:600px;margin:auto;font-size:15px;line-height:1.5">
+<div style="background:#3A1F73;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0"><b style="font-size:20px">Folder Castellón</b>
+<span style="display:inline-block;width:12px;height:12px;background:#F39A2B;border-radius:3px;margin-left:6px"></span></div>
+<div style="border:1px solid #e4e1da;border-top:0;padding:18px 20px;border-radius:0 0 8px 8px">
+<p>Hola {nom}:</p>
+<p>Hemos visto que tiene un <b>pedido sin terminar</b> en nuestra web <a href="https://www.foldercastellon.com" style="color:#3A1F73">foldercastellon.com</a>.
+Si ha tenido alguna duda o algo no le ha funcionado, estaremos encantados de ayudarle a completarlo.</p>
+{tabla}
+<p>Puede terminarlo entrando en la web con su usuario (lo tendrá guardado en el carrito) o, si lo prefiere, <b>respóndanos a este correo</b> o escríbanos por
+<b style="color:#25D366">WhatsApp al 673 10 96 93</b> y se lo preparamos nosotros.</p>
+<p style="background:#fff3df;border-left:4px solid #F39A2B;padding:8px 12px">Recuerde que hasta el 31 de diciembre tiene un <b>3 % adicional</b> en los pedidos que haga en la web.</p>
+<p>Un saludo,<br><b>Folder Castellón</b><br><span style="color:#6b6778;font-size:13px">info@foldercastellon.es · WhatsApp 673 10 96 93 · www.foldercastellon.com</span></p>
+</div></div>"""
+    r = odoo.call("mail.mail", "create", [c], vals_list=[{
+        "subject": "¿Le ayudamos a terminar su pedido en foldercastellon.com?", "email_to": p["email"],
+        "email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es",
+        "body_html": html, "recipient_ids": [[6, 0, [so["partner_id"][0]]]], "model": "sale.order", "res_id": oid, "auto_delete": False}])
+    mid = r[0] if isinstance(r, list) else r
+    try:
+        odoo.call("mail.mail", "send", [c], ids=[mid])
+    except Exception:
+        pass
+    try:   # nota interna en el pedido: así sale «avisado» en el panel y queda el historial
+        odoo.call("sale.order", "message_post", [c], ids=[oid], body=f"Email «carrito sin terminar» enviado a {p['email']} desde el panel ({u}).",
+                  subject="Carrito sin terminar: ofrecida ayuda", message_type="comment", subtype_xmlid="mail.mt_note")
+    except Exception:
+        pass
+    return {"ok": True, "pedido": so["name"], "email": p["email"]}
 
 
 OCULTAS_FILE = DATA / "ventas_ocultas.json"
@@ -1772,3 +1841,18 @@ def admin_mostrar_venta(oid: int, request: Request):
     estaba = oid in _ventas_ocultas()
     _mostrar_venta(oid)
     return {"ok": True, "estaba_oculto": estaba}
+
+
+@app.get("/api/admin/ocultas")
+def admin_ocultas(request: Request):
+    """Solo admin: pedidos quitados del panel con su estado real en Odoo (para revisar que no se pierda nada)."""
+    _solo_admin(request)
+    oc = _ventas_ocultas_t()
+
+    def run():
+        so = odoo.search_read("sale.order", [("id", "in", list(oc))], ["name", "partner_id", "state", "delivery_status", "invoice_status", "amount_total", "date_order", "website_id"],
+                              [1, 2, 3, 4, 5], limit=5000) if oc else []
+        return [{"id": r["id"], "ref": r["name"], "cliente": (r.get("partner_id") or [0, ""])[1], "estado": r["state"], "entrega": r.get("delivery_status"),
+                 "factura": r.get("invoice_status"), "total": r.get("amount_total"), "fecha": (r.get("date_order") or "")[:10], "web": bool(r.get("website_id")),
+                 "oculto": oc.get(r["id"], "")} for r in so]
+    return guard(run)

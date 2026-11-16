@@ -35,6 +35,7 @@ function card(c) {
   if (c.enviado || c.reclamado) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Enviado${/\d/.test(c.enviado) ? ' ' + fdate(c.enviado) : ''}</span>` : ''}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado ${fdate(c.reclamado)}</span>` : ''}</div>`);
   if (c.borrador) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${faltaOrd(c) ? '<span class="mk mk-rec">⚠ Falta la ORD / nº pedido del cliente (Gimeno)</span>' : `${c.su_ref ? `<span class="mk mk-env">Ref. ${escH(c.su_ref)}</span>` : ''}<span class="mk">Sin validar ni enviar</span>`}</div>`);
   if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
+  if (c.estado === 'carrito') d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas"><span class="mk mk-rec">🛒 Carrito web sin terminar · no es un pedido</span>${c.avisado ? `<span class="mk mk-env">📧 Ayuda ofrecida ${fdate(c.avisado)}</span>` : (c.anonimo ? '<span class="mk">Visitante sin identificar</span>' : (c.email ? '' : '<span class="mk">Sin email</span>'))}</div>`);
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
   d.onclick = () => openDetail(c);
@@ -55,7 +56,8 @@ async function load() {
   try {
     const q = $('#q').value.trim();
     const d = await api(`/api/ventas?company=${company}&q=${encodeURIComponent(q)}`);
-    fill('presupuestos', d.presupuestos);
+    d.carritos = d.carritos || [];
+    fill('presupuestos', [...d.carritos, ...d.presupuestos]);
     fill('presupuestos', d.caducados, '.cards.cad');
     $('#ncad').textContent = d.caducados.length;
     fill('pedidos', d.pedidos);
@@ -72,7 +74,7 @@ async function load() {
     $('#k-bor').textContent = d.borradores.length;
     $('#k-bor-e').textContent = `${sum(d.borradores)}${sinOrd ? ` · ${sinOrd} sin ORD` : ''}`;
     $('#bor-h').textContent = sinOrd ? `Sin validar ni enviar · ⚠ ${sinOrd} sin ORD` : 'Sin validar ni enviar';
-    $('#k-pre').textContent = d.presupuestos.length; $('#k-pre-e').textContent = sum(d.presupuestos);
+    $('#k-pre').textContent = d.presupuestos.length; $('#k-pre-e').textContent = sum(d.presupuestos) + (d.carritos.length ? ` · 🛒 ${d.carritos.length} carritos web sin terminar` : '');
     $('#k-ped').textContent = d.pedidos.length; $('#k-ped-e').textContent = sum(d.pedidos);
     $('#k-alb').textContent = d.albaranes.length; $('#k-alb-e').textContent = sum(d.albaranes);
     $('#k-fac').textContent = sum(d.facturas, 'pendiente');
@@ -174,6 +176,25 @@ async function dPedirProv(bx, c, l) {
 
 function dAcciones(c, d) {
   const A = $('#d-acc'); let h = '';
+  if (c.estado === 'carrito') {
+    h += `<div class="d-ok"><div class="marcas"><span class="mk mk-rec">🛒 Carrito de la web sin terminar: el cliente no ha confirmado el pedido</span>${c.avisado ? `<span class="mk mk-env">📧 Ayuda ofrecida el ${fdate(c.avisado)}</span>` : ''}</div>
+      ${c.anonimo ? '<p class="muted">Es un visitante sin identificar: no sabemos quién es y no se le puede escribir.</p>'
+        : `<button class="ac-go" id="d-car" ${c.email ? '' : 'disabled'}>✉️ Preguntar si necesita ayuda para terminarlo</button>
+          <small class="muted">${c.email ? `Se envía a ${escH(c.email)} desde info@foldercastellon.es con lo que tiene en el carrito y el WhatsApp para ayudarle.` : 'El cliente no tiene email en su ficha.'}</small>`}</div>`;
+    h += `<div class="d-del"><button class="btn" data-ac="ocultar" data-q="${escH(`¿Quitar el carrito ${c.ref} del panel? En Odoo no se toca nada.`)}">🙈 Archivar del panel</button></div>`;
+    A.innerHTML = h;
+    const b = $('#d-car'); if (b) b.onclick = async () => {
+      if (!confirm(`¿Enviar a ${c.email} un email preguntando si necesita ayuda para terminar su pedido de la web?`)) return;
+      b.disabled = true; b.textContent = 'Enviando…';
+      try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: 'carrito' }); b.textContent = '✅ Enviado'; alertBox(`Email enviado a ${c.email}`); load(); }
+      catch (e) { alertBox(e.message); b.disabled = false; b.textContent = '✉️ Preguntar si necesita ayuda para terminarlo'; }
+    };
+    A.querySelectorAll('[data-ac]').forEach(x => x.onclick = async () => {
+      if (!confirm(x.dataset.q)) return;
+      try { const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: x.dataset.ac }); alertBox(r.mensaje); $('#drawer').hidden = true; load(); } catch (e) { alertBox(e.message); }
+    });
+    return;
+  }
   if (d.estado === 'draft' || d.estado === 'sent') {
     h += `<div class="d-ok">${c.enviado || c.reclamado ? `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Presupuesto enviado${/\d/.test(c.enviado) ? ' el ' + fdate(c.enviado) : ''}</span>` : '<span class="mk">Sin enviar</span>'}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado el ${fdate(c.reclamado)}</span>` : ''}</div>` : '<div class="marcas"><span class="mk">Sin enviar ni reclamar</span></div>'}<button class="ac-go" id="d-conf">✔ Aceptar: pasar a pedido</button>
       <label><input type="checkbox" id="d-avi" ${d.email ? 'checked' : 'disabled'}> Avisar al cliente por email de que estamos preparando su material
