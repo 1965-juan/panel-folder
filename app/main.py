@@ -1960,3 +1960,25 @@ async def admin_renombrar_contacto(request: Request):
     if not nom:
         raise HTTPException(400, "Falta el nombre")
     return guard(lambda: (odoo.call("res.partner", "write", [1, 2, 3, 4, 5], ids=[int(b["partner_id"])], vals={"name": nom}), {"ok": True, "nombre": nom})[1])
+
+
+@app.post("/api/admin/fusionar_contactos")
+async def admin_fusionar(request: Request):
+    """Solo admin: {origen:[ids], destino:id, nombre?} junta contactos duplicados en uno (asistente de fusión de Odoo) y, si se da, le pone nombre."""
+    _solo_admin(request)
+    b = await request.json()
+    dst = int(b["destino"])
+    org = [int(i) for i in b.get("origen") or [] if int(i) != dst]
+    if not org:
+        raise HTTPException(400, "Faltan los contactos a juntar")
+
+    def run():
+        ctx = {"active_model": "res.partner", "active_ids": [dst] + org}
+        w = odoo.call("base.partner.merge.automatic.wizard", "create", [1], vals_list=[{"partner_ids": [[6, 0, [dst] + org]], "dst_partner_id": dst, "state": "selection"}], context=ctx)
+        w = w[0] if isinstance(w, list) else w
+        odoo.call("base.partner.merge.automatic.wizard", "action_merge", [1], ids=[w], context=ctx)
+        if (b.get("nombre") or "").strip():
+            odoo.call("res.partner", "write", [1, 2, 3, 4, 5], ids=[dst], vals={"name": b["nombre"].strip()})
+        quedan = odoo.search_read("res.partner", [("id", "in", org), ("active", "in", [True, False])], ["id", "active"], [1, 2, 3, 4, 5])
+        return {"ok": True, "destino": dst, "quedan_origen": quedan}
+    return guard(run)
