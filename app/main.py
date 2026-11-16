@@ -2023,6 +2023,37 @@ async def admin_compra_directa(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/cerrar_caja")
+async def admin_cerrar_caja(request: Request):
+    """Solo admin. Cierra una sesión de TPV SIN ventas, contando el mismo efectivo con el que abrió (sin descuadre). {session_id}"""
+    _solo_admin(request)
+    b = await request.json()
+    sid = int(b["session_id"])
+
+    def run():
+        s = odoo.search_read("pos.session", [("id", "=", sid)], ["name", "state", "config_id", "company_id", "order_count",
+                                                                   "cash_register_balance_start", "cash_register_balance_end"], [1, 2, 3, 4, 5])
+        if not s:
+            raise HTTPException(404, "No encuentro la caja")
+        s = s[0]
+        if s["state"] == "closed":
+            return {"ok": True, "ya": "cerrada"}
+        if s["order_count"]:
+            raise HTTPException(400, f"{s['config_id'][1]} tiene {s['order_count']} ventas: ciérrala desde el TPV con su arqueo")
+        c = [s["company_id"][0]]
+        efectivo = s["cash_register_balance_end"] or s["cash_register_balance_start"] or 0
+        pasos = []
+        if s["state"] == "opening_control":
+            odoo.call_kw("pos.session", "set_opening_control", [[sid], s["cash_register_balance_start"] or 0, "Abierta y cerrada sin ventas (panel)"], company_ids=c)
+            pasos.append("apertura")
+        odoo.call_kw("pos.session", "post_closing_cash_details", [[sid], efectivo], company_ids=c)
+        r = odoo.call_kw("pos.session", "close_session_from_ui", [[sid]], company_ids=c)
+        pasos.append("cierre")
+        e = odoo.search_read("pos.session", [("id", "=", sid)], ["name", "state"], [1, 2, 3, 4, 5])[0]
+        return {"ok": e["state"] == "closed", "caja": s["config_id"][1], "sesion": e["name"], "estado": e["state"], "efectivo": efectivo, "pasos": pasos, "odoo": r}
+    return guard(run)
+
+
 @app.post("/api/admin/renombrar_contacto")
 async def admin_renombrar_contacto(request: Request):
     """Solo admin: {partner_id, nombre} cambia el nombre de un contacto (y de su usuario de la web, que es el mismo)."""
