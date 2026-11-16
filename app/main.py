@@ -1949,3 +1949,14 @@ async def admin_odoo_accion(request: Request):
         odoo.call(b["model"], b["metodo"], [1, 2, 3, 4, 5], ids=ids)
         return {"ok": True, "hecho": ids}
     return guard(run)
+
+
+@app.post("/api/admin/renombrar_contacto")
+async def admin_renombrar_contacto(request: Request):
+    """Solo admin: {partner_id, nombre} cambia el nombre de un contacto (y de su usuario de la web, que es el mismo)."""
+    _solo_admin(request)
+    b = await request.json()
+    nom = (b.get("nombre") or "").strip()
+    if not nom:
+        raise HTTPException(400, "Falta el nombre")
+    return guard(lambda: (odoo.call("res.partner", "write", [1, 2, 3, 4, 5], ids=[int(b["partner_id"])], vals={"name": nom}), {"ok": True, "nombre": nom})[1])
