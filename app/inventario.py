@@ -3,6 +3,7 @@ El recuento se guarda en el panel; el administrador ve las diferencias con Odoo 
 Recuentos parciales: solo se ajustan los artículos contados; lo no contado se queda como está.
 """
 import csv
+import re
 import datetime as dt
 import io
 import json
@@ -366,6 +367,52 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
                 c.execute("UPDATE recuentos SET estado=?, aplicado_por=?, aplicado=?, resultado=? WHERE id=?",
                           ("aplicado" if not errores else "cerrado", u, time.time(), json.dumps(res, ensure_ascii=False), rid))
             return res
+        return guard(run)
+
+    # ---------- artículos nuevos sin código de barras: se les pone escaneándolos con la PDA ----------
+    @app.get("/api/inv/sin_ean")
+    def sin_ean(request: Request, dias: int = 30):
+        current_user(request)
+        desde = (dt.datetime.utcnow() - dt.timedelta(days=max(1, min(dias, 365)))).strftime("%Y-%m-%d %H:%M:%S")
+
+        def run():
+            dom = [("create_date", ">=", desde), ("barcode", "=", False), ("sale_ok", "=", True), ("type", "=", "consu")]
+            ps = odoo.search_read("product.product", dom, ["display_name", "default_code", "seller_ids", "create_date"], TODAS, limit=500, order="create_date desc")
+            sis = {}
+            ids = [i for p in ps for i in p.get("seller_ids") or []]
+            if ids:
+                for x in odoo.search_read("product.supplierinfo", [("id", "in", ids)], ["partner_id", "product_code"], TODAS, limit=2000):
+                    sis[x["id"]] = x
+            out = []
+            for p in ps:
+                s0 = next((sis[i] for i in p.get("seller_ids") or [] if i in sis), None)
+                out.append({"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "",
+                            "proveedor": s0["partner_id"][1] if s0 and s0.get("partner_id") else "", "cod_prov": (s0 or {}).get("product_code") or "",
+                            "fecha": (p.get("create_date") or "")[:10]})
+            return out
+        return guard(run)
+
+    @app.post("/api/inv/poner_ean")
+    async def poner_ean(request: Request):
+        current_user(request)
+        b = await request.json()
+        pid = int(b.get("product_id") or 0)
+        ean = re.sub(r"\s", "", str(b.get("ean") or ""))
+        if not pid or len(ean) < 6:
+            raise HTTPException(400, "Escanea el código de barras del artículo")
+
+        def run():
+            otro = odoo.search_read("product.product", [("barcode", "=", ean), ("id", "!=", pid)], ["display_name"], TODAS, limit=1)
+            if otro:
+                raise HTTPException(400, f"Ese código ya lo tiene {otro[0]['display_name']}: ¿es el mismo artículo duplicado? Avisad a Juan")
+            p = odoo.search_read("product.product", [("id", "=", pid)], ["display_name", "barcode"], TODAS)
+            if not p:
+                raise HTTPException(404, "No encuentro el artículo")
+            if p[0].get("barcode"):
+                raise HTTPException(400, f"{p[0]['display_name']} ya tiene código: {p[0]['barcode']}")
+            odoo.call("product.product", "write", [1], ids=[pid], vals={"barcode": ean})
+            cache["t"] = 0
+            return {"ok": True, "nombre": p[0]["display_name"], "ean": ean}
         return guard(run)
 
     @app.get("/api/inv/r/{rid}/excel")

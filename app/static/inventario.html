@@ -57,7 +57,21 @@ td input{width:70px;padding:6px;text-align:right}
       <button class="big" id="n-go">▶ Empezar a contar</button>
       <p class="muted">Los recuentos son <b>parciales</b>: solo se ajusta lo que contéis. Lo que no se cuente se queda como está en Odoo.</p>
     </div>
+    <div class="card" id="se-card" hidden><h2>🏷 Artículos nuevos sin código de barras <span class="bdg b-ab" id="se-n"></span></h2>
+      <p class="muted">Se han dado de alta sin código. Con el artículo en la mano: tócalo en la lista y escanea su código.</p>
+      <button class="big pu" id="se-go">Poner códigos de barras</button></div>
     <div class="card"><h2>Recuentos</h2><div id="lista"><p class="muted">Cargando…</p></div></div>
+  </section>
+
+  <!-- poner códigos de barras -->
+  <section id="v-ean" hidden>
+    <div class="card"><h2>🏷 Poner código de barras</h2>
+      <input id="se-q" placeholder="Filtrar por nombre, ref. o proveedor">
+      <div id="se-sel" class="muted" style="margin-top:8px">Toca un artículo de la lista y escanea su código.</div>
+      <input id="se-scan" inputmode="none" autocomplete="off" placeholder="Escanea aquí" style="font-size:20px;text-align:center;margin-top:8px;border:3px solid var(--or)" hidden>
+      <div id="se-res"></div></div>
+    <div class="card"><div id="se-lista"></div></div>
+    <button class="big sec" id="se-vol">← Volver</button>
   </section>
 
   <!-- escaneo -->
@@ -98,13 +112,13 @@ async function api(p, b) {
 }
 let INI = null, R = null, LIN = [], modo = localStorage.getItem('inv-modo') || 'rapido';
 const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar', 'b-ce'], aplicado: ['Aplicado en Odoo', 'b-ap'] };
-function vista(v) { ['ini', 'esc', 'rev'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
+function vista(v) { ['ini', 'esc', 'rev', 'ean'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
 
 /* ---------- lista ---------- */
 async function inicio() {
   vista('ini'); history.replaceState(null, '', '/inventario');
   try { INI = await api('/api/inv/inicio'); } catch (e) { $('#lista').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
-  $('#hu').textContent = INI.usuario;
+  $('#hu').textContent = INI.usuario; seCarga();
   $('#n-ub').innerHTML = INI.ubicaciones.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
   $('#n-ub').disabled = INI.ubicaciones.length < 2;
   $('#lista').innerHTML = INI.recuentos.length ? INI.recuentos.map(r => `<div class="rc"><div class="t"><b>${escH(r.nombre)}</b>
@@ -257,6 +271,28 @@ async function revisar(id) {
   const rb = $('#r-reab'); if (rb) rb.onclick = async () => { await api(`/api/inv/r/${id}/estado`, { accion: 'reabrir' }).catch(e => alert(e.message)); abrir(id); };
   const dl = $('#r-del'); if (dl) dl.onclick = async () => { if (!confirm('¿Borrar este recuento y todo lo contado?')) return; await api(`/api/inv/r/${id}/estado`, { accion: 'borrar' }).catch(e => alert(e.message)); inicio(); };
 }
+/* ---------- códigos de barras de artículos nuevos ---------- */
+let SE = [], SEL = null;
+async function seCarga() { try { SE = await api('/api/inv/sin_ean'); } catch (e) { SE = []; } $('#se-n').textContent = SE.length; $('#se-card').hidden = !SE.length; }
+function sePinta() {
+  const q = ($('#se-q').value || '').toLowerCase();
+  const l = SE.filter(p => !q || [p.nombre, p.ref, p.proveedor, p.cod_prov].join(' ').toLowerCase().includes(q));
+  $('#se-lista').innerHTML = l.length ? l.map(p => `<div class="rc" data-p="${p.id}" style="cursor:pointer${SEL && SEL.id === p.id ? ';background:#ece6f7' : ''}"><div class="t"><b>${escH(p.nombre)}</b>
+    <small>${escH(p.proveedor)}${p.cod_prov ? ' · cód. ' + escH(p.cod_prov) : ''} · alta ${escH(p.fecha)}</small></div></div>`).join('') : '<p class="muted">No queda ninguno sin código 🎉</p>';
+  $('#se-lista').querySelectorAll('[data-p]').forEach(d => d.onclick = () => { SEL = SE.find(x => x.id === +d.dataset.p); $('#se-sel').innerHTML = `Escanea el código de: <b>${escH(SEL.nombre)}</b>`;
+    $('#se-scan').hidden = false; $('#se-scan').value = ''; $('#se-scan').focus(); sePinta(); window.scrollTo(0, 0); });
+}
+$('#se-go').onclick = () => { vista('ean'); SEL = null; $('#se-scan').hidden = true; $('#se-res').innerHTML = ''; sePinta(); };
+$('#se-vol').onclick = () => inicio();
+$('#se-q').oninput = sePinta;
+$('#se-scan').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter' || !SEL) return; e.preventDefault();
+  const c = $('#se-scan').value.trim(); $('#se-scan').value = ''; if (!c) return;
+  try { const r = await api('/api/inv/poner_ean', { product_id: SEL.id, ean: c }); pita(true);
+    $('#se-res').innerHTML = `<div id="ult" class="ok">✅ ${escH(r.nombre)} → <b>${escH(r.ean)}</b></div>`;
+    SE = SE.filter(x => x.id !== SEL.id); SEL = null; $('#se-scan').hidden = true; $('#se-sel').textContent = 'Toca el siguiente artículo y escanea su código.'; sePinta(); }
+  catch (er) { pita(false); $('#se-res').innerHTML = `<div class="err">${escH(er.message)}</div>`; }
+});
 const h0 = +location.hash.slice(1);
 h0 ? abrir(h0) : inicio();
 </script>
