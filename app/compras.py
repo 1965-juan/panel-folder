@@ -593,7 +593,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         lec = json.loads(r["lectura"] or "{}")
         ld = lec.get("lineas") or []
         L = info.get("lineas") or []
-        tareas = [i for i, l in enumerate(L) if i < len(ld) and not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8 and not ld[i].get("ia")]
+        # se vuelven a intentar las que fallaron (p. ej. sin saldo en la API de Claude)
+        tareas = [i for i, l in enumerate(L) if i < len(ld) and not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8
+                  and (not ld[i].get("ia") or ld[i]["ia"].get("error"))]
         if not tareas:
             return 0
         prov = (info.get("proveedor") or {}).get("display_name") or lec.get("proveedor") or ""
@@ -932,7 +934,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             L = info.get("lineas") or []
             if not L:
                 return nota("No he sacado líneas del PDF: pulsa Cuadrar para revisarlo")
-            if any(not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8 and not l.get("ia") for l in L):
+            if any(not l.get("product_id") and len(re.sub(r"\D", "", l.get("ean") or "")) < 8 and (not l.get("ia") or (l.get("ia") or {}).get("error")) for l in L):
                 nota("Buscando en Odoo y en la web del fabricante los artículos que no conozco…")
                 if investigar_faltan(did, info, TODAS):
                     info = analizar(_doc(did), TODAS, pedido=(info.get("pedido") or {}).get("id") or 0, partner_id=info["proveedor"]["id"])
@@ -947,6 +949,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                         l["crear"] = True  # no está en Odoo (lo ha comprobado la IA): se da de alta con la ref. del proveedor
                     else:
                         faltan.append(l.get("descripcion") or l.get("ref") or "?")
+            if any("credit balance" in str((l.get("ia") or {}).get("error") or "") for l in L):
+                return nota("Se ha acabado el saldo de la API de Claude: no puedo buscar los artículos en la web. Recargad el saldo y pulsad 🤖 Terminar automático")
             if faltan:
                 return nota(f"Falta identificar {len(faltan)} línea(s): " + "; ".join(x[:40] for x in faltan[:4]) + ". Pulsa Cuadrar")
             lec = json.loads(_doc(did)["lectura"] or "{}")
