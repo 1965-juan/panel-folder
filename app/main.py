@@ -436,7 +436,7 @@ def short_company(name):
 
 
 SO_FIELDS = ["name", "partner_id", "date_order", "validity_date", "amount_total", "state",
-             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref", "website_id"]
+             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref", "website_id", "write_date"]
 
 
 def so_card(r, kind):
@@ -494,9 +494,11 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         if llenos:
             try:
                 for l in odoo.search_read("sale.order.line", [("order_id", "in", llenos), ("display_type", "=", False), ("is_downpayment", "=", False)],
-                                          ["order_id", "product_uom_qty", "qty_delivered", "qty_to_invoice"], cids, limit=50000):
+                                          ["order_id", "product_uom_qty", "qty_delivered", "qty_to_invoice", "product_type", "price_unit"], cids, limit=50000):
                     x = resto.setdefault(l["order_id"][0], [0, 0])
-                    x[0] += max(0, (l.get("product_uom_qty") or 0) - (l.get("qty_delivered") or 0))
+                    # descuentos, portes y servicios no se «sirven»: no cuentan como pendiente de servir
+                    if l.get("product_type") != "service" and (l.get("price_unit") or 0) >= 0:
+                        x[0] += max(0, (l.get("product_uom_qty") or 0) - (l.get("qty_delivered") or 0))
                     x[1] += max(0, l.get("qty_to_invoice") or 0)
             except Exception:
                 resto = {}
@@ -584,7 +586,11 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["reclamado"] = mk.get("reclamado", "")
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos,
                "albaranes": albaranes, "facturas": facturas, "borradores": borradores}
-        ocul = _ventas_ocultas()
+        ocul = _ventas_ocultas_t()
+        wd = {r["id"]: r.get("write_date") or "" for r in so}
+        for oid_, t in list(ocul.items()):   # si se tocó en Odoo después de ocultarlo, vuelve a salir (el panel es espejo de Odoo)
+            if t and wd.get(oid_, "") > t:
+                _mostrar_venta(oid_); ocul.pop(oid_)
         out = {k: [c for c in v if c["cid"] in cids and not (c.get("model") == "sale.order" and c["id"] in ocul)] for k, v in out.items()}
         if sin_facturas(u):
             out.pop("facturas", None)   # almacén y compras no ven facturas
@@ -752,11 +758,29 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
 OCULTAS_FILE = DATA / "ventas_ocultas.json"
 
 
-def _ventas_ocultas():
+def _ventas_ocultas_t():
+    """{id: cuándo se ocultó (UTC 'YYYY-MM-DD HH:MM:SS', '' si es de antes)}."""
     try:
-        return set(json.loads(OCULTAS_FILE.read_text())) if OCULTAS_FILE.exists() else set()
+        d = json.loads(OCULTAS_FILE.read_text()) if OCULTAS_FILE.exists() else {}
     except Exception:
-        return set()
+        d = {}
+    return {int(k): "" for k in d} if isinstance(d, list) else {int(k): v for k, v in d.items()}
+
+
+def _ventas_ocultas():
+    return set(_ventas_ocultas_t())
+
+
+def _ocultar_venta(oid):
+    d = _ventas_ocultas_t()
+    d[int(oid)] = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    OCULTAS_FILE.write_text(json.dumps({str(k): v for k, v in d.items()}))
+
+
+def _mostrar_venta(oid):
+    d = _ventas_ocultas_t()
+    if d.pop(int(oid), None) is not None:
+        OCULTAS_FILE.write_text(json.dumps({str(k): v for k, v in d.items()}))
 
 
 @app.get("/api/admin/campos")
@@ -979,7 +1003,7 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
         so = so[0]
         c = so["company_id"][0]
         if acc == "ocultar":
-            o = _ventas_ocultas(); o.add(oid); OCULTAS_FILE.write_text(json.dumps(sorted(o)))
+            _ocultar_venta(oid)
             return {"ok": True, "mensaje": f"{so['name']} ya no sale en el panel (en Odoo sigue igual)"}
         if acc == "cancelar":
             if so["state"] == "sale" and so.get("delivery_status") in ("partial", "full"):
@@ -1047,9 +1071,8 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
                     "albaranes": [{"id": p["id"], "nombre": p["name"]} for p in ok], "cid": c}
         # cerrar_resto
         pk = odoo.search_read("stock.picking", [("sale_id", "=", oid), ("state", "not in", ["done", "cancel"])], ["name"], [c])
-        if not pk:   # lo pendiente no tiene albarán (se canceló o nunca se generó): solo se quita del panel
-            o = _ventas_ocultas(); o.add(oid); OCULTAS_FILE.write_text(json.dumps(sorted(o)))
-            return {"ok": True, "mensaje": f"{so['name']}: lo que faltaba no tenía albarán pendiente; lo he quitado del panel"}
+        if not pk:   # no queda nada por servir en Odoo: no se quita del panel (sigue en Albaranes para facturar)
+            return {"ok": True, "mensaje": f"{so['name']}: no queda nada pendiente de servir en Odoo; sigue en Albaranes para facturar"}
         odoo.call("stock.picking", "action_cancel", [c], ids=[p["id"] for p in pk])
         return {"ok": True, "mensaje": f"{so['name']}: cancelado lo pendiente ({', '.join(p['name'] for p in pk)}); lo servido queda para facturar"}
 
@@ -1740,3 +1763,12 @@ def inventario_page(request: Request):
     html = (BASE / "static" / "inventario.html").read_text()
     html = re.sub(r'(/static/[\w.-]+\.(?:js|css))"', lambda m: f'{m.group(1)}?v={VERSION}"', html)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/admin/mostrar_venta/{oid}")
+def admin_mostrar_venta(oid: int, request: Request):
+    """Solo admin: vuelve a sacar en el panel un pedido que se ocultó."""
+    _solo_admin(request)
+    estaba = oid in _ventas_ocultas()
+    _mostrar_venta(oid)
+    return {"ok": True, "estaba_oculto": estaba}
