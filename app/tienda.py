@@ -9,6 +9,10 @@ import time
 
 from fastapi import Request, HTTPException
 
+class _Salta(Exception):
+    pass
+
+
 TARJETA = "TARJETERO"   # diario del datáfono (TPV banco)
 
 TODAS = [1, 2, 3, 4, 5]
@@ -16,6 +20,8 @@ TODAS = [1, 2, 3, 4, 5]
 TIENDAS = {
     "T1": {"nombre": "Tienda 1", "empresa": 1, "pos": 2, "almacen": 2, "usuario_odoo": 11, "reposicion": ["Tienda 1"], "caja": "Efectivo Tienda 1", "destino": 34},
     "T2": {"nombre": "Tienda 2", "empresa": 1, "pos": 4, "almacen": 3, "usuario_odoo": 12, "reposicion": ["Tienda 2"], "caja": "Efectivo T2", "destino": 40},
+    # el almacén también tiene TPV: solo abre su caja y cobra lo servido (sus pedidos y reposiciones los lleva en Ventas y Panel AC)
+    "AC": {"nombre": "Almacén", "empresa": 1, "pos": 1, "almacen": 1, "usuario_odoo": None, "reposicion": [], "caja": "Efectivo Almacén", "solo_cobro": True},
     "T3": {"nombre": "Tienda Logipaper", "empresa": 4, "pos": 5, "almacen": 4, "usuario_odoo": None, "reposicion": ["Tienda Logipaper", "Tienda 3", "LOGIPAPER", "Logipaper"], "caja": "Efectivo Tienda Logipaper"},
 }
 
@@ -38,11 +44,14 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
 
     def ctx(request, t):
         u = current_user(request)
-        propia = tienda_de(u)
+        propia = propia_de(u)
         t = propia or (t or "T1").upper()
         if t not in TIENDAS:
             raise HTTPException(400, "Tienda no válida")
         return u, t
+
+    def propia_de(u):
+        return tienda_de(u) or ("AC" if u == "almacen" else None)
 
     def plazo(s):
         """Contado = se cobra en la tienda al entregar. Si el cliente tiene giro / fin de mes, la tienda solo sirve."""
@@ -58,6 +67,8 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
             # reposiciones pedidas desde el TPV (las mismas que ve el almacén en el Panel AC → Tiendas)
             rep = []
             try:
+                if T.get("solo_cobro"):
+                    raise _Salta   # el almacén no tiene reposiciones propias
                 d = odoo.call_kw("sale.order", "get_panel_data", [], company_ids=[1, 4])
                 for p in d.get("reposicion", []):
                     if any(n.lower() == (p.get("store_name") or "").lower() for n in T["reposicion"]):
@@ -65,12 +76,14 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                                "pendiente": l["qty_pending"], "estado": l.get("badge_label") or ""} for l in p["lines"] if (l.get("qty_pending") or 0) > 0]
                         if ls:
                             rep.append({"id": p["picking_id"], "ref": p["picking_name"], "fecha": p["date"], "lineas": ls})
+            except _Salta:
+                pass
             except Exception as e:
                 rep = [{"error": str(e)[:200]}]
             # encargos de clientes hechos en la tienda, hasta que el almacén saca el albarán
             dom = [("state", "=", "sale"), ("delivery_status", "in", ["pending", "partial"]), ("company_id", "=", T["empresa"])]
             dom += ([("user_id", "=", T["usuario_odoo"])] if T["usuario_odoo"] else [("warehouse_id", "=", T["almacen"])])
-            so = odoo.search_read("sale.order", dom, ["name", "partner_id", "date_order", "amount_total", "client_order_ref", "order_line", "payment_term_id"],
+            so = [] if T.get("solo_cobro") else odoo.search_read("sale.order", dom, ["name", "partner_id", "date_order", "amount_total", "client_order_ref", "order_line", "payment_term_id"],
                                   company_ids=[T["empresa"]], order="date_order desc", limit=200)
             lids = [i for s in so for i in s["order_line"]]
             sl = odoo.search_read("sale.order.line", [("id", "in", lids), ("display_type", "=", False)], ["order_id", "product_id", "name", "product_uom_qty", "qty_delivered"],
@@ -104,7 +117,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                     cobrar.append({"id": x["id"], "ref": x["name"], "cliente": x["partner_id"][1], "fecha": (x.get("date_order") or "")[:10],
                                    "importe": round(pend if fs and not sin_fact else x["amount_total"], 2), "factura": ", ".join(f["name"] for f in fs if f["name"] != "/"),
                                    "ref_cliente": x.get("client_order_ref") or "", "email": ems.get(x["partner_id"][0], ""), **plazo(x)})
-            return {"tienda": t, "nombre": T["nombre"], "por_cobrar": cobrar, "fija": bool(tienda_de(u)), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
+            return {"tienda": t, "nombre": T["nombre"], "por_cobrar": cobrar, "fija": bool(propia_de(u)), "solo_cobro": bool(T.get("solo_cobro")), "tpv": f"{odoo_url}/pos/ui?config_id={T['pos']}",
                     "reposiciones": rep, "encargos": enc, "tiendas": [{"codigo": k, "nombre": v["nombre"]} for k, v in TIENDAS.items()]}
         return guard(run)
 

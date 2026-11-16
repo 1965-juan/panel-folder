@@ -8,7 +8,8 @@ async function tiOpen() {
   sel.hidden = TI.fija;
   if (!TI.fija && !sel.options.length) { sel.innerHTML = TI.tiendas.map(t => `<option value="${t.codigo}">${escH(t.nombre)}</option>`).join(''); sel.value = TI.tienda; }
   $('#ti-tpv').href = TI.tpv; $('#ti-tpv').textContent = `🧾 Abrir el TPV de ${TI.nombre}`;
-  $('#h1').textContent = TI.nombre;
+  $('#h1').textContent = TI.solo_cobro ? 'Punto de venta · ' + TI.nombre : TI.nombre;
+  document.querySelectorAll('#v-ti .ti-repo, #v-ti .ti-cols').forEach(x => x.hidden = !!TI.solo_cobro);
   const tabla = ls => `<table class="co-t ti-t"><thead><tr><th>Artículo</th><th class="num">Pedido</th><th class="num">Servido</th><th class="num">Falta</th></tr></thead><tbody>
     ${ls.map(l => `<tr><td>${escH(l.articulo)}${l.estado ? ` <span class="bdg">${escH(l.estado)}</span>` : ''}</td><td class="num">${+l.pedido}</td><td class="num">${+l.servido}</td><td class="num"><b>${+l.pendiente}</b></td></tr>`).join('')}</tbody></table>`;
   const rep = TI.reposiciones.filter(r => !r.error);
@@ -46,8 +47,8 @@ async function tiOpen() {
       } catch (e) { $('#ti-res').innerHTML = `<p class="err">${escH(e.message)}</p>`; P.querySelectorAll('button').forEach(z => z.disabled = false); }
     });
   });
-  tiRepo();
-  $('#ti-info').textContent = `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
+  if (!TI.solo_cobro) tiRepo();
+  $('#ti-info').textContent = TI.solo_cobro ? `${cob.length} pendientes de cobrar` : `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
 }
 async function tiRepo() {
   let R; try { R = await api(`/api/tienda/repo?t=${TI ? TI.tienda : ''}`); } catch (e) { $('#ti-borr').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }

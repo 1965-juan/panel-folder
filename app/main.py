@@ -37,7 +37,7 @@ ADMIN = "administrador"
 PERFILES = {
     ADMIN: {"empresas": ["*"], "modulos": None},
     "contabilidad": {"empresas": ["*"], "modulos": None},   # ve lo mismo que el administrador
-    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "pedidos", "articulos", "ac", "compras", "tablero", "etiquetas", "inventario"], "sin_facturas": True},
+    "almacen": {"empresas": ["DISTRIPLUS"], "modulos": ["ventas", "pedidos", "articulos", "ac", "compras", "tablero", "tienda", "etiquetas", "inventario"], "sin_facturas": True},
     "compras": {"empresas": ["DISTRIPLUS", "LOGIPAPER"], "modulos": ["ventas", "pedidos", "articulos", "ac", "tablero"], "sin_facturas": True},
     "tienda1": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas", "inventario"], "tienda": "T1", "nombre": "TIENDA 1"},
     "tienda2": {"empresas": ["DISTRIPLUS"], "modulos": ["tienda", "etiquetas", "inventario"], "tienda": "T2", "nombre": "TIENDA 2"},

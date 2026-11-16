@@ -187,11 +187,37 @@ class DemoOdoo:
     ]
 
     def search_read(self, model, domain, fields, company_ids=None, limit=None, order=None):
+        rows = self._sr(model, domain, fields, company_ids, limit, order)
+        hoy = dt.date.today().isoformat()
+        for r in rows:   # rellena los campos que falten en los datos de ejemplo
+            for f in fields or []:
+                if f in r:
+                    continue
+                if f.endswith("_ids"):
+                    r[f] = []
+                elif f.endswith("_id"):
+                    r[f] = False if f in ("backorder_id", "website_id", "lot_id", "purchase_line_id", "parent_id", "pos_order_id", "payment_term_id") else [r.get("id", 1), r.get("name") or r.get("display_name") or ""]
+                elif "date" in f or f.startswith("fecha"):
+                    r[f] = hoy + " 10:00:00"
+                elif f in ("name", "display_name", "complete_name"):
+                    r[f] = r.get("name") or r.get("display_name") or f"Registro {r.get('id', '')}"
+                elif any(k in f for k in ("qty", "quantity", "amount", "price", "total", "residual")):
+                    r[f] = 0
+                else:
+                    r[f] = False
+        return rows
+
+    def _sr(self, model, domain, fields, company_ids=None, limit=None, order=None):
         today = dt.date.today()
         d = lambda n: (today + dt.timedelta(days=n)).isoformat()
         clientes = ["Ayuntamiento de Borriol", "Colegio La Salle", "Gestoría Martí", "Facsa", "Clínica Dental Sol"]
         if model == "res.company":
             return self.companies
+        if model == "stock.quant":
+            pids = next((x[2] for x in domain if isinstance(x, (list, tuple)) and x[0] == "product_id"), [])
+            loc = next((x[2] for x in domain if isinstance(x, (list, tuple)) and x[0] == "location_id"), 8)
+            return [{"id": 700 + i, "product_id": [pid, "x"], "location_id": [loc, "Stock"], "quantity": [12, 3, 7][i % 3], "reserved_quantity": 0,
+                     "inventory_quantity_set": False, "lot_id": False} for i, pid in enumerate(pids if isinstance(pids, list) else [pids])]
         if model == "res.partner":
             return [{"id": i + 1, "name": c, "display_name": c} for i, c in enumerate(clientes)]
         if model == "sale.order":
