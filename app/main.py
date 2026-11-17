@@ -1446,11 +1446,15 @@ async def web_favoritos(request: Request):
     lo que ha comprado ese cliente en los últimos días (pedidos de venta y tickets de TPV, todas las empresas)."""
     _solo_admin(request)
     b = await request.json()
-    pid = int(b.get("partner_id") or 0)
-    dias = int(b.get("dias") or 365)
-    T = [1, 2, 3, 4, 5]
+    return guard(lambda: _volcar_favoritos(int(b.get("partner_id") or 0), int(b.get("dias") or 365), bool(b.get("solo_ver"))))
 
-    def run():
+
+def _volcar_favoritos(pid, dias=365, solo_ver=False):
+    """Mete en la lista de deseos de la web lo que ha comprado el cliente (empresa y todos sus contactos con acceso)."""
+    T = [1, 2, 3, 4, 5]
+    b = {"solo_ver": solo_ver}
+
+    if True:
         cp = odoo.search_read("res.partner", [("id", "=", pid)], ["commercial_partner_id", "name"], T)
         if not cp:
             raise HTTPException(404, "No encuentro el cliente")
@@ -1491,7 +1495,6 @@ async def web_favoritos(request: Request):
                 odoo.call("product.wishlist", "create", [1], vals_list=nuevos[i:i + 200])
         return {"cliente": cp[0]["name"], "comprados": len(pids), "en_web": len(prods), "accesos": len(socios),
                 "anadidos": 0 if b.get("solo_ver") else len(nuevos), "articulos": sorted(p["display_name"] for p in prods)[:200]}
-    return guard(run)
 
 
 @app.get("/api/web/clientes_activos")
@@ -1583,6 +1586,7 @@ async def web_dar_acceso(request: Request):
     b = await request.json()
     items = b.get("items") or []
     prueba = bool(b.get("prueba"))
+    historico = b.get("historico", len(items) <= 20)
     T = [1, 2, 3, 4, 5]
     rx = re.compile(r"[^@\s;,/]+@[^@\s;,/]+\.[A-Za-z]{2,}")
 
@@ -1625,6 +1629,13 @@ async def web_dar_acceso(request: Request):
                     odoo.call("res.partner", "write", T, ids=[pid], vals={"category_id": [[4, tag]]})
                 except Exception:
                     pass
+            # a quien pide acceso se le vuelca su histórico de compras a la lista de deseos (en altas sueltas, no en campañas masivas)
+            if historico and r["estado"] == "acceso creado" and not prueba:
+                try:
+                    f = _volcar_favoritos(pid)
+                    r["historico"] = f"{f['en_web']} artículos de su histórico en la web"
+                except Exception as e:
+                    r["historico"] = "no se pudo volcar: " + str(e)[:100]
             res.append(r)
         return res
     return guard(run)
