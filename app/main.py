@@ -438,6 +438,7 @@ async def odoo_guardar_clave(request: Request):
         f.with_name(f.stem + ".anterior" + f.suffix).write_text(f.read_text(errors="ignore"))
     f.write_text(ks[0] + "\n")
     odoo.key = ks[0]
+    odoo._uid = None
     return {"ok": True, "usuario": txt}
 
 
@@ -1981,6 +1982,32 @@ _ped.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, 
 from . import inventario as _inv  # noqa: E402
 
 _inv.setup(app, odoo=odoo, current_user=current_user, guard=guard, es_admin=es_admin, data_dir=DATA, nombre_usuario=nombre_usuario)
+
+
+from . import emergencia as _emerg  # noqa: E402
+
+_emerg.setup(app, odoo=odoo, current_user=current_user, guard=guard, tienda_de=tienda_de, es_admin=es_admin, data_dir=DATA)
+
+
+@app.get("/emergencia", response_class=HTMLResponse)
+def emergencia_page(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/entrar")
+    u = current_user(request)
+    if "tienda" not in modulos_de(u) and not es_admin(u):
+        return RedirectResponse("/")
+    return HTMLResponse((BASE / "static" / "emergencia.html").read_text(), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/emergencia-sw.js")
+def emergencia_sw():
+    """Service worker: guarda la página del TPV de emergencia para poder abrirla sin conexión (solo en https)."""
+    js = """const C='tpv-emergencia-v1';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/emergencia'])));self.skipWaiting();});
+self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
+ if(e.request.method==='GET'&&u.pathname==='/emergencia'){e.respondWith(fetch(e.request).then(r=>{if(r.ok){const k=r.clone();caches.open(C).then(c=>c.put('/emergencia',k));}return r;}).catch(()=>caches.match('/emergencia')));}});"""
+    return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
 @app.get("/inventario", response_class=HTMLResponse)

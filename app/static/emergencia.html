@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TPV de emergencia</title>
+<style>
+:root{--m:#b42318;--mo:#5b3ea8;--bg:#f6f4f9;--ok:#17643a;--line:#e3dff0}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:#1f2328}
+header{background:var(--m);color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}header select{font-size:14px;padding:4px}
+.est{font-size:13px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:20px}
+main{display:grid;grid-template-columns:1fr 340px;gap:14px;padding:14px;max-width:1300px;margin:auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.box{background:#fff;border-radius:12px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+#scan{width:100%;font-size:20px;padding:12px;border:3px solid var(--mo);border-radius:10px}
+#sug{margin-top:6px;max-height:260px;overflow:auto}#sug a{display:block;padding:8px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}
+#sug a:hover{background:#f0ecfa}
+table{width:100%;border-collapse:collapse;margin-top:10px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;font-size:15px}
+th{font-size:12px;color:#666;text-transform:uppercase}.n{text-align:right;white-space:nowrap}
+td input{width:76px;font-size:15px;padding:4px;text-align:right}
+.x{background:none;border:0;color:var(--m);font-size:18px;cursor:pointer}
+.tot{font-size:40px;font-weight:700;text-align:right;margin:6px 0 12px}
+button.b{width:100%;font-size:20px;padding:16px;border:0;border-radius:12px;color:#fff;cursor:pointer;margin-bottom:10px}
+.ef{background:#17643a}.tj{background:#1d4ed8}.gr{background:#6b7280;font-size:15px!important;padding:10px!important}
+button:disabled{opacity:.4;cursor:default}
+.aviso{background:#fff4e5;border:1px solid #f5c26b;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+.v{font-size:13px;border-bottom:1px solid var(--line);padding:6px 0;display:flex;justify-content:space-between;gap:8px}
+.bdg{font-size:11px;padding:2px 7px;border-radius:10px;background:#eee;white-space:nowrap}.b-ok{background:#e7f6ec;color:var(--ok)}.b-err{background:#fdecec;color:var(--m)}.b-nas{background:#e8eefc;color:#1d4ed8}
+#pago{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px}
+#pago .box{width:100%;max-width:420px}#pago input{width:100%;font-size:28px;padding:10px;text-align:right}
+.cambio{font-size:28px;margin:10px 0;text-align:right}
+.muted{color:#666;font-size:13px}
+#tk{display:none}
+@media print{body *{visibility:hidden}#tk,#tk *{visibility:visible}#tk{display:block;position:absolute;left:0;top:0;width:72mm;font:12px monospace}}
+</style></head>
+<body>
+<header><h1>🆘 TPV de emergencia · <span id="tn">…</span></h1>
+<select id="tsel" hidden></select>
+<span class="est" id="conex">…</span><span class="est" id="catf">Catálogo: …</span><span class="est" id="pend"></span>
+<a href="/" style="color:#fff;font-size:13px">Panel</a></header>
+<main>
+<section class="box">
+  <div class="aviso">Úsalo <b>solo cuando el TPV de Odoo no funcione</b>. Las ventas se guardan en este ordenador y pasan solas a Odoo cuando vuelve.
+  <b>No cierres esta pestaña</b> mientras no haya conexión.</div>
+  <input id="scan" placeholder="Pasa el lector o escribe código / nombre del artículo" autocomplete="off" autofocus>
+  <div id="sug"></div>
+  <table><thead><tr><th>Artículo</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Importe</th><th></th></tr></thead><tbody id="lin"></tbody></table>
+  <p><button class="b gr" id="var" style="width:auto">＋ Artículo sin código (precio a mano)</button></p>
+</section>
+<aside>
+  <div class="box">
+    <div class="muted">TOTAL (IVA incl.)</div><div class="tot" id="tot">0,00 €</div>
+    <button class="b ef" id="bef" disabled>💶 Cobrar en efectivo</button>
+    <button class="b tj" id="btj" disabled>💳 Cobrar con tarjeta</button>
+    <label class="muted"><input type="checkbox" id="imp"> Imprimir ticket al cobrar</label>
+    <button class="b gr" id="vac" style="margin-top:10px">Vaciar venta</button>
+  </div>
+  <div class="box" style="margin-top:14px"><b>Ventas de emergencia</b><div id="ven" class="muted">—</div>
+    <button class="b gr" id="cat" style="margin-top:8px">↻ Actualizar catálogo</button></div>
+</aside>
+</main>
+<div id="pago"><div class="box"><b id="ptit"></b>
+  <div id="pef"><label class="muted">Entregado por el cliente</label><input id="ent" inputmode="decimal"><div class="cambio" id="cam"></div></div>
+  <button class="b ef" id="pok">Confirmar cobro</button><button class="b gr" id="pno">Cancelar</button></div></div>
+<div id="tk"></div>
+<script>
+const $=s=>document.querySelector(s), eur=n=>(Math.round(n*100)/100).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let TIENDA=null, EMP=null, CAT=[], COD=new Map(), REF=new Map(), LIN=[], ONLINE=false, INFO=null;
+try{const t=localStorage.getItem('emerg_t'); if(t) TIENDA=t;}catch(e){}
+
+/* ---------- IndexedDB ---------- */
+const idb=new Promise((ok,ko)=>{const r=indexedDB.open('tpv_emergencia',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('kv');d.createObjectStore('ventas',{keyPath:'uid'});};r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error);});
+const st=(n,m='readonly')=>idb.then(d=>d.transaction(n,m).objectStore(n));
+const req=r=>new Promise((ok,ko)=>{r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error);});
+const kvGet=async k=>req((await st('kv')).get(k)), kvPut=async(k,v)=>req((await st('kv','readwrite')).put(v,k));
+const vPut=async v=>req((await st('ventas','readwrite')).put(v)), vAll=async()=>req((await st('ventas')).getAll());
+
+/* ---------- catálogo ---------- */
+function indexar(d){CAT=d.articulos;COD=new Map();REF=new Map();
+  CAT.forEach((a,i)=>{(a[5]||[]).forEach(([c,q])=>COD.set(String(c),[i,q||1])); if(a[2]) REF.set(String(a[2]).toLowerCase(),i);});
+  $('#catf').textContent='Catálogo: '+(d.fecha||'?')+' · '+CAT.length+' art.';}
+async function cargarCatalogo(forzar){
+  try{const r=await fetch(`/api/emerg/catalogo?t=${TIENDA||''}${forzar?'&forzar=1':''}`,{cache:'no-store'}); if(!r.ok) throw 0;
+    const d=await r.json(); await kvPut('cat_'+d.empresa,d); EMP=d.empresa; indexar(d); return;}catch(e){}
+  const d=await kvGet('cat_'+(EMP||1)); if(d) indexar(d); else $('#catf').textContent='⚠️ Sin catálogo guardado';}
+
+/* ---------- conexión con el panel ---------- */
+async function inicio(){
+  try{const r=await fetch(`/api/emerg/inicio?t=${TIENDA||''}`,{cache:'no-store'}); if(r.status===401){location.href='/entrar';return;} if(!r.ok) throw 0;
+    INFO=await r.json(); ONLINE=true; TIENDA=INFO.tienda; EMP=INFO.empresa; try{localStorage.setItem('emerg_t',TIENDA);}catch(e){}
+    try{localStorage.setItem('emerg_info',JSON.stringify({tienda:INFO.tienda,nombre:INFO.nombre,empresa:INFO.empresa}));}catch(e){}
+    $('#tn').textContent=INFO.nombre;
+    if(INFO.admin){const s=$('#tsel'); s.hidden=false; if(!s.options.length){s.innerHTML=Object.entries(INFO.tiendas).map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join(''); s.onchange=()=>{TIENDA=s.value;try{localStorage.setItem('emerg_t',TIENDA);}catch(e){} inicio().then(()=>cargarCatalogo());};} s.value=TIENDA;}
+  }catch(e){ONLINE=false; if(!INFO){try{const i=JSON.parse(localStorage.getItem('emerg_info')||'null'); if(i){TIENDA=i.tienda;EMP=i.empresa;$('#tn').textContent=i.nombre;}}catch(x){}}}
+  $('#conex').textContent=ONLINE?'🟢 Conectado con el panel':'🔴 Sin conexión: las ventas se guardan aquí';
+}
+async function enviar(){
+  const vs=(await vAll()).filter(v=>!v.enviada);
+  if(vs.length){try{const r=await fetch('/api/emerg/ventas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ventas:vs})});
+      if(r.ok){for(const v of vs){v.enviada=Date.now();await vPut(v);} ONLINE=true;}}catch(e){ONLINE=false;}}
+  await inicio(); pintarVentas();
+}
+async function pintarVentas(){
+  const loc=(await vAll()).filter(v=>v.tienda===TIENDA).sort((a,b)=>b.ts-a.ts).slice(0,30);
+  const srv=new Map((INFO&&INFO.ultimas||[]).map(v=>[v.uid,v]));
+  const sinEnviar=loc.filter(v=>!v.enviada).length;
+  $('#pend').textContent=sinEnviar?`⏳ ${sinEnviar} sin enviar`:(INFO&&INFO.pendientes?`${INFO.pendientes} por pasar a Odoo`:'✅ Todo en Odoo');
+  $('#ven').innerHTML=loc.length?loc.map(v=>{const s=srv.get(v.uid);
+    const b=!v.enviada?'<span class="bdg">guardada aquí</span>':s&&s.estado==='volcada'?`<span class="bdg b-ok">en Odoo ${esc(s.ticket||'')}</span>`:s&&s.estado==='error'?`<span class="bdg b-err" title="${esc(s.error)}">error al pasar</span>`:`<span class="bdg b-nas" title="${esc(s&&s.error||'')}">en el panel</span>`;
+    return `<div class="v"><span>${esc(v.fecha.slice(11,16))} · ${v.pagos.map(p=>p.forma==='tarjeta'?'💳':'💶').join('')} <b>${eur(v.total)}</b></span>${b}</div>`;}).join(''):'Ninguna todavía';
+}
+
+/* ---------- venta ---------- */
+function anadir(i,q=1){const a=CAT[i]; const l=LIN.find(x=>x.product_id===a[0]&&x.precio===a[3]);
+  if(l) l.cant+=q; else LIN.push({product_id:a[0],nombre:a[1],precio:a[3],cant:q}); pintar();}
+function pintar(){
+  $('#lin').innerHTML=LIN.map((l,k)=>`<tr><td>${esc(l.nombre)}${l.product_id?'':' <span class="bdg">sin código</span>'}</td>
+    <td class="n"><input type="number" step="1" value="${l.cant}" data-c="${k}"></td>
+    <td class="n"><input type="number" step="0.01" value="${l.precio.toFixed(2)}" data-p="${k}"></td>
+    <td class="n">${eur(l.cant*l.precio)}</td><td><button class="x" data-x="${k}">✕</button></td></tr>`).join('');
+  $('#lin').querySelectorAll('[data-c]').forEach(i=>i.onchange=()=>{const v=parseFloat(i.value)||0; if(v<=0) LIN.splice(+i.dataset.c,1); else LIN[+i.dataset.c].cant=v; pintar();});
+  $('#lin').querySelectorAll('[data-p]').forEach(i=>i.onchange=()=>{LIN[+i.dataset.p].precio=Math.max(0,parseFloat(i.value)||0); pintar();});
+  $('#lin').querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>{LIN.splice(+b.dataset.x,1); pintar();});
+  const t=total(); $('#tot').textContent=eur(t); $('#bef').disabled=$('#btj').disabled=!LIN.length;
+}
+const total=()=>Math.round(LIN.reduce((s,l)=>s+l.cant*l.precio,0)*100)/100;
+function buscar(q){q=q.trim(); if(!q) return;
+  const c=COD.get(q); if(c){anadir(c[0],c[1]); return true;}
+  const r=REF.get(q.toLowerCase()); if(r!==undefined){anadir(r); return true;}
+  const ws=q.toLowerCase().split(/\s+/); const res=[];
+  for(let i=0;i<CAT.length&&res.length<40;i++){const n=(CAT[i][1]+' '+CAT[i][2]).toLowerCase(); if(ws.every(w=>n.includes(w))) res.push(i);}
+  $('#sug').innerHTML=res.length?res.map(i=>`<a href="#" data-i="${i}"><b>${esc(CAT[i][1])}</b> <span class="muted">${esc(CAT[i][2])}</span> · ${eur(CAT[i][3])}</a>`).join(''):'<p class="muted">No encuentro ese artículo. Usa «Artículo sin código».</p>';
+  $('#sug').querySelectorAll('a').forEach(a=>a.onclick=e=>{e.preventDefault(); anadir(+a.dataset.i); $('#sug').innerHTML=''; $('#scan').value=''; $('#scan').focus();});
+  return false;}
+$('#scan').onkeydown=e=>{if(e.key==='Enter'){const v=$('#scan').value; if(buscar(v)){ $('#scan').value=''; $('#sug').innerHTML='';}}};
+$('#var').onclick=()=>{const n=prompt('Descripción del artículo','Varios'); if(n===null) return; const p=parseFloat((prompt('Precio unitario con IVA','')||'').replace(',','.'));
+  if(!(p>0)) return; LIN.push({product_id:null,nombre:n||'Varios',precio:p,cant:1}); pintar(); $('#scan').focus();};
+$('#vac').onclick=()=>{if(LIN.length&&confirm('¿Vaciar la venta?')){LIN=[];pintar();}};
+
+let FORMA=null;
+function abrirPago(f){FORMA=f; $('#ptit').textContent=(f==='tarjeta'?'💳 Tarjeta · ':'💶 Efectivo · ')+eur(total());
+  $('#pef').style.display=f==='efectivo'?'':'none'; $('#ent').value=''; $('#cam').textContent=''; $('#pago').style.display='flex'; if(f==='efectivo') setTimeout(()=>$('#ent').focus(),50);}
+$('#bef').onclick=()=>abrirPago('efectivo'); $('#btj').onclick=()=>abrirPago('tarjeta');
+$('#ent').oninput=()=>{const e=parseFloat($('#ent').value.replace(',','.'))||0, c=e-total(); $('#cam').textContent=e?(c>=0?'Cambio: '+eur(c):'Faltan '+eur(-c)):'';};
+$('#ent').onkeydown=e=>{if(e.key==='Enter') $('#pok').click();};
+$('#pno').onclick=()=>{$('#pago').style.display='none'; $('#scan').focus();};
+$('#pok').onclick=async()=>{
+  const t=total(); let imp=t;
+  if(FORMA==='efectivo'){const e=parseFloat($('#ent').value.replace(',','.')); if(e){ if(e<t){alert('Lo entregado no llega al total'); return;} imp=e; }}
+  const d=new Date(), pad=n=>String(n).padStart(2,'0');
+  const v={uid:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2)), tienda:TIENDA, ts:Date.now(),
+    fecha:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`, fecha_iso:d.toISOString(),
+    lineas:LIN.map(l=>({product_id:l.product_id,nombre:l.nombre,cant:l.cant,precio:l.precio})), pagos:[{forma:FORMA,importe:imp}], total:t};
+  await vPut(v);
+  if($('#imp').checked) ticket(v, imp-t);
+  LIN=[]; pintar(); $('#pago').style.display='none'; $('#scan').focus(); enviar();
+};
+function ticket(v,cambio){
+  $('#tk').innerHTML=`<div style="text-align:center"><b>FOLDER CASTELLÓN</b><br>${esc($('#tn').textContent)}<br>${esc(v.fecha)}</div><hr>`+
+    v.lineas.map(l=>`${esc(l.nombre.slice(0,32))}<br>&nbsp;&nbsp;${l.cant} x ${eur(l.precio)} = ${eur(l.cant*l.precio)}`).join('<br>')+
+    `<hr><b>TOTAL ${eur(v.total)}</b> (IVA incl.)<br>${v.pagos[0].forma==='tarjeta'?'Tarjeta':'Efectivo '+eur(v.pagos[0].importe)+'<br>Cambio '+eur(cambio)}<br><br><div style="text-align:center">Gracias por su compra</div>`;
+  window.print();}
+
+$('#cat').onclick=async()=>{$('#cat').disabled=true; await cargarCatalogo(true); $('#cat').disabled=false;};
+if('serviceWorker' in navigator && window.isSecureContext){navigator.serviceWorker.register('/emergencia-sw.js',{scope:'/'}).catch(()=>{});}
+window.addEventListener('beforeunload',e=>{if(LIN.length){e.preventDefault();e.returnValue='';}});
+(async()=>{await inicio(); await cargarCatalogo(); pintar(); await enviar(); setInterval(enviar,20000);})();
+</script></body></html>
