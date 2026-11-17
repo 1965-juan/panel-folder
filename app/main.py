@@ -385,6 +385,88 @@ async def claude_guardar_clave(request: Request):
     return {"ok": True, "releyendo": n}
 
 
+def _probar_clave_odoo(k):
+    import httpx as _hx
+    r = _hx.post(f"{odoo.url}/json/2/res.users/context_get", json={}, timeout=30,
+                 headers={"Authorization": f"bearer {k}", "X-Odoo-Database": odoo.db, "User-Agent": "PanelFolder/0.1"})
+    if r.status_code != 200:
+        try:
+            msg = r.json().get("message") or r.text
+        except Exception:
+            msg = r.text
+        return False, f"Odoo no acepta la clave ({r.status_code}): {str(msg)[:200]}"
+    uid = (r.json() or {}).get("uid")
+    nombre = ""
+    try:
+        r2 = _hx.post(f"{odoo.url}/json/2/res.users/read", json={"ids": [uid], "fields": ["name", "login"]}, timeout=30,
+                      headers={"Authorization": f"bearer {k}", "X-Odoo-Database": odoo.db, "User-Agent": "PanelFolder/0.1"})
+        if r2.status_code == 200 and r2.json():
+            nombre = f"{r2.json()[0]['name']} ({r2.json()[0]['login']})"
+    except Exception:
+        pass
+    return True, nombre or f"usuario {uid}"
+
+
+@app.get("/api/odoo/estado")
+def odoo_estado(request: Request):
+    """¿Funciona la clave de Odoo del panel? (sin enseñarla)"""
+    if not es_admin(current_user(request)):
+        raise HTTPException(403)
+    if not odoo.key:
+        return {"ok": False, "mensaje": "El panel no tiene clave de Odoo"}
+    try:
+        ok, txt = _probar_clave_odoo(odoo.key)
+    except Exception as e:
+        return {"ok": False, "mensaje": f"No se pudo conectar con Odoo: {e}"}
+    return {"ok": ok, "mensaje": ("Conectado como " + txt) if ok else txt}
+
+
+@app.post("/api/odoo/clave")
+async def odoo_guardar_clave(request: Request):
+    """Juan pega en el panel la clave API nueva de Odoo: se prueba y, si vale, se guarda en el NAS y se usa al momento."""
+    if not es_admin(current_user(request)):
+        raise HTTPException(403, "Solo Juan puede cambiar la clave")
+    b = await request.json()
+    ks = re.findall(r"[0-9a-f]{40}", (b.get("clave") or "").strip())
+    if not ks:
+        raise HTTPException(400, "Eso no parece una clave API de Odoo (son 40 letras y números)")
+    ok, txt = _probar_clave_odoo(ks[0])
+    if not ok:
+        raise HTTPException(400, txt + ". No se ha cambiado nada.")
+    f = Path(os.environ.get("ODOO_KEY_FILE") or (DATA / "clave_panel.txt"))
+    if f.exists():
+        f.with_name(f.stem + ".anterior" + f.suffix).write_text(f.read_text(errors="ignore"))
+    f.write_text(ks[0] + "\n")
+    odoo.key = ks[0]
+    return {"ok": True, "usuario": txt}
+
+
+@app.get("/clave-odoo", response_class=HTMLResponse)
+def pagina_clave_odoo(request: Request):
+    if not es_admin(current_user(request)):
+        raise HTTPException(403)
+    return """<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clave de Odoo</title>
+<style>body{font-family:system-ui,Arial;background:#f5f3fa;margin:0;padding:40px 16px;color:#1f2328}.c{max-width:600px;margin:auto;background:#fff;border-radius:14px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+h1{color:#5b3ea8;font-size:20px;margin:0 0 6px}ol{padding-left:20px;line-height:1.6}input{width:100%;box-sizing:border-box;padding:12px;font-size:15px;border:2px solid #cfc6e6;border-radius:10px;margin:8px 0}
+button{background:#5b3ea8;color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:15px;cursor:pointer}#m{margin-top:14px;padding:12px;border-radius:8px;display:none}.ok{background:#e7f6ec;color:#17643a}.mal{background:#fdecec;color:#9b1c1c}a{color:#5b3ea8}</style></head>
+<body><div class="c"><h1>🔑 Conexión del panel con Odoo</h1><p id="est">Comprobando la conexión actual…</p>
+<ol><li>En Odoo, arriba a la derecha pulsa tu nombre → <b>Mi perfil / Preferencias</b> → pestaña <b>Seguridad de la cuenta</b>.</li>
+<li>Pulsa <b>Nueva clave API</b>, pon de nombre <b>Panel Folder</b> y como duración la más larga que te deje (o <b>Persistente</b>). Te pedirá tu contraseña de Odoo.</li>
+<li>Copia la clave que sale (solo se ve una vez) y pégala aquí abajo. El panel la prueba antes de guardarla.</li></ol>
+<input id="k" type="password" placeholder="clave API de Odoo" autocomplete="off"><button id="g">Guardar y comprobar</button><div id="m"></div>
+<p style="margin-top:18px"><a href="/">← Volver al panel</a></p></div>
+<script>
+const m=document.getElementById('m'), est=document.getElementById('est');
+const mira=()=>fetch('/api/odoo/estado').then(r=>r.json()).then(j=>{est.textContent=(j.ok?'✅ ':'❌ ')+j.mensaje});
+mira();
+document.getElementById('g').onclick=async()=>{const k=document.getElementById('k').value.trim(); if(!k) return; m.style.display='block'; m.className=''; m.textContent='Probando con Odoo…';
+ const r=await fetch('/api/odoo/clave',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clave:k})}); const j=await r.json().catch(()=>({}));
+ document.getElementById('k').value='';
+ if(r.ok){m.className='ok'; m.textContent='✅ Clave guardada. El panel ya está conectado como '+j.usuario+'.'; mira();}
+ else {m.className='mal'; m.textContent='❌ '+(j.detail||'No se pudo guardar');}};
+</script></body></html>"""
+
+
 @app.get("/clave-claude", response_class=HTMLResponse)
 def pagina_clave(request: Request):
     u = current_user(request)
