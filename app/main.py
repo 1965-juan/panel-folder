@@ -2065,6 +2065,59 @@ async def admin_cerrar_caja(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/igualar_impuestos")
+async def admin_igualar_impuestos(request: Request):
+    """Solo admin. Deja los impuestos de venta y compra de los artículos de la empresa destino iguales que en la de origen
+    (el equivalente con el mismo nombre). {origen:1, destino:4, prueba:true}"""
+    _solo_admin(request)
+    b = await request.json()
+    o, d, prueba = int(b.get("origen") or 1), int(b.get("destino") or 4), b.get("prueba", True)
+
+    def run():
+        tx = odoo.search_read("account.tax", [("company_id", "in", [o, d]), ("active", "in", [True, False])],
+                              ["name", "company_id", "type_tax_use", "amount", "amount_type", "price_include"], [o, d], limit=5000)
+        key = lambda t: (t["name"].strip().lower(), t["type_tax_use"], round(t["amount"], 4), t["amount_type"])
+        dest = {key(t): t["id"] for t in tx if t["company_id"][0] == d}
+        mapa, sin = {}, set()
+        for t in tx:
+            if t["company_id"][0] == o:
+                if key(t) in dest:
+                    mapa[t["id"]] = dest[key(t)]
+                else:
+                    sin.add(t["name"])
+        campos = ["taxes_id", "supplier_taxes_id"]
+        a = {p["id"]: p for p in odoo.search_read("product.template", [], ["name"] + campos, [o], limit=200000)}
+        z = {p["id"]: p for p in odoo.search_read("product.template", [], campos, [d], limit=200000)}
+        grupos, ej, falta = {}, [], 0
+        for pid, p in a.items():
+            q = z.get(pid)
+            if not q:
+                continue
+            cmds = {}
+            for f in campos:
+                if any(x not in mapa for x in p[f]):
+                    falta += 1
+                    break
+                quiero = {mapa[x] for x in p[f]}
+                hay = set(q[f])
+                if quiero != hay:
+                    cmds[f] = tuple([(3, x) for x in sorted(hay - quiero)] + [(4, x) for x in sorted(quiero - hay)])
+            else:
+                if cmds:
+                    k = tuple(sorted(cmds.items()))
+                    grupos.setdefault(k, []).append(pid)
+                    if len(ej) < 15:
+                        ej.append(p["name"][:50])
+        n = sum(len(v) for v in grupos.values())
+        if not prueba:
+            for k, ids in grupos.items():
+                vals = {f: [list(c) for c in cs] for f, cs in k}
+                for i in range(0, len(ids), 500):
+                    odoo.call("product.template", "write", [d], ids=ids[i:i + 500], vals=vals)
+        return {"articulos": len(a), "a_cambiar": n, "hecho": not prueba, "ejemplos": ej, "sin_equivalente": sorted(sin)[:30], "con_impuesto_sin_equivalente": falta}
+    return guard(run)
+
+
 @app.post("/api/admin/renombrar_contacto")
 async def admin_renombrar_contacto(request: Request):
     """Solo admin: {partner_id, nombre} cambia el nombre de un contacto (y de su usuario de la web, que es el mismo)."""
