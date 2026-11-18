@@ -5,6 +5,7 @@ así que validar, cambiar cantidades o crear traspasos hace exactamente lo mismo
 Novedades: borrar y añadir líneas en pedidos de clientes y tiendas, filtro de pedidos completos,
 y ver los datos del cliente sin cuenta que la tienda apunta en "Referencia del cliente".
 """
+import json
 from fastapi import Request, HTTPException
 
 
@@ -33,6 +34,24 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             d["orders"] = [o for o in d.get("orders", []) if not (extra.get(o["order_id"]) and (extra[o["order_id"]].get("company_id") or [1])[0] != 1
                                                                  and (extra[o["order_id"]].get("partner_id") or [0])[0] in propias())]
             quitar_pedidos_entre_empresas(d)
+            # albaranes ya impresos (desde Odoo o desde el panel: Odoo los marca "impreso"): fuera de pendientes de imprimir
+            try:
+                pids = {x["id"] for k in ("orders", "reposicion") for o in d.get(k, []) for l in o.get("lines", []) for x in (l.get("pending_print_docs") or [])}
+                hechos = {p["id"] for p in odoo.search_read("stock.picking", [("id", "in", list(pids)), ("printed", "=", True)], ["id"], company_ids=TODAS)} if pids else set()
+                if hechos:
+                    for k, model, key in (("orders", "sale.order.line", "line_id"), ("reposicion", "stock.move", "move_id")):
+                        for o in d.get(k, []):
+                            for l in o.get("lines", []):
+                                docs = l.get("pending_print_docs") or []
+                                resto = [x for x in docs if x["id"] not in hechos]
+                                if len(resto) != len(docs):
+                                    l["pending_print_docs"] = resto
+                                    try:
+                                        odoo.call(model, "write", cids, ids=[l[key]], vals={"ac_pending_print_docs": json.dumps(resto) if resto else False})
+                                    except Exception:
+                                        pass
+            except Exception:
+                pass
             # lo ya servido no se enseña: en pedidos servidos en parte (clientes y tiendas) solo quedan las líneas con algo pendiente
             for k in ("orders", "reposicion"):
                 for o in d.get(k, []):
