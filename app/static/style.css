@@ -495,6 +495,6 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 #d-lines .d-add td{padding-top:8px}
 #d-lines .d-as .d-ao{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #eee}
 /* barra de preguntas plegada: solo un botón ✨ abajo a la izquierda, para no tapar los botones */
-#as-bar.mini{left:216px;transform:none;width:auto;padding:8px 12px;border-radius:24px;cursor:pointer;opacity:.85}
+#as-bar.mini{left:auto;right:18px;top:12px;bottom:auto;transform:none;width:auto;padding:6px 12px;border-radius:24px;cursor:pointer;opacity:.9;box-shadow:none}
 #as-bar.mini:hover{opacity:1}#as-bar.mini input,#as-bar.mini button{display:none}#as-bar.mini span::after{content:" Preguntar";font-size:14px;font-weight:700;color:#3A1F73}
-@media (max-width:900px){#as-bar.mini{left:12px}}
+@media (max-width:900px){#as-bar.mini{left:auto;right:12px}}
