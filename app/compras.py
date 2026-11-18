@@ -1161,7 +1161,18 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             sec.append(f"<h2>📦 Recibido en almacén ({e(rec.get('picking', ''))})</h2>" + filas(["Artículo", "Esperado", "Recibido", "Diferencia"], ls)
                        + ("<p class='nota'>Lo que faltaba queda pendiente en una entrada nueva.</p>" if rec.get("queda_pendiente")
                           else "<p class='nota'>Lo que faltaba se ha cancelado: no queda pendiente de recibir.</p>" if rec.get("cancelado") else ""))
-        if rec.get("servir"):
+        sp_vivo = None
+        if rec.get("picking_id"):
+            try:   # en vivo: con el stock de ahora (lo ya servido desaparece)
+                pr = {m["product_id"][0] for m in odoo.search_read("stock.move", [("picking_id", "=", rec["picking_id"]), ("quantity", ">", 0)], ["product_id"], company_ids=cids)}
+                sp_vivo = calc_servir(pr, cids)[1] if pr else []
+            except Exception:
+                sp_vivo = None
+        if sp_vivo is not None:
+            sec.append(servir_html(sp_vivo, e, n) if sp_vivo else "<h2>🚚 Ya se puede servir</h2><p class='nota'>Nada pendiente: ya está todo servido o nadie lo esperaba.</p>")
+        elif rec.get("servir_pedidos"):
+            sec.append(servir_html(rec["servir_pedidos"], e, n))
+        elif rec.get("servir"):
             sec.append("<h2>🚚 Ya se puede servir</h2>" + filas(["Para", "Pedido", "Artículo", "Pend."],
                        [f"<tr><td>{e(x['quien'])}</td><td>{e(x['ref'])}</td><td>{e(x['producto'])}</td><td>{n(x['pendiente'])}</td></tr>" for x in rec["servir"]]))
         if not comp and lec.get("lineas"):
@@ -1174,7 +1185,10 @@ h1{{color:#5B2D82;font-size:21px;margin:0 0 4px}}h2{{font-size:15px;color:#5B2D8
 .sub{{color:#666;font-size:13px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{border-bottom:1px solid #e5e1ea;padding:5px 6px;text-align:left}}
 th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-left:20px;font-size:13px}}.nota{{font-size:12px;color:#666}}
 .caja{{border-radius:8px;padding:10px 14px;margin-top:12px;font-size:14px}}.pend{{background:#fff3df;border-left:4px solid #F39200}}.ok{{background:#eaf7ee;border-left:4px solid #1F7A4D}}
-.caja li{{margin:3px 0}}.bot{{margin-top:18px}}button{{background:#5B2D82;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:14px;cursor:pointer}}
+.caja li{{margin:3px 0}}h3{{font-size:14px;margin:14px 0 6px}}.svg{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}}
+.sv{{display:block;border-radius:8px;padding:8px 10px;text-decoration:none;color:#222;border:1px solid #e5e1ea;font-size:13px}}.sv:hover{{box-shadow:0 2px 8px rgba(0,0,0,.12)}}
+.sv.ok{{background:#eaf7ee;border-left:4px solid #1F7A4D}}.sv.pa{{background:#fff3df;border-left:4px solid #F39200}}.sv-h{{display:flex;justify-content:space-between;gap:6px}}.sv-h span{{color:#5B2D82;white-space:nowrap}}
+.sv ul{{margin:4px 0 0;padding-left:18px}}.sv-f{{color:#b42318;font-size:12px;margin-top:4px}}.sv-o{{color:#1F7A4D;font-size:12px;margin-top:4px}}.bot{{margin-top:18px}}button{{background:#5B2D82;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:14px;cursor:pointer}}
 @media print{{.bot{{display:none}}body{{background:#fff}}.p{{padding:0}}}}</style></head><body><div class="p">
 <h1>Informe de albarán · {e(comp.get('proveedor') or lec.get('proveedor') or '')}</h1>
 <div class="sub">Albarán nº <b>{e(comp.get('documento') or lec.get('numero') or '')}</b>{(' del ' + e(lec['fecha'][8:10] + '/' + lec['fecha'][5:7] + '/' + lec['fecha'][:4])) if lec.get('fecha') else ''}
@@ -1186,6 +1200,54 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
 {''.join(sec) or '<p class="sub">Todavía no se ha cuadrado ni recibido nada de este albarán.</p>'}
 <div class="bot"><button onclick="print()">🖨 Imprimir</button></div></div></body></html>"""
         return HTMLResponse(html)
+
+    def calc_servir(prods, cids):
+        """Qué pedidos de clientes y reposiciones de tiendas esperaban estos artículos, y si ya pueden salir enteros con el stock actual."""
+        servir, servir_pedidos = [], []
+        try:
+            d = odoo.call_kw("sale.order", "get_panel_data", [], company_ids=cids)
+            locs = [str(x["id"]) for x in d.get("locations", []) if not x.get("read_only")]
+            hay = lambda l: sum(max(0, (l.get("stock_by_loc") or {}).get(k, 0) or 0) for k in locs)
+
+            def grupo(tipo, quien, ref, ls):
+                llegan = [l for l in ls if l["product_id"] in prods]
+                if not llegan:
+                    return
+                for l in llegan:
+                    servir.append({"quien": quien, "ref": ref, "producto": l["product_name"], "pendiente": l["qty_pending"]})
+                falta = [l for l in ls if l["qty_pending"] > 0 and hay(l) < l["qty_pending"] - 1e-6]
+                servir_pedidos.append({"tipo": tipo, "quien": quien, "ref": ref, "completo": not falta,
+                                       "llegan": [{"producto": l["product_name"], "pendiente": l["qty_pending"]} for l in llegan],
+                                       "otras": len([l for l in ls if l["product_id"] not in prods and l["qty_pending"] > 0]),
+                                       "faltan": [{"producto": l["product_name"], "pendiente": l["qty_pending"]} for l in falta][:8]})
+            for o in d.get("orders", []):
+                grupo("tienda" if "logipaper" in (o["partner_name"] or "").lower() else "cliente", o["partner_name"], o["order_name"], o["lines"])
+            for p in d.get("reposicion", []):
+                grupo("tienda", p["store_name"], p["picking_name"], p["lines"])
+        except Exception:
+            pass
+        return servir, servir_pedidos
+
+    def servir_html(sp, e, n):
+        """Lo que se puede servir con lo recibido, en tarjetas: clientes que salen enteros, tiendas y clientes con más cosas pendientes.
+        Cada tarjeta abre el Panel AC (en otra pestaña) ya filtrado por ese pedido."""
+        def tarjeta(x):
+            ls = "".join(f"<li>{e(l['producto'])} <b>×{n(l['pendiente'])}</b></li>" for l in x["llegan"])
+            extra = ""
+            if not x["completo"]:
+                extra = "<div class='sv-f'>Le falta: " + ", ".join(f"{e(l['producto'][:40])} ×{n(l['pendiente'])}" for l in x["faltan"]) + "</div>"
+            elif x["otras"]:
+                extra = f"<div class='sv-o'>+ {x['otras']} artículo(s) más que ya había en stock: sale entero</div>"
+            return (f"<a class='sv {'ok' if x['completo'] else 'pa'}' href='/?r=sv#ac?q={e(x['ref'])}' target='_blank'>"
+                    f"<div class='sv-h'><b>{e(x['quien'])}</b><span>{e(x['ref'])} ↗</span></div><ul>{ls}</ul>{extra}</a>")
+        cli_ok = [x for x in sp if x["tipo"] == "cliente" and x["completo"]]
+        tie = [x for x in sp if x["tipo"] == "tienda"]
+        cli_pa = [x for x in sp if x["tipo"] == "cliente" and not x["completo"]]
+        out = "<h2>🚚 Ya se puede servir</h2><p class='nota'>Pulsa una tarjeta para abrir ese pedido en el Panel AC (se abre aparte).</p>"
+        for tit, ls in (("🟢 Clientes que ya se pueden servir enteros", cli_ok), ("🏬 Tiendas", tie), ("🟠 Clientes con más cosas pendientes (servir parcial o esperar)", cli_pa)):
+            if ls:
+                out += f"<h3>{tit} ({len(ls)})</h3><div class='svg'>" + "".join(tarjeta(x) for x in ls) + "</div>"
+        return out
 
     @app.post("/api/compras/recibir")
     async def recibir(request: Request, company: str = "all"):
@@ -1246,26 +1308,14 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
             # qué se puede servir ahora con lo que ha entrado
             prods = {m["product_id"][0] for m in odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id"], company_ids=c1)
                      if cant.get(m["id"], 0) > 0}
-            servir = []
-            try:
-                d = odoo.call_kw("sale.order", "get_panel_data", [], company_ids=cids)
-                for o in d.get("orders", []):
-                    for l in o["lines"]:
-                        if l["product_id"] in prods:
-                            servir.append({"quien": o["partner_name"], "ref": o["order_name"], "producto": l["product_name"], "pendiente": l["qty_pending"]})
-                for p in d.get("reposicion", []):
-                    for l in p["lines"]:
-                        if l["product_id"] in prods:
-                            servir.append({"quien": p["store_name"], "ref": p["picking_name"], "producto": l["product_name"], "pendiente": l["qty_pending"]})
-            except Exception:
-                pass
+            servir, servir_pedidos = calc_servir(prods, cids)
             # para el informe del almacén: lo pedido y lo recibido, lo que queda pendiente y lo que ya se puede servir
             try:
                 mv = odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id", "product_uom_qty"], company_ids=c1)
                 rec = {"picking": pk["name"], "picking_id": pid, "por": u_rec, "cuando": time.time(), "albaran": b.get("albaran") or "",
                        "lineas": [{"articulo": m["product_id"][1], "pedido": m["product_uom_qty"], "recibido": cant.get(m["id"], 0)} for m in mv],
                        "queda_pendiente": pendiente, "cancelado": b.get("faltan") == "cancelar" or any(x["destino"] == "cancelar" for x in movidas),
-                       "servir": servir, "faltas": movidas}
+                       "servir": servir, "servir_pedidos": servir_pedidos, "faltas": movidas}
                 po_id = (odoo.search_read("stock.picking", [("id", "=", pid)], ["purchase_id"], company_ids=c1)[0].get("purchase_id") or [0])[0]
                 with lock, con() as c:
                     dids = [b["doc_id"]] if b.get("doc_id") else []
@@ -1281,7 +1331,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 rec_doc = dids[0] if dids else None
             except Exception:
                 rec_doc = None
-            return {"ok": True, "queda_pendiente": pendiente, "servir": servir, "informe": rec_doc, "faltas": movidas}
+            return {"ok": True, "queda_pendiente": pendiente, "servir": servir, "servir_pedidos": servir_pedidos, "informe": rec_doc, "faltas": movidas}
         return guard(run)
 
     def repartir_faltas(pk, mvs, faltas, c1, albaran):

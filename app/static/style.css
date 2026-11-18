@@ -498,3 +498,7 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 #as-bar.mini{left:auto;right:18px;top:12px;bottom:auto;transform:none;width:auto;padding:6px 12px;border-radius:24px;cursor:pointer;opacity:.9;box-shadow:none}
 #as-bar.mini:hover{opacity:1}#as-bar.mini input,#as-bar.mini button{display:none}#as-bar.mini span::after{content:" Preguntar";font-size:14px;font-weight:700;color:#3A1F73}
 @media (max-width:900px){#as-bar.mini{left:auto;right:12px}}
+.svg{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;margin-bottom:8px}
+.sv{display:block;border-radius:8px;padding:8px 10px;text-decoration:none;color:#222;border:1px solid #e5e1ea;font-size:13px}.sv:hover{box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.sv.ok{background:#eaf7ee;border-left:4px solid #1F7A4D}.sv.pa{background:#fff3df;border-left:4px solid #F39200}.sv-h{display:flex;justify-content:space-between;gap:6px}.sv-h span{color:#5B2D82;white-space:nowrap}
+.sv ul{margin:4px 0 0;padding-left:18px}.sv-f{color:#b42318;font-size:12px;margin-top:4px}.sv-o{color:#1F7A4D;font-size:12px;margin-top:4px}

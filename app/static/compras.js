@@ -300,6 +300,15 @@ function coRecRender() {
   });
 }
 $('#co-rq').oninput = coRecRender;
+function coServirHTML(sp) {   // tarjetas: clientes que salen enteros, tiendas, y clientes con más cosas pendientes; cada una abre el Panel AC aparte
+  const t = x => `<a class="sv ${x.completo ? 'ok' : 'pa'}" href="/?r=sv#ac?q=${encodeURIComponent(x.ref)}" target="_blank" rel="noopener"><div class="sv-h"><b>${escH(x.quien)}</b><span>${escH(x.ref)} ↗</span></div>
+    <ul>${x.llegan.map(l => `<li>${escH(l.producto)} <b>×${l.pendiente}</b></li>`).join('')}</ul>
+    ${!x.completo ? `<div class="sv-f">Le falta: ${x.faltan.map(l => `${escH(l.producto.slice(0, 40))} ×${l.pendiente}`).join(', ')}</div>` : x.otras ? `<div class="sv-o">+ ${x.otras} artículo(s) más ya en stock: sale entero</div>` : ''}</a>`;
+  const g = [['🟢 Clientes que ya se pueden servir enteros', sp.filter(x => x.tipo === 'cliente' && x.completo)], ['🏬 Tiendas', sp.filter(x => x.tipo === 'tienda')],
+    ['🟠 Clientes con más cosas pendientes', sp.filter(x => x.tipo === 'cliente' && !x.completo)]];
+  return '<h4>🚚 Ya se puede servir <small class="muted">(pulsa para abrir el pedido en el Panel AC, aparte)</small></h4>' +
+    g.filter(([, l]) => l.length).map(([tt, l]) => `<h5>${tt} (${l.length})</h5><div class="svg">${l.map(t).join('')}</div>`).join('');
+}
 async function coRecibirDe(refs, did, pedido) {   // abrir la recepción de un pedido recién cuadrado, con su albarán
   try {
     const recs = await api(`/api/compras/recepciones?company=${company}`); CO_RECS = recs;
@@ -359,8 +368,7 @@ function coRecibirOpen(r) {
         ${(res.faltas || []).length ? '<br>' + res.faltas.map(f => `${escH(f.articulo)} (${f.cant}) → ${f.a === 'eliminado' ? 'eliminado' : escH(f.a)}`).join('<br>') : ''}
         <br>📄 El albarán queda guardado para que Mayte lo cuadre con la factura.
         ${res.informe ? `<br><a class="btn" target="_blank" href="/compras/informe/${res.informe}">📄 Ver el informe del albarán</a>` : ''}</div>
-        ${res.servir.length ? `<h4>Ya se puede servir</h4><table class="co-t"><thead><tr><th>Para</th><th>Pedido</th><th>Artículo</th><th>Pend.</th></tr></thead><tbody>${res.servir.map(s => `<tr><td>${escH(s.quien)}</td><td>${escH(s.ref)}</td><td>${escH(s.producto)}</td><td>${s.pendiente}</td></tr>`).join('')}</tbody></table>
-          <a class="btn" href="#ac" onclick="$('#co-drawer').hidden=true">Ir al Panel AC a servirlo</a>` : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
+        ${(res.servir_pedidos || []).length ? coServirHTML(res.servir_pedidos) : res.servir.length ? '<p>Hay cosas que servir: <a class="btn" href="#ac">Panel AC</a></p>' : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
       $('#co-ok').remove(); coRec();
     } catch (e) { alertBox(e.message); $('#co-ok').disabled = false; $('#co-ok').textContent = '✓ Recibir en Odoo'; }
   };
