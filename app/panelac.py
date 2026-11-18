@@ -207,6 +207,30 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             return out
         return guard(run)
 
+    @app.post("/api/admin/pasar_stock")
+    async def admin_pasar_stock(request: Request):
+        """Solo admin. Pasa unidades de un artículo duplicado al bueno en una ubicación (ajuste de inventario -X / +X).
+        {location_id, empresa, de: product_id, a: product_id, cant}"""
+        from .main import _solo_admin  # noqa
+        _solo_admin(request)
+        b = await body(request)
+        loc, E, q = int(b["location_id"]), int(b.get("empresa") or 1), float(b["cant"])
+        ctx_ = {"inventory_mode": True, "inventory_name": f"Panel: pasar stock de artículo duplicado ({b['de']} → {b['a']})"}
+
+        def run():
+            qids = []
+            for pid, delta in ((int(b["de"]), -q), (int(b["a"]), q)):
+                qs = odoo.search_read("stock.quant", [("product_id", "=", pid), ("location_id", "=", loc)], ["quantity"], company_ids=[E])
+                if qs:
+                    odoo.call("stock.quant", "write", [E], ids=[qs[0]["id"]], vals={"inventory_quantity": qs[0]["quantity"] + delta}, context=dict(ctx_))
+                    qids.append(qs[0]["id"])
+                else:
+                    x = odoo.call("stock.quant", "create", [E], vals_list=[{"product_id": pid, "location_id": loc, "inventory_quantity": delta}], context=dict(ctx_))
+                    qids.append(x[0] if isinstance(x, list) else x)
+            odoo.call("stock.quant", "action_apply_inventory", [E], ids=qids, context=dict(ctx_))
+            return {"ok": True}
+        return guard(run)
+
     @app.post("/api/ac/impreso")
     async def ac_impreso(request: Request, company: str = "all"):
         """Marca los albaranes como impresos (lo que usa el Panel AC para quitarlos de «Pend. imprimir»)."""
