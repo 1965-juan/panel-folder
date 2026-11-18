@@ -95,7 +95,7 @@ async function coDocs() {
       if (a === 'auto') { b.disabled = true; b.textContent = 'Buscando y cuadrando…'; await jpost(`/api/compras/docs/${x.id}/auto`, {}); setTimeout(coDocs, 1500); return; }
       if (a === 'prov') { if (!confirm(`¿Crear en Odoo el proveedor «${x.proveedor}» con el CIF de la factura?`)) return; const r = await jpost(`/api/compras/docs/${x.id}/proveedor_nuevo`, {}); alertBox(`Proveedor ${r.nombre} listo. Vuelvo a cuadrar el documento…`); setTimeout(coDocs, 8000); return coDocs(); }
       if (a === 'informe') return window.open('/compras/informe/' + x.id, '_blank');
-      if (a === 'recibir') return coRecibirDe(x.compra.recepciones, x.id);
+      if (a === 'recibir') return coRecibirDe(x.compra.recepciones || [], x.id, x.compra.pedido);
       if (a === 'fichas') return coFichas({ pedido: x.compra.pedido });
       if (a === 'cuadrar_factura') return coFacCuadrar({ id: x.odoo_id, proveedor: x.proveedor, base: +x.base || 0 });
       if (a === 'releer') { await jpost(`/api/compras/docs/${x.id}/releer`, {}); return coDocs(); }
@@ -121,7 +121,7 @@ async function coPasar(did, opts = {}) {
   const fiBtn = (ref) => { db.insertAdjacentHTML('beforeend', `<button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`); $('#pc-fi').onclick = () => coFichas(ref); };
   if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>
     ${(d.compra.recepciones || []).length ? '<button class="ac-go" id="pc-rec">📦 Recibir la mercancía ahora</button>' : ''}`;
-    const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(d.compra.recepciones, did);
+    const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(d.compra.recepciones || [], did, d.compra.pedido);
     fiBtn({ pedido: d.compra.pedido }); return; }
   if (d.ya_cuadrado) { db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">El documento ${escH(lec.numero)} ya está en el pedido confirmado <b>${escH(d.ya_cuadrado)}</b>. Recíbelo desde Recepciones.</div>`; fiBtn({ pedido: d.ya_cuadrado }); return; }
   const L = d.lineas || [];
@@ -206,7 +206,7 @@ async function coPasar(did, opts = {}) {
           ${r.recepciones.length ? '<button class="ac-go" id="pc-rec">📦 Recibir la mercancía ahora</button>' : ''}
           <button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`;
         $('#pc-fi').onclick = () => coFichas({ pedido_id: r.pedido_id });
-        const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(r.recepciones, did);
+        const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(r.recepciones, did, r.pedido);
         $('#pc-go').remove(); coDocs();
       } catch (e) { alertBox(e.message); $('#pc-go').disabled = false; $('#pc-go').textContent = '✓ Cuadrar y confirmar pedido'; }
     };
@@ -300,10 +300,10 @@ function coRecRender() {
   });
 }
 $('#co-rq').oninput = coRecRender;
-async function coRecibirDe(refs, did) {   // abrir la recepción de un pedido recién cuadrado, con su albarán
+async function coRecibirDe(refs, did, pedido) {   // abrir la recepción de un pedido recién cuadrado, con su albarán
   try {
     const recs = await api(`/api/compras/recepciones?company=${company}`); CO_RECS = recs;
-    const r = recs.find(x => refs.includes(x.ref));
+    const r = recs.find(x => refs.includes(x.ref)) || (pedido && recs.find(x => (x.pedido || '').split(' ')[0] === pedido));
     if (!r) { alertBox('Esa entrada ya no está pendiente de recibir'); return; }
     if (did) { const d = (await api(`/api/compras/docs?company=${company}`)).find(x => x.id === did); if (d) CO_ALB = d; }
     coRecibirOpen(r);
