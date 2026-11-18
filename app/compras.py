@@ -1198,7 +1198,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
 {('<ul>' + ''.join(f'<li>{t}</li>' for t in tareas) + '</ul>') if tareas else ''}</div>
 {('<div class="caja ok"><b>Hecho:</b><ul>' + ''.join(f'<li>{h}</li>' for h in hechas) + '</ul></div>') if hechas else ''}
 {''.join(sec) or '<p class="sub">Todavía no se ha cuadrado ni recibido nada de este albarán.</p>'}
-<div class="bot"><button onclick="print()">🖨 Imprimir</button></div></div></body></html>"""
+<div class="bot"><button onclick="print()">🖨 Imprimir</button></div></div>
+<script>let _v=0;document.addEventListener('visibilitychange',()=>{{if(document.visibilityState==='visible'&&Date.now()-_v>3000){{_v=Date.now();location.reload();}}}});</script></body></html>"""
         return HTMLResponse(html)
 
     def calc_servir(prods, cids):
@@ -1227,6 +1228,21 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         except Exception:
             pass
         return servir, servir_pedidos
+
+    @app.get("/api/compras/servir/{did}")
+    def servir_vivo(did: str, request: Request):
+        """Lo que se puede servir ahora con lo que entró en la recepción de este albarán (en vivo)."""
+        _, cids = ctx(request, "all")
+        with con() as c:
+            r = c.execute("SELECT recepcion FROM docs WHERE id=?", (did,)).fetchone()
+        rec = json.loads(r["recepcion"]) if r and r["recepcion"] else {}
+        if not rec.get("picking_id"):
+            return []
+
+        def run():
+            pr = {m["product_id"][0] for m in odoo.search_read("stock.move", [("picking_id", "=", rec["picking_id"]), ("quantity", ">", 0)], ["product_id"], company_ids=cids)}
+            return calc_servir(pr, cids)[1] if pr else []
+        return guard(run)
 
     def servir_html(sp, e, n):
         """Lo que se puede servir con lo recibido, en tarjetas: clientes que salen enteros, tiendas y clientes con más cosas pendientes.

@@ -368,8 +368,13 @@ function coRecibirOpen(r) {
         ${(res.faltas || []).length ? '<br>' + res.faltas.map(f => `${escH(f.articulo)} (${f.cant}) → ${f.a === 'eliminado' ? 'eliminado' : escH(f.a)}`).join('<br>') : ''}
         <br>📄 El albarán queda guardado para que Mayte lo cuadre con la factura.
         ${res.informe ? `<br><a class="btn" target="_blank" href="/compras/informe/${res.informe}">📄 Ver el informe del albarán</a>` : ''}</div>
-        ${(res.servir_pedidos || []).length ? coServirHTML(res.servir_pedidos) : res.servir.length ? '<p>Hay cosas que servir: <a class="btn" href="#ac">Panel AC</a></p>' : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
+        ${(res.servir_pedidos || []).length ? `<div id="co-sv">${coServirHTML(res.servir_pedidos)}</div>` : res.servir.length ? '<p>Hay cosas que servir: <a class="btn" href="#ac">Panel AC</a></p>' : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
       $('#co-ok').remove(); coRec();
+      if (res.informe && (res.servir_pedidos || []).length) {   // al volver del Panel AC se actualiza: lo ya servido desaparece
+        const upd = async () => { const b = $('#co-sv'); if (!b || document.visibilityState !== 'visible') return;
+          try { const sp = await api('/api/compras/servir/' + res.informe); b.innerHTML = sp.length ? coServirHTML(sp) : '<p class="muted">✓ Ya está todo servido.</p>'; } catch (e) { } };
+        document.addEventListener('visibilitychange', upd);
+      }
     } catch (e) { alertBox(e.message); $('#co-ok').disabled = false; $('#co-ok').textContent = '✓ Recibir en Odoo'; }
   };
   $('#co-drawer').hidden = false;
