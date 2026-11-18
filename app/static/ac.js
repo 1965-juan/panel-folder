@@ -96,7 +96,11 @@ function acKey(g, l) { return g.tipo + ':' + l.line_id; }
 // albaranes pendientes de imprimir de un pedido (los da el Panel AC de Odoo); al imprimirlos o marcarlos se quitan del panel
 function acDocsDe(g) { const m = new Map(); g.lines.forEach(l => (l.pending_print_docs || []).forEach(x => m.set(x.id, x))); return [...m.values()]; }
 async function acImpreso(ids) {
-  try { await jpost(`/api/ac/impreso?company=${company}`, { picking_ids: ids }); } catch (e) { return alertBox(e.message); }
+  const tiene = l => (l.pending_print_docs || []).some(x => ids.includes(x.id));
+  const lineas = [], movimientos = [];
+  (AC.orders || []).forEach(o => o.lines.forEach(l => { if (tiene(l)) lineas.push(l.line_id); }));
+  (AC.reposicion || []).forEach(o => o.lines.forEach(l => { if (tiene(l)) movimientos.push(l.move_id); }));
+  try { await jpost(`/api/ac/impreso?company=${company}`, { picking_ids: ids, lineas, movimientos }); } catch (e) { return alertBox(e.message); }
   const quita = o => { o.lines.forEach(l => { if (l.pending_print_docs) l.pending_print_docs = l.pending_print_docs.filter(x => !ids.includes(x.id)); });
     o.lines = o.lines.filter(l => l.qty_pending > 0 || (l.pending_print_docs || []).length); };
   (AC.orders || []).forEach(quita); (AC.reposicion || []).forEach(quita);

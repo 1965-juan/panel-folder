@@ -183,12 +183,29 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
         _, cids = ctx(request, company)
         b = await body(request)
         ids = [int(x) for x in b.get("picking_ids") or []]
+        T = [1, 2, 3, 4, 5]
 
         def run():
-            ps = odoo.search_read("stock.picking", [("id", "in", ids)], ["company_id"], company_ids=[1, 2, 3, 4, 5]) if ids else []
+            import json as _j
+            ps = odoo.search_read("stock.picking", [("id", "in", ids)], ["company_id"], company_ids=T) if ids else []
             for p in ps:
                 odoo.call("stock.picking", "write", [p["company_id"][0]], ids=[p["id"]], vals={"printed": True})
-            return {"ok": True, "marcados": len(ps)}
+            # el Panel AC de Odoo guarda en cada línea (ac_pending_print_docs) los albaranes que faltan por imprimir: se quitan esos
+            n = 0
+            for model, key in (("sale.order.line", "lineas"), ("stock.move", "movimientos")):
+                rids = [int(x) for x in b.get(key) or []]
+                if not rids:
+                    continue
+                for r in odoo.search_read(model, [("id", "in", rids)], ["ac_pending_print_docs", "company_id"], company_ids=T):
+                    try:
+                        docs = _j.loads(r.get("ac_pending_print_docs") or "[]")
+                    except Exception:
+                        continue
+                    resto = [d for d in docs if int(d.get("id") or 0) not in ids]
+                    if len(resto) != len(docs):
+                        odoo.call(model, "write", [r["company_id"][0]], ids=[r["id"]], vals={"ac_pending_print_docs": _j.dumps(resto) if resto else False})
+                        n += 1
+            return {"ok": True, "marcados": len(ps), "lineas": n}
         return guard(run)
 
     @app.get("/api/ac/proveedor/{product_id}")
