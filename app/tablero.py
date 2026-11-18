@@ -189,6 +189,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
             for c in out:
                 c["total"] = round(c["total"], 2)
                 c["lineas"].sort(key=lambda x: x["articulo"].lower())
+                c["lanzados"] = [z for z in c["lanzados"] if z["lineas"]]   # sin nada por llegar: fuera
                 c["lanzados"].sort(key=lambda x: x["fecha"], reverse=True)
             return {"columnas": out, "odoo_url": odoo_url}
         return guard(run)
