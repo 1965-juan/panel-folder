@@ -177,6 +177,20 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             return out
         return guard(run)
 
+    @app.post("/api/ac/impreso")
+    async def ac_impreso(request: Request, company: str = "all"):
+        """Marca los albaranes como impresos (lo que usa el Panel AC para quitarlos de «Pend. imprimir»)."""
+        _, cids = ctx(request, company)
+        b = await body(request)
+        ids = [int(x) for x in b.get("picking_ids") or []]
+
+        def run():
+            ps = odoo.search_read("stock.picking", [("id", "in", ids)], ["company_id"], company_ids=[1, 2, 3, 4, 5]) if ids else []
+            for p in ps:
+                odoo.call("stock.picking", "write", [p["company_id"][0]], ids=[p["id"]], vals={"printed": True})
+            return {"ok": True, "marcados": len(ps)}
+        return guard(run)
+
     @app.get("/api/ac/proveedor/{product_id}")
     def ac_proveedor(product_id: int, request: Request, company: str = "all"):
         _, cids = ctx(request, company)

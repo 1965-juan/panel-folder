@@ -80,8 +80,11 @@ function acRender() {
     const odooHref = g.tipo === 'cliente' ? `${ODOO}/odoo/sale.order/${g.id}` : `${ODOO}/odoo/action-stock.action_picking_tree_all/${g.id}`;
     h.innerHTML = `<td colspan="${ncol}"><div class="ordin"><b>${escH(g.ref)}</b><span class="nm">${escH(g.nombre)}</span><span class="muted">${escH(g.fecha)}</span>${tags}
       <span class="muted">${g.lines.length} línea${g.lines.length > 1 ? 's' : ''}</span>
+      ${acDocsDe(g).length ? `<span class="ac-pr">${acDocsDe(g).map(x => `<a class="lnk" data-pr="${x.id}" target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name)}</a>`).join(' ')}<button class="lnk" data-oc title="Quitar del panel sin imprimir">✓ Ya impreso</button></span>` : ''}
       <span class="sp"><button class="lnk" data-add>+ Añadir artículo</button><button class="lnk" data-auto>Rellenar desde stock</button><a class="lnk" target="_blank" rel="noopener" href="${odooHref}">Abrir en Odoo</a></span></div></td>`;
     h.querySelector('[data-add]').onclick = () => acAddOpen(g);
+    h.querySelectorAll('[data-pr]').forEach(a => a.addEventListener('click', () => setTimeout(() => acImpreso([+a.dataset.pr]), 300)));
+    const oc = h.querySelector('[data-oc]'); if (oc) oc.onclick = () => acImpreso(acDocsDe(g).map(x => x.id));
     h.querySelector('[data-auto]').onclick = () => { lines.forEach(l => acAuto(g, l)); acRender(); };
     tb.appendChild(h);
     lines.forEach((l, i) => tb.appendChild(acLine(g, l, locs, i)));
@@ -90,6 +93,16 @@ function acRender() {
   const c = acSelCount(); $('#ac-ok').disabled = !c; $('#ac-ok').textContent = c ? `✓ Validar selección (${c})` : '✓ Validar selección';
 }
 function acKey(g, l) { return g.tipo + ':' + l.line_id; }
+// albaranes pendientes de imprimir de un pedido (los da el Panel AC de Odoo); al imprimirlos o marcarlos se quitan del panel
+function acDocsDe(g) { const m = new Map(); g.lines.forEach(l => (l.pending_print_docs || []).forEach(x => m.set(x.id, x))); return [...m.values()]; }
+async function acImpreso(ids) {
+  try { await jpost(`/api/ac/impreso?company=${company}`, { picking_ids: ids }); } catch (e) { return alertBox(e.message); }
+  const quita = o => { o.lines.forEach(l => { if (l.pending_print_docs) l.pending_print_docs = l.pending_print_docs.filter(x => !ids.includes(x.id)); });
+    o.lines = o.lines.filter(l => l.qty_pending > 0 || (l.pending_print_docs || []).length); };
+  (AC.orders || []).forEach(quita); (AC.reposicion || []).forEach(quita);
+  AC.orders = AC.orders.filter(o => o.lines.length); AC.reposicion = AC.reposicion.filter(o => o.lines.length);
+  acRender();
+}
 function acAuto(g, l) {
   let falta = l.qty_pending; const t = {};
   const locs = acLocs().filter(x => !x.read_only).sort((a, b) => (b.is_central - a.is_central));
@@ -168,8 +181,9 @@ async function acValidar(keys) {
     acRender();
     const d = $('#ac-docs');
     d.innerHTML = `<b>✓ Validado.</b> ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
-      ${r.documents.length ? '<span>Para imprimir:</span> ' + r.documents.map(x => `<a target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name || x.type || 'documento')}</a>`).join(' ') : ''}
+      ${r.documents.length ? '<span>Para imprimir:</span> ' + r.documents.map(x => `<a data-pr="${x.id}" target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name || x.type || 'documento')}</a>`).join(' ') : ''}
       <button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
+    d.querySelectorAll('[data-pr]').forEach(a => a.addEventListener('click', () => setTimeout(() => acImpreso([+a.dataset.pr]), 300)));
     d.hidden = false;
     acLoad();
   } catch (e) { alertBox(e.message); acRender(); }
