@@ -169,6 +169,8 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, data_dir=None):
                     col["total"] += p.get("amount_untaxed") or 0
             po_partner = {p["id"]: p["partner_id"][0] for p in pos}
             for l in ls:
+                if l["order_id"][0] in lanzados and (l["product_qty"] <= 0 or (l.get("qty_received") or 0) >= l["product_qty"]):
+                    continue   # en los lanzados solo lo que falta por llegar (fuera líneas a 0 y lo ya recibido)
                 pr = prods.get(l["product_id"][0], {})
                 alt = por_tmpl.get((pr.get("product_tmpl_id") or [0])[0], {})
                 dst = lanzados[l["order_id"][0]]["lineas"] if l["order_id"][0] in lanzados else cols[po_partner[l["order_id"][0]]]["lineas"]
