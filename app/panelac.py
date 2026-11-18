@@ -34,6 +34,17 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             d["orders"] = [o for o in d.get("orders", []) if not (extra.get(o["order_id"]) and (extra[o["order_id"]].get("company_id") or [1])[0] != 1
                                                                  and (extra[o["order_id"]].get("partner_id") or [0])[0] in propias())]
             quitar_pedidos_entre_empresas(d)
+            # reposiciones ya hechas (movimiento validado): el Panel AC de Odoo a veces las sigue dando como pendientes; se ponen como entregadas
+            try:
+                mids = [l["move_id"] for o in d.get("reposicion", []) for l in o.get("lines", []) if l.get("move_id")]
+                hechos_mv = {m["id"] for m in odoo.search_read("stock.move", [("id", "in", mids), ("state", "in", ["done", "cancel"])], ["id"], company_ids=TODAS)} if mids else set()
+                for o in d.get("reposicion", []):
+                    for l in o.get("lines", []):
+                        if l.get("move_id") in hechos_mv:
+                            l["qty_delivered"] = l.get("qty_ordered") or l.get("qty_delivered") or 0
+                            l["qty_pending"] = 0
+            except Exception:
+                pass
             # albaranes ya impresos (desde Odoo o desde el panel: Odoo los marca "impreso"): fuera de pendientes de imprimir
             try:
                 pids = {x["id"] for k in ("orders", "reposicion") for o in d.get(k, []) for l in o.get("lines", []) for x in (l.get("pending_print_docs") or [])}
