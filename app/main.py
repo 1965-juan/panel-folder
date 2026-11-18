@@ -1097,6 +1097,8 @@ async def admin_po_ajustar(request: Request):
                 v["product_qty"] = float(x["qty"])
             if x.get("price") is not None:
                 v["price_unit"] = float(x["price"])
+            if x.get("discount") is not None:
+                v["discount"] = float(x["discount"])
             if v:
                 odoo.call("purchase.order.line", "write", [c], ids=[int(x["line_id"])], vals=v)
         if b.get("quitar"):
