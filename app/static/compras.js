@@ -315,17 +315,17 @@ function coRecibirOpen(r) {
   db.innerHTML = `<h3>${escH(r.ref)} · ${escH(r.proveedor)}</h3><p class="muted">${escH(r.pedido || r.origen)} · ${escH(r.empresa)}${CO_ALB ? ` · albarán: <a target="_blank" rel="noopener" href="/api/compras/pdf/${CO_ALB.id}">${escH(CO_ALB.nombre)}</a>` : ''}</p>
     ${CO_ALB ? `<iframe class="co-pdf" src="/api/compras/pdf/${CO_ALB.id}#view=FitH"></iframe>` : '<p class="hint">Consejo: elige primero el PDF en "Albaranes subidos sin recibir" y quedará adjunto a la recepción en Odoo.</p>'}
     <label class="co-alb-n">Nº de albarán del proveedor <input id="co-an" placeholder="A-695686"></label>
-    <div class="co-q"><button class="lnk" id="co-todo">Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button></div>
+    <div class="co-q"><button class="lnk" id="co-todo">Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button> <span id="co-avq" class="bdg b-ok" hidden></span></div>
     <table class="co-t"><thead><tr><th>Artículo</th><th>Pedido</th><th>Ha llegado</th><th>Si no ha llegado todo</th></tr></thead><tbody>${r.lineas.map(l => `<tr><td></td><td>${l.pedido}</td>
-      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="${l.pedido}"></td><td><select class="co-dst" data-d="${l.move_id}" hidden></select></td></tr>`).join('')}</tbody></table>
+      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="" placeholder="${l.pedido}"></td><td><select class="co-dst" data-d="${l.move_id}" hidden></select></td></tr>`).join('')}</tbody></table>
     <div class="co-falta"><b>Lo que no haya llegado</b> <span class="muted">(se puede cambiar línea a línea)</span>: <select id="co-dg"></select></div>
     <button id="co-ok" class="ac-go">✓ Recibir en Odoo</button><div id="co-res"></div>`;
   db.querySelectorAll('tbody tr').forEach((tr, i) => tr.firstChild.textContent = r.lineas[i].producto);
-  let OPC = [['pendiente', 'Queda pendiente en este pedido (vendrá más tarde)'], ['nuevo', 'Pasar a un pedido nuevo sin lanzar'], ['cancelar', 'No vendrá: eliminarlo']];
+  let OPC = [['pendiente', 'Sigue pendiente en este pedido (llegará más tarde)'], ['nuevo', 'Dejar para el próximo pedido (nuevo, sin lanzar)'], ['cancelar', 'No vendrá: eliminarlo']];
   const opts = v => OPC.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${escH(t)}</option>`).join('');
   const dg = $('#co-dg');
   const refresca = () => db.querySelectorAll('tbody tr').forEach((tr, k) => {
-    const i = tr.querySelector('input[data-m]'), s = tr.querySelector('select[data-d]'), falta = (parseFloat(i.value) || 0) < r.lineas[k].pedido;
+    const i = tr.querySelector('input[data-m]'), s = tr.querySelector('select[data-d]'), falta = i.value !== '' && (parseFloat(i.value) || 0) < r.lineas[k].pedido;
     if (falta && s.hidden) { s.innerHTML = opts(dg.value); } s.hidden = !falta; tr.classList.toggle('co-falta-l', falta);
   });
   dg.innerHTML = opts('pendiente');
@@ -333,15 +333,21 @@ function coRecibirOpen(r) {
   db.querySelectorAll('input[data-m]').forEach(i => i.oninput = refresca);
   api(`/api/compras/recibir/destinos?picking_id=${r.id}&company=${company}`).then(ps => {
     if (!ps.length) return;
-    OPC = OPC.slice(0, 2).concat(ps.map(p => ['po:' + p.id, `Pasar a ${p.name} (${p.lanzado ? 'lanzado' : 'sin lanzar'}, ${eur(p.base)})`]), OPC.slice(2));
+    const bor = ps.filter(p => !p.lanzado), lan = ps.filter(p => p.lanzado);
+    OPC = [OPC[0]].concat(bor.map(p => ['po:' + p.id, `Dejar para el próximo pedido ${p.name} (sin lanzar, ${eur(p.base)})`]),
+      bor.length ? [] : [OPC[1]], lan.map(p => ['po:' + p.id, `Pasar a ${p.name} (ya lanzado, ${eur(p.base)})`]), [OPC[OPC.length - 1]]);
     const v = dg.value; dg.innerHTML = opts(v);
     db.querySelectorAll('select[data-d]').forEach(s => { const x = s.value; s.innerHTML = opts(x); });
   }).catch(() => {});
-  $('#co-todo').onclick = () => { db.querySelectorAll('input[data-m]').forEach((i, k) => i.value = r.lineas[k].pedido); refresca(); };
-  $('#co-nada').onclick = () => { db.querySelectorAll('input[data-m]').forEach(i => i.value = 0); refresca(); };
+  const avisa = t => { const b = $('#co-avq'); b.textContent = t; b.hidden = false; clearTimeout(b._t); b._t = setTimeout(() => b.hidden = true, 2500); };
+  $('#co-todo').onclick = () => { db.querySelectorAll('input[data-m]').forEach((i, k) => i.value = r.lineas[k].pedido); refresca(); avisa(`✓ Marcado como llegado todo (${r.lineas.length} líneas)`); };
+  $('#co-nada').onclick = () => { db.querySelectorAll('input[data-m]').forEach(i => i.value = 0); refresca(); avisa('Todo a 0: pon lo que ha llegado'); };
   $('#co-ok').onclick = async () => {
+    const vac = [...db.querySelectorAll('input[data-m]')].filter(i => i.value === '').length;
+    if (vac && !confirm(`Hay ${vac} línea(s) sin rellenar: se tomarán como NO llegadas. ¿Seguir? (Si ha llegado todo, pulsa «Ha llegado todo»)`)) return;
     const cant = {}, destinos = {}; db.querySelectorAll('input[data-m]').forEach(i => cant[i.dataset.m] = parseFloat(i.value) || 0);
     db.querySelectorAll('select[data-d]').forEach(s => { if (!s.hidden) destinos[s.dataset.d] = s.value; });
+    db.querySelectorAll('input[data-m]').forEach(i => { if (i.value === '') destinos[i.dataset.m] = dg.value; });
     const nd = Object.values(destinos).filter(v => v === 'cancelar').length;
     if (nd && !confirm(`${nd} línea(s) que no han llegado se eliminarán del pedido. ¿Seguir?`)) return;
     $('#co-ok').disabled = true; $('#co-ok').textContent = 'Recibiendo…';
