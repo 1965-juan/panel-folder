@@ -1341,8 +1341,9 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 return []
             pk = pk[0]
             com = odoo.search_read("res.partner", [("id", "=", pk["partner_id"][0])], ["commercial_partner_id"], company_ids=cids)[0]["commercial_partner_id"][0]
-            ps = odoo.search_read("purchase.order", [("partner_id", "child_of", com), ("state", "in", ["draft", "sent", "purchase"]),
-                                                     ("company_id", "=", pk["company_id"][0]), ("id", "!=", (pk.get("purchase_id") or [0])[0])],
+            ps = odoo.search_read("purchase.order", [("partner_id", "child_of", com), ("company_id", "=", pk["company_id"][0]),
+                                                     ("id", "!=", (pk.get("purchase_id") or [0])[0]),
+                                                     "|", ("state", "in", ["draft", "sent"]), "&", ("state", "=", "purchase"), ("receipt_status", "in", ["pending", "partial"])],
                                   ["name", "state", "amount_untaxed", "origin", "date_order"], company_ids=[pk["company_id"][0]], order="id desc", limit=15)
             return [{"id": p["id"], "name": p["name"], "lanzado": p["state"] == "purchase", "base": p["amount_untaxed"], "origen": p.get("origin") or ""} for p in ps]
         return guard(run)
