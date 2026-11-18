@@ -117,7 +117,10 @@ async function coPasar(did, opts = {}) {
   const lec = d.lectura || {};
   const eu = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €';
   const fiBtn = (ref) => { db.insertAdjacentHTML('beforeend', `<button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`); $('#pc-fi').onclick = () => coFichas(ref); };
-  if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>`; fiBtn({ pedido: d.compra.pedido }); return; }
+  if (d.compra) { db.innerHTML = `<h3>Ya está cuadrado</h3><div class="ac-docs">Pedido <b>${escH(d.compra.pedido)}</b> · entrada ${escH((d.compra.recepciones || []).join(', ') || '—')}${d.compra.pendiente ? ` · lo que no vino está en ${escH(d.compra.pendiente)}` : ''}</div>
+    ${(d.compra.recepciones || []).length ? '<button class="ac-go" id="pc-rec">📦 Recibir la mercancía ahora</button>' : ''}`;
+    const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(d.compra.recepciones, did);
+    fiBtn({ pedido: d.compra.pedido }); return; }
   if (d.ya_cuadrado) { db.innerHTML = `<h3>Ya está en compras</h3><div class="ac-docs">El documento ${escH(lec.numero)} ya está en el pedido confirmado <b>${escH(d.ya_cuadrado)}</b>. Recíbelo desde Recepciones.</div>`; fiBtn({ pedido: d.ya_cuadrado }); return; }
   const L = d.lineas || [];
   const cab = `<h3>Cuadrar con el pedido · ${escH(d.doc.nombre)}</h3>
@@ -198,8 +201,10 @@ async function coPasar(did, opts = {}) {
           ${r.anadidas.length ? `<br>Añadidas al pedido: ${r.anadidas.map(escH).join(', ')}.` : ''}
           ${r.factura ? '<br>' + escH(r.factura) : ''}${r.avisos.map(a => `<br>⚠️ ${escH(a)}`).join('')}</div>
           <a class="btn" target="_blank" href="/compras/informe/${did}">📄 Informe para almacén (cambios y pendiente)</a>
+          ${r.recepciones.length ? '<button class="ac-go" id="pc-rec">📦 Recibir la mercancía ahora</button>' : ''}
           <button class="ac-go" id="pc-fi">📷 Completar fichas (fotos y datos del fabricante)</button>`;
         $('#pc-fi').onclick = () => coFichas({ pedido_id: r.pedido_id });
+        const br = $('#pc-rec'); if (br) br.onclick = () => coRecibirDe(r.recepciones, did);
         $('#pc-go').remove(); coDocs();
       } catch (e) { alertBox(e.message); $('#pc-go').disabled = false; $('#pc-go').textContent = '✓ Cuadrar y confirmar pedido'; }
     };
@@ -293,6 +298,15 @@ function coRecRender() {
   });
 }
 $('#co-rq').oninput = coRecRender;
+async function coRecibirDe(refs, did) {   // abrir la recepción de un pedido recién cuadrado, con su albarán
+  try {
+    const recs = await api(`/api/compras/recepciones?company=${company}`); CO_RECS = recs;
+    const r = recs.find(x => refs.includes(x.ref));
+    if (!r) { alertBox('Esa entrada ya no está pendiente de recibir'); return; }
+    if (did) { const d = (await api(`/api/compras/docs?company=${company}`)).find(x => x.id === did); if (d) CO_ALB = d; }
+    coRecibirOpen(r);
+  } catch (e) { alertBox(e.message); }
+}
 function coRecibirOpen(r) {
   if (!CO_ALB && r.doc) CO_ALB = r.doc;
   const db = $('#co-db');
@@ -300,23 +314,42 @@ function coRecibirOpen(r) {
     ${CO_ALB ? `<iframe class="co-pdf" src="/api/compras/pdf/${CO_ALB.id}#view=FitH"></iframe>` : '<p class="hint">Consejo: elige primero el PDF en "Albaranes subidos sin recibir" y quedará adjunto a la recepción en Odoo.</p>'}
     <label class="co-alb-n">Nº de albarán del proveedor <input id="co-an" placeholder="A-695686"></label>
     <div class="co-q"><button class="lnk" id="co-todo">Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button></div>
-    <table class="co-t"><thead><tr><th>Artículo</th><th>Pedido</th><th>Ha llegado</th></tr></thead><tbody>${r.lineas.map(l => `<tr><td></td><td>${l.pedido}</td>
-      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="${l.pedido}"></td></tr>`).join('')}</tbody></table>
-    <div class="co-falta"><b>Lo que no haya llegado:</b>
-      <label><input type="radio" name="co-f" value="pendiente" checked> Queda <b>pendiente de recibir</b> (vendrá más tarde: sale una entrada nueva en Recepciones)</label>
-      <label><input type="radio" name="co-f" value="cancelar"> <b>No vendrá: cancelarlo</b> (no queda nada pendiente de este pedido)</label></div>
+    <table class="co-t"><thead><tr><th>Artículo</th><th>Pedido</th><th>Ha llegado</th><th>Si no ha llegado todo</th></tr></thead><tbody>${r.lineas.map(l => `<tr><td></td><td>${l.pedido}</td>
+      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="${l.pedido}"></td><td><select class="co-dst" data-d="${l.move_id}" hidden></select></td></tr>`).join('')}</tbody></table>
+    <div class="co-falta"><b>Lo que no haya llegado</b> <span class="muted">(se puede cambiar línea a línea)</span>: <select id="co-dg"></select></div>
     <button id="co-ok" class="ac-go">✓ Recibir en Odoo</button><div id="co-res"></div>`;
   db.querySelectorAll('tbody tr').forEach((tr, i) => tr.firstChild.textContent = r.lineas[i].producto);
-  $('#co-todo').onclick = () => db.querySelectorAll('input[data-m]').forEach((i, k) => i.value = r.lineas[k].pedido);
-  $('#co-nada').onclick = () => db.querySelectorAll('input[data-m]').forEach(i => i.value = 0);
+  let OPC = [['pendiente', 'Queda pendiente en este pedido (vendrá más tarde)'], ['nuevo', 'Pasar a un pedido nuevo sin lanzar'], ['cancelar', 'No vendrá: eliminarlo']];
+  const opts = v => OPC.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${escH(t)}</option>`).join('');
+  const dg = $('#co-dg');
+  const refresca = () => db.querySelectorAll('tbody tr').forEach((tr, k) => {
+    const i = tr.querySelector('input[data-m]'), s = tr.querySelector('select[data-d]'), falta = (parseFloat(i.value) || 0) < r.lineas[k].pedido;
+    if (falta && s.hidden) { s.innerHTML = opts(dg.value); } s.hidden = !falta; tr.classList.toggle('co-falta-l', falta);
+  });
+  dg.innerHTML = opts('pendiente');
+  dg.onchange = () => db.querySelectorAll('select[data-d]').forEach(s => { s.innerHTML = opts(dg.value); });
+  db.querySelectorAll('input[data-m]').forEach(i => i.oninput = refresca);
+  api(`/api/compras/recibir/destinos?picking_id=${r.id}&company=${company}`).then(ps => {
+    if (!ps.length) return;
+    OPC = OPC.slice(0, 2).concat(ps.map(p => ['po:' + p.id, `Pasar a ${p.name} (${p.lanzado ? 'lanzado' : 'sin lanzar'}, ${eur(p.base)})`]), OPC.slice(2));
+    const v = dg.value; dg.innerHTML = opts(v);
+    db.querySelectorAll('select[data-d]').forEach(s => { const x = s.value; s.innerHTML = opts(x); });
+  }).catch(() => {});
+  $('#co-todo').onclick = () => { db.querySelectorAll('input[data-m]').forEach((i, k) => i.value = r.lineas[k].pedido); refresca(); };
+  $('#co-nada').onclick = () => { db.querySelectorAll('input[data-m]').forEach(i => i.value = 0); refresca(); };
   $('#co-ok').onclick = async () => {
-    const cant = {}; db.querySelectorAll('input[data-m]').forEach(i => cant[i.dataset.m] = parseFloat(i.value) || 0);
+    const cant = {}, destinos = {}; db.querySelectorAll('input[data-m]').forEach(i => cant[i.dataset.m] = parseFloat(i.value) || 0);
+    db.querySelectorAll('select[data-d]').forEach(s => { if (!s.hidden) destinos[s.dataset.d] = s.value; });
+    const nd = Object.values(destinos).filter(v => v === 'cancelar').length;
+    if (nd && !confirm(`${nd} línea(s) que no han llegado se eliminarán del pedido. ¿Seguir?`)) return;
     $('#co-ok').disabled = true; $('#co-ok').textContent = 'Recibiendo…';
     try {
-      const res = await jpost(`/api/compras/recibir?company=${company}`, { picking_id: r.id, cantidades: cant, albaran: $('#co-an').value.trim(), doc_id: CO_ALB && CO_ALB.id, faltan: (db.querySelector('input[name=co-f]:checked') || {}).value });
+      const res = await jpost(`/api/compras/recibir?company=${company}`, { picking_id: r.id, cantidades: cant, albaran: $('#co-an').value.trim(), doc_id: CO_ALB && CO_ALB.id, faltan: dg.value === 'cancelar' ? 'cancelar' : 'pendiente', destinos });
       CO_ALB = null;
       if (res.informe) window.open('/compras/informe/' + res.informe, '_blank');
       $('#co-res').innerHTML = `<div class="ac-docs"><b>✓ Recibido en Odoo.</b> ${res.queda_pendiente ? 'Lo que faltaba queda pendiente de recibir.' : 'No queda nada pendiente de esta entrada.'}
+        ${(res.faltas || []).length ? '<br>' + res.faltas.map(f => `${escH(f.articulo)} (${f.cant}) → ${f.a === 'eliminado' ? 'eliminado' : escH(f.a)}`).join('<br>') : ''}
+        <br>📄 El albarán queda guardado para que Mayte lo cuadre con la factura.
         ${res.informe ? `<br><a class="btn" target="_blank" href="/compras/informe/${res.informe}">📄 Ver el informe del albarán</a>` : ''}</div>
         ${res.servir.length ? `<h4>Ya se puede servir</h4><table class="co-t"><thead><tr><th>Para</th><th>Pedido</th><th>Artículo</th><th>Pend.</th></tr></thead><tbody>${res.servir.map(s => `<tr><td>${escH(s.quien)}</td><td>${escH(s.ref)}</td><td>${escH(s.producto)}</td><td>${s.pendiente}</td></tr>`).join('')}</tbody></table>
           <a class="btn" href="#ac" onclick="$('#co-drawer').hidden=true">Ir al Panel AC a servirlo</a>` : '<p class="muted">Nadie lo tenía pedido: queda en stock.</p>'}`;
@@ -382,17 +415,22 @@ async function coFacCuadrar(x) {
   db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Buscando pedidos de este proveedor…</p>`;
   try {
     const d = await api(`/api/compras/facturas/${x.id}/pedidos`);
-    db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Factura ${escH(d.factura.ref || '')} · base ${eur(d.factura.base)}. Elige el pedido al que corresponde: las líneas de la factura pasan a ser las del pedido y ya se puede comprobar con lo que ha llegado.</p>
-      ${d.pedidos.length ? d.pedidos.map(p => `<div class="co-alb ${p.coincide ? 'on' : ''}"><span class="ic">🛒</span><div><b>${escH(p.name)}</b> ${p.coincide ? '<span class="bdg b-ok">mismo nº de documento</span>' : ''}
-        <small class="muted">${escH(p.empresa || '')} · ${coDate(p.fecha)} · base ${eur(p.base)} · ${escH(p.ref)} · ${p.recibido === 'full' ? 'recibido' : p.recibido === 'partial' ? 'recibido en parte' : 'sin recibir'}</small></div>
-        <button class="lnk" data-p="${p.id}">Cuadrar con este</button></div>`).join('')
+    db.innerHTML = `<h3>Cuadrar factura · ${escH(x.proveedor)}</h3><p class="muted">Factura ${escH(d.factura.ref || '')} · base ${eur(d.factura.base)}. Marca el albarán o los albaranes (pedidos) que incluye esta factura: sus líneas pasan a ser lo recibido de ellos y se comprueba con lo que ha llegado.</p>
+      ${d.pedidos.length ? d.pedidos.map(p => `<label class="co-alb ${p.coincide ? 'on' : ''}"><input type="checkbox" data-p="${p.id}" data-b="${p.base}" ${p.coincide ? 'checked' : ''}><span class="ic">🛒</span><div><b>${escH(p.name)}</b> ${p.ref ? `· albarán <b>${escH(p.ref)}</b>` : ''} ${p.coincide ? '<span class="bdg b-ok">mismo nº de documento</span>' : ''}
+        <small class="muted">${escH(p.empresa || '')} · ${coDate(p.fecha)} · base ${eur(p.base)} · ${p.recibido === 'full' ? 'recibido' : p.recibido === 'partial' ? 'recibido en parte' : 'sin recibir'}</small></div></label>`).join('')
+        + `<p id="fc-sum" class="muted"></p><button class="ac-go" id="fc-go">✓ Cuadrar la factura con los marcados</button>`
       : '<p class="empty">Este proveedor no tiene pedidos pendientes de facturar. Si es material, primero súbelo como albarán y cuádralo con su pedido; si es un gasto, márcala como gasto.</p>'}`;
-    db.querySelectorAll('[data-p]').forEach(bt => bt.onclick = async () => {
-      bt.disabled = true;
-      try { const r = await jpost(`/api/compras/facturas/${x.id}/enlazar`, { pedido_id: +bt.dataset.p });
-        db.insertAdjacentHTML('beforeend', `<div class="ac-docs">✓ Factura cuadrada con ${escH(r.pedido)} · base ${eur(r.base)} (la del PDF era ${eur(x.base)}). Revisa la diferencia si la hay.</div>`); coFac(); coDocs();
-      } catch (e) { alertBox(e.message); bt.disabled = false; }
-    });
+    const chk = () => [...db.querySelectorAll('input[data-p]:checked')];
+    const suma = () => { const s = chk().reduce((a, i) => a + (+i.dataset.b), 0), dif = Math.round((d.factura.base - s) * 100) / 100;
+      $('#fc-sum') && ($('#fc-sum').innerHTML = chk().length ? `Marcados: ${chk().length} · suman ${eur(s)} · factura ${eur(d.factura.base)} · ${Math.abs(dif) < 0.02 ? '<b style="color:#1F7A4D">cuadra</b>' : `<b style="color:#b42318">diferencia ${eur(dif)}</b>`}` : 'Marca al menos uno'); };
+    db.querySelectorAll('input[data-p]').forEach(i => i.onchange = suma); suma();
+    const go = $('#fc-go'); if (go) go.onclick = async () => {
+      const ids = chk().map(i => +i.dataset.p); if (!ids.length) return alertBox('Marca al menos un albarán');
+      go.disabled = true;
+      try { const r = await jpost(`/api/compras/facturas/${x.id}/enlazar`, { pedido_ids: ids });
+        db.insertAdjacentHTML('beforeend', `<div class="ac-docs">✓ Factura cuadrada con ${escH(r.pedido)} · base ${eur(r.base)} (la del PDF era ${eur(x.base)}). Revisa la diferencia si la hay.</div>`); go.remove(); coFac(); coDocs();
+      } catch (e) { alertBox(e.message); go.disabled = false; }
+    };
   } catch (e) { db.innerHTML += `<p class="err">${escH(e.message)}</p>`; }
 }
 /* --- facturar albaranes (asistente de Nextdoo, con la empresa por defecto de cada cliente) --- */

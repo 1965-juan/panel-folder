@@ -48,6 +48,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             c.execute("ALTER TABLE docs ADD COLUMN recepcion TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            c.execute("ALTER TABLE docs ADD COLUMN factura_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
         return c
 
     # fotos de albaranes (móvil): se guardan tal cual y Claude las lee igual que un PDF
@@ -188,8 +192,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             n = json.loads(marca.get("nota") or "{}")
         except Exception:
             return None, False
-        po = odoo.search_read("purchase.order", [("id", "=", n.get("pedido_id"))], ["name", "receipt_status"], company_ids=TODAS)
-        return (po[0]["name"], po[0]["receipt_status"] == "full") if po else (n.get("pedido"), False)
+        ids = n.get("pedido_ids") or [n.get("pedido_id")]
+        po = odoo.search_read("purchase.order", [("id", "in", ids)], ["name", "receipt_status"], company_ids=TODAS)
+        return (", ".join(p["name"] for p in po), all(p["receipt_status"] == "full" for p in po)) if po else (n.get("pedido"), False)
 
     def empresa_del_pdf(lec, por_defecto):
         nif = re.sub(r"[^A-Z0-9]", "", (lec.get("nif_cliente") or "").upper())
@@ -1197,24 +1202,39 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
             c1 = [pk["company_id"][0]]
             if not any(v > 0 for v in cant.values()):
                 raise HTTPException(400, "No has puesto ninguna cantidad recibida")
+            mvs = {m["id"]: m for m in odoo.search_read("stock.move", [("id", "in", pk["move_ids"])],
+                                                          ["product_id", "product_uom_qty", "purchase_line_id"], company_ids=c1)}
+            # qué hacer con lo que no ha llegado, línea a línea: pendiente (misma entrada) | cancelar | po:<id> (otro pedido) | nuevo (pedido nuevo sin lanzar)
+            glob = "cancelar" if b.get("faltan") == "cancelar" else "pendiente"
+            dest_in = {int(k): v for k, v in (b.get("destinos") or {}).items()}
+            faltas = {}
+            for mid, m in mvs.items():
+                f = round(m["product_uom_qty"] - cant.get(mid, 0), 4)
+                if f > 0:
+                    faltas[mid] = (f, dest_in.get(mid) or glob)
             for mid in pk["move_ids"]:
                 q = cant.get(mid, 0)
                 odoo.call("stock.move", "write", c1, ids=[mid], vals={"quantity": q, "picked": q > 0})
             if b.get("albaran"):
                 odoo.call("stock.picking", "write", c1, ids=[pid], vals={"origin": f"{pk.get('origin') or ''} · Albarán {b['albaran']}".strip(" ·")})
+            todo_pend = all(d == "pendiente" for _, d in faltas.values())
             res = odoo.call("stock.picking", "button_validate", c1, ids=[pid])
             pendiente = False
             if isinstance(res, dict) and res.get("res_model") == "stock.backorder.confirmation":
                 wctx = dict(res.get("context") or {}, allowed_company_ids=c1)
                 w = odoo.call("stock.backorder.confirmation", "create", None, vals_list=[{}], context=wctx)
                 w = w[0] if isinstance(w, list) else w
-                if b.get("faltan") == "cancelar":   # lo que falta no vendrá: se cancela, no queda pendiente
-                    odoo.call("stock.backorder.confirmation", "process_cancel_backorder", None, ids=[w], context=wctx)
-                else:
+                if todo_pend:
                     odoo.call("stock.backorder.confirmation", "process", None, ids=[w], context=wctx)
                     pendiente = True
+                else:   # se cierra la entrada y cada falta se lleva a donde se ha dicho
+                    odoo.call("stock.backorder.confirmation", "process_cancel_backorder", None, ids=[w], context=wctx)
             elif isinstance(res, dict) and res.get("res_model"):
                 raise HTTPException(400, f"Odoo pide confirmar algo más ({res.get('name')}). Termínalo en Odoo.")
+            movidas = []
+            if faltas and not todo_pend:
+                movidas = repartir_faltas(pk, mvs, faltas, c1, b.get("albaran") or "")
+                pendiente = any(x["a"] for x in movidas if x["destino"] == "pendiente")
             # adjuntar el PDF del albarán a la recepción
             if b.get("doc_id"):
                 with con() as c:
@@ -1244,7 +1264,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 mv = odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id", "product_uom_qty"], company_ids=c1)
                 rec = {"picking": pk["name"], "picking_id": pid, "por": u_rec, "cuando": time.time(), "albaran": b.get("albaran") or "",
                        "lineas": [{"articulo": m["product_id"][1], "pedido": m["product_uom_qty"], "recibido": cant.get(m["id"], 0)} for m in mv],
-                       "queda_pendiente": pendiente, "cancelado": b.get("faltan") == "cancelar", "servir": servir}
+                       "queda_pendiente": pendiente, "cancelado": b.get("faltan") == "cancelar" or any(x["destino"] == "cancelar" for x in movidas),
+                       "servir": servir, "faltas": movidas}
                 po_id = (odoo.search_read("stock.picking", [("id", "=", pid)], ["purchase_id"], company_ids=c1)[0].get("purchase_id") or [0])[0]
                 with lock, con() as c:
                     dids = [b["doc_id"]] if b.get("doc_id") else []
@@ -1260,7 +1281,70 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 rec_doc = dids[0] if dids else None
             except Exception:
                 rec_doc = None
-            return {"ok": True, "queda_pendiente": pendiente, "servir": servir, "informe": rec_doc}
+            return {"ok": True, "queda_pendiente": pendiente, "servir": servir, "informe": rec_doc, "faltas": movidas}
+        return guard(run)
+
+    def repartir_faltas(pk, mvs, faltas, c1, albaran):
+        """Tras cerrar la entrada sin pendiente: rebaja en el pedido lo que no ha llegado (así el pedido = lo recibido, para cuadrar la factura)
+        y lo lleva a su destino: el mismo pedido (línea nueva, vuelve a salir en Recepciones), otro pedido abierto del proveedor o uno nuevo sin lanzar."""
+        po_id = (odoo.search_read("stock.picking", [("id", "=", pk["id"])], ["purchase_id"], company_ids=c1)[0].get("purchase_id") or [0])[0]
+        po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "partner_id", "company_id", "picking_type_id"], company_ids=c1)[0] if po_id else None
+        plids = [m["purchase_line_id"][0] for m in mvs.values() if m.get("purchase_line_id")]
+        pls = {p["id"]: p for p in odoo.search_read("purchase.order.line", [("id", "in", plids)],
+                                                    ["product_id", "name", "product_qty", "qty_received", "price_unit", "discount", "tax_ids"],
+                                                    company_ids=c1)} if plids else {}
+        nuevo = None
+        out = []
+        for mid, (f, dest) in faltas.items():
+            m = mvs[mid]
+            pl = pls.get((m.get("purchase_line_id") or [0])[0])
+            item = {"articulo": m["product_id"][1], "cant": f, "destino": dest, "a": ""}
+            if pl:
+                q = max(round(pl["product_qty"] - f, 4), pl["qty_received"])
+                odoo.call("purchase.order.line", "write", c1, ids=[pl["id"]], vals={"product_qty": q})
+                pl["product_qty"] = q
+            if dest == "cancelar" or not pl or not po:
+                item["a"] = "eliminado"
+                out.append(item)
+                continue
+            if dest == "pendiente":
+                destino = po_id
+            elif dest.startswith("po:"):
+                destino = int(dest[3:])
+            else:
+                if not nuevo:
+                    n = odoo.call("purchase.order", "create", c1, vals_list=[{
+                        "partner_id": po["partner_id"][0], "company_id": po["company_id"][0], "picking_type_id": po["picking_type_id"][0],
+                        "origin": f"Pendiente de {po['name']}" + (f" (albarán {albaran})" if albaran else "")}])
+                    nuevo = n[0] if isinstance(n, list) else n
+                destino = nuevo
+            vals = {"order_id": destino, "product_id": pl["product_id"][0], "name": pl["name"], "product_qty": f, "price_unit": pl["price_unit"],
+                    "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl.get("tax_ids") or []]]}
+            ex = odoo.search_read("purchase.order.line", [("order_id", "=", destino), ("product_id", "=", pl["product_id"][0]), ("display_type", "=", False)],
+                                  ["product_qty"], company_ids=c1, limit=1) if destino != po_id else []
+            if ex:   # ya estaba en ese pedido: se suma
+                odoo.call("purchase.order.line", "write", c1, ids=[ex[0]["id"]], vals={"product_qty": ex[0]["product_qty"] + f})
+            else:
+                odoo.call("purchase.order.line", "create", c1, vals_list=[vals])
+            item["a"] = odoo.search_read("purchase.order", [("id", "=", destino)], ["name"], company_ids=c1)[0]["name"]
+            out.append(item)
+        return out
+
+    @app.get("/api/compras/recibir/destinos")
+    def recibir_destinos(request: Request, picking_id: int, company: str = "all"):
+        """Pedidos abiertos del mismo proveedor a los que se puede pasar lo que no ha llegado."""
+        _, cids = ctx(request, company)
+
+        def run():
+            pk = odoo.search_read("stock.picking", [("id", "=", picking_id)], ["partner_id", "purchase_id", "company_id"], company_ids=cids)
+            if not pk or not pk[0].get("partner_id"):
+                return []
+            pk = pk[0]
+            com = odoo.search_read("res.partner", [("id", "=", pk["partner_id"][0])], ["commercial_partner_id"], company_ids=cids)[0]["commercial_partner_id"][0]
+            ps = odoo.search_read("purchase.order", [("partner_id", "child_of", com), ("state", "in", ["draft", "sent", "purchase"]),
+                                                     ("company_id", "=", pk["company_id"][0]), ("id", "!=", (pk.get("purchase_id") or [0])[0])],
+                                  ["name", "state", "amount_untaxed", "origin", "date_order"], company_ids=[pk["company_id"][0]], order="id desc", limit=15)
+            return [{"id": p["id"], "name": p["name"], "lanzado": p["state"] == "purchase", "base": p["amount_untaxed"], "origen": p.get("origin") or ""} for p in ps]
         return guard(run)
 
     # ---------- facturas para Mayte ----------
@@ -1409,40 +1493,54 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         Si el pedido es de otra empresa (compras en Distriplus, factura en Logipaper) no se tocan las líneas: se apunta el cruce."""
         _u, _cids = ctx(request, "all")
         b = await request.json()
-        po_id = int(b.get("pedido_id") or 0)
+        po_ids = [int(x) for x in (b.get("pedido_ids") or [b.get("pedido_id")]) if x]
+        if not po_ids:
+            raise HTTPException(400, "Elige al menos un albarán/pedido")
 
-        return guard(lambda: enlazar_factura(mid, po_id, _u))
+        return guard(lambda: enlazar_factura(mid, po_ids, _u))
 
-    def enlazar_factura(mid, po_id, _u):
+    def enlazar_factura(mid, po_ids, _u):
+        """Una factura puede llevar uno o varios albaranes (pedidos): sus líneas pasan a ser lo recibido de todos ellos que falte por facturar."""
         cids = TODAS
+        if isinstance(po_ids, int):
+            po_ids = [po_ids]
         if True:
             m = odoo.search_read("account.move", [("id", "=", mid), ("state", "=", "draft")], ["company_id"], company_ids=cids)
             if not m:
                 raise HTTPException(404, "La factura ya no está en borrador")
-            pco = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "company_id", "amount_untaxed"], company_ids=TODAS)
-            if pco and pco[0]["company_id"][0] != m[0]["company_id"][0]:
-                # pedido de Distriplus (almacén central) pagado por otra empresa: Odoo no deja enlazarlos, lo apunta el panel
+            pco = odoo.search_read("purchase.order", [("id", "in", po_ids)], ["name", "company_id", "amount_untaxed", "partner_ref"], company_ids=TODAS)
+            nombres = ", ".join(p["name"] + (f" ({p['partner_ref']})" if p.get("partner_ref") else "") for p in pco)
+            if pco and any(p["company_id"][0] != m[0]["company_id"][0] for p in pco):
+                # pedidos de Distriplus (almacén central) pagados por otra empresa: Odoo no deja enlazarlos, lo apunta el panel
                 with lock, con() as c:
                     c.execute("INSERT OR REPLACE INTO factura_marcas VALUES (?,?,?,?,?)",
-                              (mid, "pedido", _u, time.time(), json.dumps({"pedido_id": po_id, "pedido": pco[0]["name"], "empresa_pedido": pco[0]["company_id"][0]})))
+                              (mid, "pedido", _u, time.time(), json.dumps({"pedido_id": pco[0]["id"], "pedido_ids": [p["id"] for p in pco],
+                                                                          "pedido": nombres, "empresa_pedido": pco[0]["company_id"][0]})))
                 t = odoo.search_read("account.move", [("id", "=", mid)], ["amount_untaxed", "amount_total"], company_ids=cids)[0]
-                return {"ok": True, "pedido": pco[0]["name"] + " (" + pco[0]["company_id"][1] + ")", "base": t["amount_untaxed"], "total": t["amount_total"],
-                        "base_pedido": pco[0]["amount_untaxed"]}
-            pol = odoo.search_read("purchase.order.line", [("order_id", "=", po_id), ("display_type", "=", False)],
-                                   ["product_id", "name", "product_qty", "qty_invoiced", "qty_received", "price_unit", "discount", "tax_ids"], company_ids=cids)
+                return {"ok": True, "pedido": nombres + " (" + pco[0]["company_id"][1] + ")", "base": t["amount_untaxed"], "total": t["amount_total"],
+                        "base_pedido": round(sum(p["amount_untaxed"] for p in pco), 2)}
+            pol = odoo.search_read("purchase.order.line", [("order_id", "in", po_ids), ("display_type", "=", False)],
+                                   ["order_id", "product_id", "name", "product_qty", "qty_invoiced", "qty_received", "price_unit", "discount", "tax_ids"], company_ids=cids)
             lineas = []
             for pl in pol:
-                q = round(pl["product_qty"] - pl["qty_invoiced"], 4)
+                base_q = pl["qty_received"] if pl["qty_received"] > 0 else pl["product_qty"]   # se factura lo que ha llegado
+                q = round(base_q - pl["qty_invoiced"], 4)
                 if q > 0 and pl.get("product_id"):
                     lineas.append([0, 0, {"purchase_line_id": pl["id"], "product_id": pl["product_id"][0], "name": pl["name"], "quantity": q,
                                           "price_unit": pl["price_unit"], "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl.get("tax_ids") or []]]}])
             if not lineas:
-                raise HTTPException(400, "Ese pedido ya está facturado entero")
-            po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name"], company_ids=cids)[0]
-            odoo.call("account.move", "write", cids, ids=[mid], vals={"invoice_line_ids": [[5, 0, 0]] + lineas, "invoice_origin": po["name"]},
+                raise HTTPException(400, "Esos pedidos ya están facturados enteros")
+            odoo.call("account.move", "write", cids, ids=[mid], vals={"invoice_line_ids": [[5, 0, 0]] + lineas, "invoice_origin": ", ".join(p["name"] for p in pco)},
                       context={"default_move_type": "in_invoice"})
             t = odoo.search_read("account.move", [("id", "=", mid)], ["amount_untaxed", "amount_total"], company_ids=cids)[0]
-            return {"ok": True, "pedido": po["name"], "base": t["amount_untaxed"], "total": t["amount_total"]}
+            with lock, con() as c:   # los albaranes del panel quedan como facturados
+                for d in c.execute("SELECT id, compra FROM docs WHERE compra IS NOT NULL").fetchall():
+                    try:
+                        if json.loads(d["compra"]).get("pedido_id") in po_ids:
+                            c.execute("UPDATE docs SET factura_id=? WHERE id=?", (mid, d["id"]))
+                    except Exception:
+                        pass
+            return {"ok": True, "pedido": nombres, "base": t["amount_untaxed"], "total": t["amount_total"]}
 
     @app.get("/api/compras/bandeja")
     def bandeja(request: Request, company: str = "all", dias: int = 45):
