@@ -224,6 +224,12 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
             n = 0
             for model, key in (("sale.order.line", "lineas"), ("stock.move", "movimientos")):
                 rids = [int(x) for x in b.get(key) or []]
+                for pid in ids:   # también las líneas que el navegador aún no tenía (albarán recién creado al validar)
+                    try:
+                        rids += [x["id"] for x in odoo.search_read(model, [("ac_pending_print_docs", "ilike", f'"id": {pid},')], ["id"], company_ids=T, limit=200)]
+                    except Exception:
+                        pass
+                rids = list(set(rids))
                 if not rids:
                     continue
                 for r in odoo.search_read(model, [("id", "in", rids)], ["ac_pending_print_docs", "company_id"], company_ids=T):
