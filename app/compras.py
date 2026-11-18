@@ -1210,7 +1210,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
             hay = lambda l: sum(max(0, (l.get("stock_by_loc") or {}).get(k, 0) or 0) for k in locs)
 
             def grupo(tipo, quien, ref, ls):
-                llegan = [l for l in ls if l["product_id"] in prods]
+                llegan = [l for l in ls if l["product_id"] in prods and (l.get("qty_pending") or 0) > 0]
                 if not llegan:
                     return
                 for l in llegan:
