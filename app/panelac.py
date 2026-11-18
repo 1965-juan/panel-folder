@@ -219,7 +219,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
 
         def run():
             qids = []
-            for pid, delta in ((int(b["de"]), -q), (int(b["a"]), q)):
+            for pid, delta in (((int(b["de"]), -q),) if b.get("de") else ()) + ((int(b["a"]), q),):
                 qs = odoo.search_read("stock.quant", [("product_id", "=", pid), ("location_id", "=", loc)], ["quantity"], company_ids=[E])
                 if qs:
                     odoo.call("stock.quant", "write", [E], ids=[qs[0]["id"]], vals={"inventory_quantity": qs[0]["quantity"] + delta}, context=dict(ctx_))
@@ -229,6 +229,43 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
                     qids.append(x[0] if isinstance(x, list) else x)
             odoo.call("stock.quant", "action_apply_inventory", [E], ids=qids, context=dict(ctx_))
             return {"ok": True}
+        return guard(run)
+
+    @app.post("/api/admin/devolver")
+    async def admin_devolver(request: Request):
+        """Solo admin. Devuelve al proveedor parte de una entrada ya validada (lo que se recibió de más por error):
+        {picking_id, empresa, lineas:{product_id: cant}}. Crea la devolución y la valida; así el pedido de compra baja lo recibido."""
+        from .main import _solo_admin  # noqa
+        _solo_admin(request)
+        b = await body(request)
+        pid, E = int(b["picking_id"]), [int(b.get("empresa") or 1)]
+        quiero = {int(k): float(v) for k, v in (b.get("lineas") or {}).items()}
+
+        def run():
+            ctx_ = {"active_id": pid, "active_ids": [pid], "active_model": "stock.picking"}
+            w = odoo.call("stock.return.picking", "create", E, vals_list=[{"picking_id": pid}], context=ctx_)
+            w = w[0] if isinstance(w, list) else w
+            ls = odoo.search_read("stock.return.picking.line", [("wizard_id", "=", w)], ["product_id", "quantity"], company_ids=E)
+            if not ls:
+                raise HTTPException(400, "Odoo no deja devolver nada de esa entrada")
+            for l in ls:
+                odoo.call("stock.return.picking.line", "write", E, ids=[l["id"]], vals={"quantity": quiero.get(l["product_id"][0], 0), "to_refund": True} if True else {})
+            met = "action_create_returns"
+            try:
+                r = odoo.call("stock.return.picking", met, E, ids=[w], context=ctx_)
+            except Exception as e:
+                if "action_create_returns" not in str(e):
+                    raise
+                r = odoo.call("stock.return.picking", "create_returns", E, ids=[w], context=ctx_)
+            nid = (r or {}).get("res_id")
+            if not nid:
+                raise HTTPException(400, "No se creó la devolución")
+            mv = odoo.search_read("stock.move", [("picking_id", "=", nid)], ["product_uom_qty"], company_ids=E)
+            for m in mv:
+                odoo.call("stock.move", "write", E, ids=[m["id"]], vals={"quantity": m["product_uom_qty"], "picked": True})
+            res = odoo.call("stock.picking", "button_validate", E, ids=[nid])
+            n = odoo.search_read("stock.picking", [("id", "=", nid)], ["name", "state"], company_ids=E)[0]
+            return {"ok": n["state"] == "done", "devolucion": n["name"], "estado": n["state"], "odoo": res if isinstance(res, dict) else None}
         return guard(run)
 
     @app.post("/api/ac/impreso")
