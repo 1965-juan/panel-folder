@@ -215,7 +215,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url):
         _solo_admin(request)
         b = await body(request)
         loc, E, q = int(b["location_id"]), int(b.get("empresa") or 1), float(b["cant"])
-        ctx_ = {"inventory_mode": True, "inventory_name": f"Panel: pasar stock de artículo duplicado ({b['de']} → {b['a']})"}
+        ctx_ = {"inventory_mode": True, "inventory_name": f"Panel: pasar stock de artículo duplicado ({b.get('de')} → {b['a']})"}
 
         def run():
             qids = []
