@@ -1588,10 +1588,14 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         "base_pedido": round(sum(p["amount_untaxed"] for p in pco), 2)}
             pol = odoo.search_read("purchase.order.line", [("order_id", "in", po_ids), ("display_type", "=", False)],
                                    ["order_id", "product_id", "name", "product_qty", "qty_invoiced", "qty_received", "price_unit", "discount", "tax_ids"], company_ids=cids)
+            # lo que ya está en ESTA factura no cuenta como facturado (se va a sustituir)
+            propias = {}
+            for x in odoo.search_read("account.move.line", [("move_id", "=", mid), ("purchase_line_id", "!=", False)], ["purchase_line_id", "quantity"], company_ids=cids):
+                propias[x["purchase_line_id"][0]] = propias.get(x["purchase_line_id"][0], 0) + x["quantity"]
             lineas = []
             for pl in pol:
                 base_q = pl["qty_received"] if pl["qty_received"] > 0 else pl["product_qty"]   # se factura lo que ha llegado
-                q = round(base_q - pl["qty_invoiced"], 4)
+                q = round(base_q - (pl["qty_invoiced"] - propias.get(pl["id"], 0)), 4)
                 if q > 0 and pl.get("product_id"):
                     lineas.append([0, 0, {"purchase_line_id": pl["id"], "product_id": pl["product_id"][0], "name": pl["name"], "quantity": q,
                                           "price_unit": pl["price_unit"], "discount": pl.get("discount") or 0, "tax_ids": [[6, 0, pl.get("tax_ids") or []]]}])
@@ -1692,8 +1696,11 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                     else:
                         pk = pick.get(d["compra"].get("pedido_id"), [])
                         abiertas = [x["name"] for x in pk if x["state"] not in ("done", "cancel")]
-                        if pk and not abiertas:
-                            e.update(paso="terminado", texto=f"Cuadrado con {d['compra']['pedido']} y recibido por almacén")
+                        suyas = d["compra"].get("recepciones") or []   # la entrada de ESTE albarán; lo que quede en otra entrada es lo que no vino
+                        suya_hecha = bool(suyas) and all(x["state"] in ("done", "cancel") for x in pk if x["name"] in suyas) and any(x["name"] in suyas for x in pk)
+                        if (pk and not abiertas) or suya_hecha or d.get("recepcion"):
+                            e.update(paso="terminado", texto=f"Cuadrado con {d['compra']['pedido']} y recibido por almacén"
+                                     + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
                         else:
                             e.update(paso="espera", texto=f"Cuadrado con {d['compra']['pedido']}. Falta que almacén reciba la entrada {', '.join(abiertas) or ''} en Recepciones",
                                      acciones=["fichas"])
