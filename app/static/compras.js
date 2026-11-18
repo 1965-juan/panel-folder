@@ -315,9 +315,9 @@ function coRecibirOpen(r) {
   db.innerHTML = `<h3>${escH(r.ref)} · ${escH(r.proveedor)}</h3><p class="muted">${escH(r.pedido || r.origen)} · ${escH(r.empresa)}${CO_ALB ? ` · albarán: <a target="_blank" rel="noopener" href="/api/compras/pdf/${CO_ALB.id}">${escH(CO_ALB.nombre)}</a>` : ''}</p>
     ${CO_ALB ? `<iframe class="co-pdf" src="/api/compras/pdf/${CO_ALB.id}#view=FitH"></iframe>` : '<p class="hint">Consejo: elige primero el PDF en "Albaranes subidos sin recibir" y quedará adjunto a la recepción en Odoo.</p>'}
     <label class="co-alb-n">Nº de albarán del proveedor <input id="co-an" placeholder="A-695686"></label>
-    <div class="co-q"><button class="lnk" id="co-todo">Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button> <span id="co-avq" class="bdg b-ok" hidden></span></div>
+    <div class="co-q"><span class="muted">Viene puesto lo pedido: cambia solo lo que no haya llegado y pulsa Recibir.</span> <button class="lnk" id="co-todo" hidden>Ha llegado todo</button><button class="lnk" id="co-nada">Poner todo a 0</button> <span id="co-avq" class="bdg b-ok" hidden></span></div>
     <table class="co-t"><thead><tr><th>Artículo</th><th>Pedido</th><th>Ha llegado</th><th>Si no ha llegado todo</th></tr></thead><tbody>${r.lineas.map(l => `<tr><td></td><td>${l.pedido}</td>
-      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="" placeholder="${l.pedido}"></td><td><select class="co-dst" data-d="${l.move_id}" hidden></select></td></tr>`).join('')}</tbody></table>
+      <td><input type="number" min="0" step="any" data-m="${l.move_id}" value="${l.pedido}"></td><td><select class="co-dst" data-d="${l.move_id}" hidden></select></td></tr>`).join('')}</tbody></table>
     <div class="co-falta"><b>Lo que no haya llegado</b> <span class="muted">(se puede cambiar línea a línea)</span>: <select id="co-dg"></select></div>
     <button id="co-ok" class="ac-go">✓ Recibir en Odoo</button><div id="co-res"></div>`;
   db.querySelectorAll('tbody tr').forEach((tr, i) => tr.firstChild.textContent = r.lineas[i].producto);
@@ -344,7 +344,7 @@ function coRecibirOpen(r) {
   $('#co-nada').onclick = () => { db.querySelectorAll('input[data-m]').forEach(i => i.value = 0); refresca(); avisa('Todo a 0: pon lo que ha llegado'); };
   $('#co-ok').onclick = async () => {
     const vac = [...db.querySelectorAll('input[data-m]')].filter(i => i.value === '').length;
-    if (vac && !confirm(`Hay ${vac} línea(s) sin rellenar: se tomarán como NO llegadas. ¿Seguir? (Si ha llegado todo, pulsa «Ha llegado todo»)`)) return;
+    if (false && vac && !confirm(`Hay ${vac} línea(s) sin rellenar: se tomarán como NO llegadas. ¿Seguir? (Si ha llegado todo, pulsa «Ha llegado todo»)`)) return;
     const cant = {}, destinos = {}; db.querySelectorAll('input[data-m]').forEach(i => cant[i.dataset.m] = parseFloat(i.value) || 0);
     db.querySelectorAll('select[data-d]').forEach(s => { if (!s.hidden) destinos[s.dataset.d] = s.value; });
     db.querySelectorAll('input[data-m]').forEach(i => { if (i.value === '') destinos[i.dataset.m] = dg.value; });
