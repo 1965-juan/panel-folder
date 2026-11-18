@@ -105,7 +105,7 @@ async function acImpreso(ids) {
     o.lines = o.lines.filter(l => l.qty_pending > 0 || (l.pending_print_docs || []).length); };
   (AC.orders || []).forEach(quita); (AC.reposicion || []).forEach(quita);
   AC.orders = AC.orders.filter(o => o.lines.length); AC.reposicion = AC.reposicion.filter(o => o.lines.length);
-  acRender();
+  acRender(); setTimeout(acLoad, 1500);
 }
 function acAuto(g, l) {
   let falta = l.qty_pending; const t = {};
