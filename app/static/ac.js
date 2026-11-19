@@ -181,7 +181,7 @@ async function acValidar(keys) {
       hoja[dest].lineas.push({ codigo: l.product_code || '', ean: l.product_barcode || '', nombre: l.product_name, cant: q }); } })); });
   const b = $('#ac-ok'); b.disabled = true; b.textContent = 'Validando…';
   // la ventana de impresión se abre ya (con el clic) para que el navegador no la bloquee; se rellena al validar
-  const wImp = Object.keys(hoja).length ? window.open('', '_blank') : null;
+  const wImp = (Object.keys(hoja).length) ? window.open('', '_blank') : null;
   if (wImp) wImp.document.write('<p style="font-family:Arial">Validando…</p>');
   try {
     const r = await jpost(`/api/ac/validar?company=${company}`, body);
@@ -199,9 +199,17 @@ async function acValidar(keys) {
     acRender();
     const d = $('#ac-docs');
     d.innerHTML = `<b>✓ Validado.</b> ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
-      ${Object.keys(hoja).length ? '<button class="lnk" id="ac-hoja">🖨 volver a imprimir la hoja</button>' : ''}<button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
-    const bh = $('#ac-hoja'); if (bh) bh.onclick = () => acHojaReparto(hoja, r.picking_names || []);
-    if (wImp) acHojaReparto(hoja, r.picking_names || [], wImp);
+      ${Object.values(hoja).some(h => h.tipo !== 'cliente') ? '<button class="lnk" id="ac-hoja">🖨 volver a imprimir la hoja</button>' : ''}<button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
+    const bh = $('#ac-hoja'); if (bh) bh.onclick = () => acHojaReparto(Object.fromEntries(Object.entries(hoja).filter(([, h]) => h.tipo !== 'cliente')), r.picking_names || []);
+    // tiendas: hoja de reparto unificada · clientes: su albarán de Odoo (como siempre)
+    const hojaT = Object.fromEntries(Object.entries(hoja).filter(([, h]) => h.tipo !== 'cliente'));
+    const docsCli = (r.documents || []).filter(x => x.type !== 'reposicion' && !x.store);
+    const pdf = x => `${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}`;
+    let w = wImp;
+    if (Object.keys(hojaT).length) { acHojaReparto(hojaT, r.picking_names || [], w); w = null; }
+    docsCli.forEach(x => { if (w) { w.location.href = pdf(x); w = null; } else window.open(pdf(x), '_blank'); });
+    if (w) w.close();
+    if (docsCli.length) d.insertAdjacentHTML('beforeend', ' ' + docsCli.map(x => `<a class="lnk" target="_blank" rel="noopener" href="${pdf(x)}">🖨 ${escH(x.name)}</a>`).join(' '));
     d.hidden = false; clearTimeout(d._t); d._t = setTimeout(() => { d.hidden = true; }, 8000);
     acLoad();
   } catch (e) { if (wImp) wImp.close(); alertBox(e.message); acRender(); }
