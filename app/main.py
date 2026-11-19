@@ -597,6 +597,27 @@ def convertir_descuento_web(order_ids=None, forzar=False):
     return hechos
 
 
+@app.post("/api/admin/factura_libre")
+async def admin_factura_libre(request: Request):
+    """Solo admin. Factura de cliente sin artículos de stock (no mueve inventario), en borrador:
+    {company, partner_id, lineas:[{nombre, base, tax_id}], observaciones, fecha?}"""
+    _solo_admin(request)
+    b = await request.json()
+    c = [int(b["company"])]
+
+    def run():
+        vals = {"move_type": "out_invoice", "partner_id": int(b["partner_id"]), "company_id": c[0],
+                "narration": b.get("observaciones") or False,
+                "invoice_line_ids": [[0, 0, {"name": l["nombre"], "quantity": 1, "price_unit": float(l["base"]),
+                                             "tax_ids": [[6, 0, [int(l["tax_id"])]]]}] for l in b["lineas"]]}
+        if b.get("fecha"):
+            vals["invoice_date"] = b["fecha"]
+        m = odoo.call("account.move", "create", c, vals_list=[vals], context={"default_move_type": "out_invoice"})
+        m = m[0] if isinstance(m, list) else m
+        return odoo.search_read("account.move", [("id", "=", m)], ["name", "state", "amount_untaxed", "amount_tax", "amount_total", "partner_id"], c)[0]
+    return guard(run)
+
+
 @app.post("/api/admin/descuento_web")
 async def admin_descuento_web(request: Request):
     _solo_admin(request)
