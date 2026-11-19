@@ -540,7 +540,16 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             if len(pp) == 1:
                 return pp[0]["id"], pp[0]["display_name"], "referencia"
             if partner_id:
-                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", ref)], ["product_id", "product_tmpl_id"], company_ids=cids, limit=1)
+                si = odoo.search_read("product.supplierinfo", [("partner_id", "=", partner_id), ("product_code", "=", ref)], ["product_id", "product_tmpl_id"], company_ids=cids, limit=10)
+                if len(si) > 1:   # el mismo código de proveedor en varios artículos (duplicados): el bueno es el de nuestra referencia y EAN
+                    tm = odoo.search_read("product.template", [("id", "in", [x["product_tmpl_id"][0] for x in si]), ("active", "=", True)],
+                                          ["default_code", "barcode", "qty_available"], company_ids=cids)
+                    def nota_t(t):
+                        return ((t.get("barcode") or "") == ean) * 100 + (bool(t.get("default_code")) and (t.get("default_code") or "").lstrip("0") != ref.lstrip("0")) * 10 \
+                            + bool(t.get("barcode")) * 5 + ((t.get("qty_available") or 0) > 0)
+                    if tm:
+                        mejor_t = max(tm, key=nota_t)
+                        si = [x for x in si if x["product_tmpl_id"][0] == mejor_t["id"]] or si
                 if si:
                     if si[0].get("product_id"):
                         return si[0]["product_id"][0], si[0]["product_id"][1], "cód. proveedor"
@@ -690,9 +699,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             ids_c = {pl["product_id"][0] for pl in pls_c if pl.get("product_id")}
             res_c = [(l,) + _identificar(l, prov["id"], cids, pls_c) for l in lineas_doc]
             sc = sum(1 for x in res_c if x[1] in ids_c)
-            if sc and sc >= max(1, len(lineas_doc) // 2) and (mejor is None or sc > mejor[0]):
+            if sc and (mejor is None or sc > mejor[0]):
                 if sc < len(lineas_doc):   # el albarán trae cosas que no están en ese pedido: no se da por cuadrado solo
-                    info["confirmado_parcial"] = {"name": p["name"], "coinciden": sc, "lineas_doc": len(lineas_doc)}
+                    info["confirmado_parcial"] = {"id": p["id"], "name": p["name"], "coinciden": sc, "lineas_doc": len(lineas_doc)}
                     continue
                 pk = odoo.search_read("stock.picking", [("id", "in", p["picking_ids"]), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=cids) if p["picking_ids"] else []
                 info["confirmado"] = {"id": p["id"], "name": p["name"], "recepciones": [x["name"] for x in pk], "coinciden": sc, "lineas_doc": len(lineas_doc)}
@@ -894,6 +903,46 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             c.execute("UPDATE docs SET compra=? WHERE id=?", (json.dumps(res, ensure_ascii=False), did))
         return res
 
+    def sumar_a_confirmado(did, po_id, partner_id):
+        """El albarán es de un pedido ya lanzado pero trae más cosas: se añaden al pedido (salen en su misma entrada) y se ajustan
+        cantidades/precios de lo que coincide. Solo si todas las líneas están identificadas con seguridad (EAN, referencia o código de proveedor)."""
+        r = _doc(did)
+        lec = json.loads(r["lectura"] or "{}")
+        pls = _lineas_pedido(po_id, TODAS)
+        po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "company_id", "picking_ids"], company_ids=TODAS)[0]
+        c = [po["company_id"][0]]
+        anad, camb = [], []
+        for l in lec.get("lineas") or []:
+            pid, nom, como = _identificar(l, partner_id, TODAS, pls)
+            if not pid or "revisar" in (como or ""):
+                return False
+            q, pr, dto = _num(l.get("cantidad")), _num(l.get("precio")), _num(l.get("descuento"))
+            pl = next((x for x in pls if x.get("product_id") and x["product_id"][0] == pid), None)
+            if pl:
+                v = {}
+                if q > pl["product_qty"]:
+                    v["product_qty"] = q
+                if pr and abs(pr - pl["price_unit"]) > 0.0001:
+                    v["price_unit"] = pr
+                if v:
+                    odoo.call("purchase.order.line", "write", c, ids=[pl["id"]], vals=v)
+                    camb.append(nom)
+            else:
+                odoo.call("purchase.order.line", "create", c, vals_list=[{"order_id": po_id, "product_id": pid, "product_qty": q or 1,
+                                                                          "price_unit": pr, "discount": dto}])
+                anad.append(nom)
+        pk = odoo.search_read("stock.picking", [("purchase_id", "=", po_id), ("state", "not in", ["done", "cancel"])], ["name"], company_ids=TODAS)
+        comp = {"pedido": po["name"], "pedido_id": po_id, "recepciones": [x["name"] for x in pk], "ya_estaba": True, "auto": True,
+                "anadidas": anad, "cambios": [{"articulo": x} for x in camb]}
+        if lec.get("numero"):
+            try:
+                odoo.call("purchase.order", "write", c, ids=[po_id], vals={"partner_ref": lec["numero"]})
+            except Exception:
+                pass
+        with lock, con() as cx:
+            cx.execute("UPDATE docs SET compra=?, nota=NULL WHERE id=?", (json.dumps(comp, ensure_ascii=False), did))
+        return True
+
     def auto_cuadrar(did):
         """Al subir un albarán o factura: se cruza solo con compras. Si todo está identificado (o es nuevo con EAN) y la base cuadra,
         deja el pedido igual que el documento, mete lo nuevo, pasa lo que no llega a pendiente y saca la entrada para almacén.
@@ -923,8 +972,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 return nota("No encuentro el proveedor en Odoo: pulsa Cuadrar y elígelo")
             if not info.get("confirmado") and info.get("confirmado_parcial"):
                 cp = info["confirmado_parcial"]
-                return nota(f"Parece del pedido ya confirmado {cp['name']}, pero solo coinciden {cp['coinciden']} de {cp['lineas_doc']} líneas "
-                            f"(trae artículos que no están en el pedido). Avisad a compras/Juan para ajustar {cp['name']} antes de recibirlo.")
+                try:   # no se crea otro pedido: lo que trae el albarán y no estaba se añade a ese pedido ya lanzado
+                    hecho = sumar_a_confirmado(did, cp["id"], info["proveedor"]["id"])
+                    if hecho:
+                        return
+                except Exception as e:
+                    return nota(f"Es del pedido {cp['name']} pero no pude añadirle lo que falta: {str(e)[:120]}. Pulsa Cuadrar")
+                return nota(f"Parece del pedido ya confirmado {cp['name']}, pero solo coinciden {cp['coinciden']} de {cp['lineas_doc']} líneas. Pulsa Cuadrar")
             if info.get("confirmado"):
                 cf = info["confirmado"]
                 comp = {"pedido": cf["name"], "pedido_id": cf["id"], "recepciones": cf["recepciones"], "ya_estaba": True, "auto": True}
@@ -944,6 +998,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 if investigar_faltan(did, info, TODAS):
                     info = analizar(_doc(did), TODAS, pedido=(info.get("pedido") or {}).get("id") or 0, partner_id=info["proveedor"]["id"])
                     L = info.get("lineas") or []
+            dudosas = [l for l in L if l.get("product_id") and "revisar" in (l.get("como") or "")]
+            if dudosas:   # identificado solo por parecido: que lo mire una persona antes de meter stock en un artículo que no es
+                return nota(f"{len(dudosas)} línea(s) identificadas solo por el nombre (" + "; ".join((x.get("descripcion") or "")[:30] for x in dudosas[:3])
+                            + "). Pulsa Cuadrar y comprueba que el artículo es el mismo (referencia / EAN)")
             faltan = []
             for l in L:
                 if not l.get("product_id"):

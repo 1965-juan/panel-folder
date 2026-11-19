@@ -171,9 +171,20 @@ async function acValidar(keys) {
   const body = { lineas: [], reposicion: [] };
   keys.forEach(k => { const s = ACSEL[k]; if (s) (s.tipo === 'cliente' ? body.lineas : body.reposicion).push({ id: s.id, transfers: s.t }); });
   if (!body.lineas.length && !body.reposicion.length) return;
+  // lo que se va a servir, agrupado por destino (tienda o cliente), para la hoja de reparto
+  const hoja = {};
+  keys.forEach(k => { const s = ACSEL[k]; if (!s) return; const q = Object.values(s.t).reduce((a, v) => a + v, 0); if (!q) return;
+    const coll = s.tipo === 'cliente' ? AC.orders : AC.reposicion;
+    coll.forEach(o => o.lines.forEach(l => { if ((s.tipo === 'cliente' ? l.line_id : l.move_id) === s.id) {
+      const dest = s.tipo === 'cliente' ? (o.partner_name || 'Cliente') : (o.store_name || 'Tienda');
+      (hoja[dest] = hoja[dest] || { tipo: s.tipo, refs: new Set(), lineas: [] }).refs.add(o.order_name || o.picking_name);
+      hoja[dest].lineas.push({ codigo: l.product_code || '', ean: l.product_barcode || '', nombre: l.product_name, cant: q }); } })); });
   const b = $('#ac-ok'); b.disabled = true; b.textContent = 'Validando…';
   try {
     const r = await jpost(`/api/ac/validar?company=${company}`, body);
+    // los albaranes nuevos no se quedan en «pendiente de imprimir»: se imprime (o no) la hoja de reparto y ya está
+    if ((r.documents || []).length) acImpreso(r.documents.map(x => x.id)).catch(() => {});
+    window._acHoja = hoja;
     keys.forEach(k => {
       const s = ACSEL[k]; delete ACSEL[k]; if (!s) return;
       const q = Object.values(s.t).reduce((a, v) => a + v, 0);
@@ -184,10 +195,11 @@ async function acValidar(keys) {
     AC.orders = AC.orders.filter(o => o.lines.length); AC.reposicion = AC.reposicion.filter(o => o.lines.length);
     acRender();
     const d = $('#ac-docs');
-    d.innerHTML = `<b>✓ Validado.</b> ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
+    d.innerHTML = `<b>✓ Validado.</b> ${Object.keys(hoja).length ? '<button class="ac-go" id="ac-hoja">🖨 Imprimir hoja de reparto</button>' : ''} ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
       ${r.documents.length ? '<span>Para imprimir:</span> ' + r.documents.map(x => `<a data-pr="${x.id}" target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name || x.type || 'documento')}</a>`).join(' ') : ''}
       <button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
     d.querySelectorAll('[data-pr]').forEach(a => a.addEventListener('click', () => setTimeout(() => acImpreso([+a.dataset.pr]), 300)));
+    const bh = $('#ac-hoja'); if (bh) bh.onclick = () => acHojaReparto(hoja, r.picking_names || []);
     d.hidden = false;
     acLoad();
   } catch (e) { alertBox(e.message); acRender(); }
@@ -256,3 +268,23 @@ let acQ; $('#ac-add-q').oninput = () => { clearTimeout(acQ); acQ = setTimeout(as
     b.onclick = async () => { try { await jpost(`/api/ac/anadir?company=${company}`, { tipo: ACADD.tipo, id: ACADD.id, product_id: p.id, qty: parseFloat($('#ac-add-n').value) || 1 }); $('#ac-modal').hidden = true; acLoad(); } catch (e) { alertBox(e.message); } };
     box.appendChild(b); });
 }, 300); };
+
+// Hoja de reparto: todo lo validado de una vez, una hoja por tienda / cliente (como el Panel AC de Odoo)
+function acHojaReparto(hoja, traspasos) {
+  const hoy = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  const pag = Object.entries(hoja).map(([dest, h]) => `<section><h1>${escH(dest)}</h1>
+    <p class="m">${h.tipo === 'cliente' ? 'Pedido' : 'Reposición'}: ${[...h.refs].map(escH).join(', ')} · ${hoy}</p>
+    <table><thead><tr><th>Ref.</th><th>Artículo</th><th>EAN</th><th class="n">Cant.</th><th class="c">✓</th></tr></thead><tbody>
+    ${h.lineas.map(l => `<tr><td>${escH(l.codigo)}</td><td>${escH(l.nombre.replace(/^\[[^\]]*\]\s*/, ''))}</td><td>${escH(l.ean)}</td><td class="n"><b>${l.cant}</b></td><td class="c">☐</td></tr>`).join('')}
+    </tbody></table><p class="t">${h.lineas.length} líneas · ${h.lineas.reduce((a, l) => a + l.cant, 0)} unidades</p>
+    <p class="f">Preparado por: ______________ &nbsp;&nbsp; Recibido en ${escH(dest)}: ______________</p></section>`).join('');
+  const w = window.open('', '_blank');
+  if (!w) return alertBox('El navegador ha bloqueado la ventana: permite ventanas emergentes para el panel');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Hoja de reparto</title><style>
+    body{font-family:Arial,sans-serif;margin:16px;color:#111}section{page-break-after:always}section:last-child{page-break-after:auto}
+    h1{font-size:20px;margin:0 0 2px}.m{color:#555;font-size:12px;margin:0 0 10px}table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{border:1px solid #bbb;padding:4px 6px;text-align:left}th{background:#eee}.n{text-align:right}.c{text-align:center;width:24px}
+    .t{font-size:12px;margin-top:6px}.f{margin-top:28px;font-size:12px}</style></head><body>${pag}
+    <script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+  w.document.close();
+}
