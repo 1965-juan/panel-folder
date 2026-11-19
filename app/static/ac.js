@@ -180,6 +180,9 @@ async function acValidar(keys) {
       (hoja[dest] = hoja[dest] || { tipo: s.tipo, refs: new Set(), lineas: [] }).refs.add(o.order_name || o.picking_name);
       hoja[dest].lineas.push({ codigo: l.product_code || '', ean: l.product_barcode || '', nombre: l.product_name, cant: q }); } })); });
   const b = $('#ac-ok'); b.disabled = true; b.textContent = 'Validando…';
+  // la ventana de impresión se abre ya (con el clic) para que el navegador no la bloquee; se rellena al validar
+  const wImp = Object.keys(hoja).length ? window.open('', '_blank') : null;
+  if (wImp) wImp.document.write('<p style="font-family:Arial">Validando…</p>');
   try {
     const r = await jpost(`/api/ac/validar?company=${company}`, body);
     // los albaranes nuevos no se quedan en «pendiente de imprimir»: se imprime (o no) la hoja de reparto y ya está
@@ -195,14 +198,13 @@ async function acValidar(keys) {
     AC.orders = AC.orders.filter(o => o.lines.length); AC.reposicion = AC.reposicion.filter(o => o.lines.length);
     acRender();
     const d = $('#ac-docs');
-    d.innerHTML = `<b>✓ Validado.</b> ${Object.keys(hoja).length ? '<button class="ac-go" id="ac-hoja">🖨 Imprimir hoja de reparto</button>' : ''} ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
-      ${r.documents.length ? '<span>Para imprimir:</span> ' + r.documents.map(x => `<a data-pr="${x.id}" target="_blank" rel="noopener" href="${ODOO}/report/pdf/${encodeURIComponent(x.report_name)}/${x.id}">🖨 ${escH(x.name || x.type || 'documento')}</a>`).join(' ') : ''}
-      <button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
-    d.querySelectorAll('[data-pr]').forEach(a => a.addEventListener('click', () => setTimeout(() => acImpreso([+a.dataset.pr]), 300)));
+    d.innerHTML = `<b>✓ Validado.</b> ${r.picking_names.length ? 'Traspasos: ' + r.picking_names.map(escH).join(', ') : ''}
+      ${Object.keys(hoja).length ? '<button class="lnk" id="ac-hoja">🖨 volver a imprimir la hoja</button>' : ''}<button class="x2" onclick="this.parentNode.hidden=true">×</button>`;
     const bh = $('#ac-hoja'); if (bh) bh.onclick = () => acHojaReparto(hoja, r.picking_names || []);
-    d.hidden = false;
+    if (wImp) acHojaReparto(hoja, r.picking_names || [], wImp);
+    d.hidden = false; clearTimeout(d._t); d._t = setTimeout(() => { d.hidden = true; }, 8000);
     acLoad();
-  } catch (e) { alertBox(e.message); acRender(); }
+  } catch (e) { if (wImp) wImp.close(); alertBox(e.message); acRender(); }
 }
 $('#ac-ok').onclick = () => acValidar(Object.keys(ACSEL));
 let acT; $('#ac-q').oninput = () => { clearTimeout(acT); acT = setTimeout(acRender, 200); };
@@ -270,7 +272,7 @@ let acQ; $('#ac-add-q').oninput = () => { clearTimeout(acQ); acQ = setTimeout(as
 }, 300); };
 
 // Hoja de reparto: todo lo validado de una vez, una hoja por tienda / cliente (como el Panel AC de Odoo)
-function acHojaReparto(hoja, traspasos) {
+function acHojaReparto(hoja, traspasos, wYa) {
   const hoy = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   const pag = Object.entries(hoja).map(([dest, h]) => `<section><h1>${escH(dest)}</h1>
     <p class="m">${h.tipo === 'cliente' ? 'Pedido' : 'Reposición'}: ${[...h.refs].map(escH).join(', ')} · ${hoy}</p>
@@ -278,8 +280,9 @@ function acHojaReparto(hoja, traspasos) {
     ${h.lineas.map(l => `<tr><td>${escH(l.codigo)}</td><td>${escH(l.nombre.replace(/^\[[^\]]*\]\s*/, ''))}</td><td>${escH(l.ean)}</td><td class="n"><b>${l.cant}</b></td><td class="c">☐</td></tr>`).join('')}
     </tbody></table><p class="t">${h.lineas.length} líneas · ${h.lineas.reduce((a, l) => a + l.cant, 0)} unidades</p>
     <p class="f">Preparado por: ______________ &nbsp;&nbsp; Recibido en ${escH(dest)}: ______________</p></section>`).join('');
-  const w = window.open('', '_blank');
+  const w = wYa || window.open('', '_blank');
   if (!w) return alertBox('El navegador ha bloqueado la ventana: permite ventanas emergentes para el panel');
+  w.document.open();
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Hoja de reparto</title><style>
     body{font-family:Arial,sans-serif;margin:16px;color:#111}section{page-break-after:always}section:last-child{page-break-after:auto}
     h1{font-size:20px;margin:0 0 2px}.m{color:#555;font-size:12px;margin:0 0 10px}table{width:100%;border-collapse:collapse;font-size:12px}
