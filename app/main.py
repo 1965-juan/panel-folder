@@ -584,6 +584,16 @@ def convertir_descuento_web(order_ids=None, forzar=False):
             odoo.call("sale.order.line", "write", c, ids=[l["id"]], vals={"discount": nuevo})
         odoo.call("sale.order.line", "write", c, ids=[r["id"]], vals={"product_uom_qty": 0})
         hechos.append({"pedido": r["order_id"][1], "lineas": len(ls), "pct": pct})
+    # la línea «Entrega estándar» a 0 € de la web tampoco se sirve: se deja a 0 en los pedidos confirmados
+    try:
+        dd = [("is_delivery", "=", True), ("price_unit", "=", 0), ("product_uom_qty", ">", 0), ("qty_invoiced", "=", 0), ("order_id.state", "=", "sale")]
+        if order_ids:
+            dd.append(("order_id", "in", order_ids))
+        for r in odoo.search_read("sale.order.line", dd, ["order_id", "company_id"], T, limit=200):
+            odoo.call("sale.order.line", "write", [r["company_id"][0]], ids=[r["id"]], vals={"product_uom_qty": 0})
+            hechos.append({"pedido": r["order_id"][1], "entrega": "quitada"})
+    except Exception:
+        pass
     return hechos
 
 
