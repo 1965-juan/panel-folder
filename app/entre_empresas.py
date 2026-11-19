@@ -135,6 +135,38 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             return {"empresas": [{"id": k, "nombre": v} for k, v in emp.items()], "grupos": sorted(grupos.values(), key=lambda g: g["cliente"].lower())}
         return guard(run)
 
+    BANCO_EMPRESA = {4: 1}   # Logipaper: ES80 2100 1981 3102 0082 1749 (Caixabank)
+
+    def corregir_banco(ids=None, empresa=None):
+        """Pone en las facturas de cliente la cuenta bancaria de SU empresa (si llevan la de otra empresa)."""
+        dom = [("move_type", "in", ["out_invoice", "out_refund"]), ("partner_bank_id", "!=", False)]
+        dom += [("id", "in", ids)] if ids else []
+        dom += [("company_id", "=", empresa)] if empresa else []
+        movs = odoo.search_read("account.move", dom, ["company_id", "partner_bank_id", "name"], company_ids=TODAS, limit=5000)
+        if not movs:
+            return []
+        cos = {c["id"]: c for c in odoo.search_read("res.company", [], ["partner_id"], company_ids=TODAS)}
+        bks = {b["id"]: b for b in odoo.search_read("res.partner.bank", [], ["partner_id"], company_ids=TODAS, limit=500)}
+        hechos = []
+        for m in movs:
+            c = m["company_id"][0]
+            b = bks.get(m["partner_bank_id"][0])
+            if not b or b["partner_id"][0] == cos[c]["partner_id"][0]:
+                continue
+            bueno = BANCO_EMPRESA.get(c) or next((x for x in sorted(bks) if bks[x]["partner_id"][0] == cos[c]["partner_id"][0]), None)
+            if bueno:
+                odoo.call("account.move", "write", [c], ids=[m["id"]], vals={"partner_bank_id": bueno})
+                hechos.append(m["name"] or f"borrador {m['id']}")
+        return hechos
+
+    @app.post("/api/admin/corregir_banco")
+    async def api_corregir_banco(request: Request):
+        u, cids = ctx(request)
+        from .main import _solo_admin  # noqa
+        _solo_admin(request)
+        b = await request.json()
+        return guard(lambda: {"corregidas": corregir_banco(b.get("ids"), b.get("empresa"))})
+
     @app.post("/api/facturar/albaranes")
     async def facturar(request: Request):
         u, cids = ctx(request)
@@ -165,6 +197,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 res = odoo.call("stock.picking.invoice.wizard", "action_create_draft", TODAS, ids=[wid], context=ctx_w) or {}
                 inv = [res["res_id"]] if res.get("res_id") else next((d[2] for d in res.get("domain") or [] if isinstance(d, (list, tuple)) and d[0] == "id"), [])
                 errores = []
+                if inv:   # la cuenta para transferencias tiene que ser la de la empresa que factura, no la del pedido (Distriplus)
+                    try:
+                        corregir_banco(inv)
+                    except Exception as e:
+                        errores.append("cuenta bancaria: " + str(e)[:150])
                 if inv and fecha:
                     odoo.call("account.move", "write", TODAS, ids=inv, vals={"invoice_date": fecha, "date": fecha})
                 if inv and directo:
