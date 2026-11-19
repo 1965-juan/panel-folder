@@ -161,7 +161,7 @@ async function dLinea(c, b) {
 }
 
 // el PDF del albarán se abre en la empresa del pedido (si no, Odoo da «403 registros ultrasecretos» con otra empresa activa)
-const albPdf = (id, cid) => `${ODOO}/report/pdf/stock.report_deliveryslip/${id}` + (cid ? `?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [cid] }))}` : '');
+const albPdf = (id, cid) => `${ODOO}/report/pdf/stock.report_delivery_document_copy_2/${id}` + (cid ? `?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [cid] }))}` : '');
 
 // desplegable dentro de cada línea del pedido: proveedores de la ficha con su precio y pedirlo (se añade al borrador de ese proveedor)
 async function dPedirProv(bx, c, l) {
@@ -233,6 +233,9 @@ function dAcciones(c, d) {
         <a target="_blank" href="/ventas/${c.id}/vista?tipo=sin_confirmar&company=${company}">sin confirmar</a></small>
       <div class="d-mails"><button class="btn" data-m="presupuesto" ${d.email ? '' : 'disabled'}>📧 Enviar el presupuesto por email</button>
       <button class="btn" data-m="sin_confirmar" ${d.email ? '' : 'disabled'}>🔔 Avisar: no hemos recibido confirmación (¿archivamos o cambios?)</button></div></div>`;
+  }
+  if (c.estado !== 'carrito') {   // imprimir el pedido sin entrar en Odoo
+    h += `<div class="d-alb"><a class="btn" target="_blank" rel="noopener" href="${ODOO}/report/pdf/sale.report_saleorder/${c.id}${c.cid ? `?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [c.cid] }))}` : ''}">🖨 Imprimir ${c.estado === 'presupuesto' || c.estado === 'caducado' ? 'presupuesto' : 'pedido'} ${escH(c.ref)}</a></div>`;
   }
   if (d.albaranes && d.albaranes.length) {
     const est = { draft: 'borrador', waiting: 'esperando', confirmed: 'esperando material', assigned: 'listo para servir', done: 'servido' };

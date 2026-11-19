@@ -641,6 +641,13 @@ def lanzar_compras_entre_empresas():
         if so:
             odoo.call("purchase.order", "button_confirm", [p["company_id"][0]], ids=[p["id"]])
             hechos.append(p["name"])
+    # pedidos de la web que el cliente ya ha aprobado (quedan «enviados»): se confirman para que salgan en Pedidos y en el Panel AC
+    for s in odoo.search_read("sale.order", [("website_id", "!=", False), ("state", "=", "sent"), ("amount_total", ">", 0)], ["name", "company_id"], T, limit=50):
+        try:
+            odoo.call("sale.order", "action_confirm", [s["company_id"][0]], ids=[s["id"]])
+            hechos.append(s["name"])
+        except Exception:
+            pass
     return hechos
 
 
