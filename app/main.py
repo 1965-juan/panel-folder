@@ -606,14 +606,23 @@ async def admin_factura_libre(request: Request):
     c = [int(b["company"])]
 
     def run():
-        vals = {"move_type": "out_invoice", "partner_id": int(b["partner_id"]), "company_id": c[0],
-                "narration": b.get("observaciones") or False,
-                "invoice_line_ids": [[0, 0, {"name": l["nombre"], "quantity": 1, "price_unit": float(l["base"]),
-                                             "tax_ids": [[6, 0, [int(l["tax_id"])]]]}] for l in b["lineas"]]}
-        if b.get("fecha"):
-            vals["invoice_date"] = b["fecha"]
-        m = odoo.call("account.move", "create", c, vals_list=[vals], context={"default_move_type": "out_invoice"})
-        m = m[0] if isinstance(m, list) else m
+        lineas = []
+        for l in b["lineas"]:
+            v = {"name": l["nombre"], "quantity": float(l.get("cant") or 1), "price_unit": float(l.get("precio", l.get("base"))),
+                 "tax_ids": [[6, 0, [int(l["tax_id"])]]]}
+            if l.get("product_id"):
+                v["product_id"] = int(l["product_id"])
+            lineas.append([0, 0, v])
+        if b.get("move_id"):   # rehacer las líneas de un borrador
+            m = int(b["move_id"])
+            odoo.call("account.move", "write", c, ids=[m], vals={"invoice_line_ids": [[5, 0, 0]] + lineas, "narration": b.get("observaciones") or False})
+        else:
+            vals = {"move_type": "out_invoice", "partner_id": int(b["partner_id"]), "company_id": c[0],
+                    "narration": b.get("observaciones") or False, "invoice_line_ids": lineas}
+            if b.get("fecha"):
+                vals["invoice_date"] = b["fecha"]
+            m = odoo.call("account.move", "create", c, vals_list=[vals], context={"default_move_type": "out_invoice"})
+            m = m[0] if isinstance(m, list) else m
         return odoo.search_read("account.move", [("id", "=", m)], ["name", "state", "amount_untaxed", "amount_tax", "amount_total", "partner_id"], c)[0]
     return guard(run)
 
