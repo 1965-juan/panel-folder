@@ -771,6 +771,9 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
         lines = odoo.search_read("sale.order.line", [("order_id", "=", oid)],
                                  ["product_id", "name", "product_uom_qty", "qty_delivered", "qty_invoiced",
                                   "price_unit", "discount", "price_subtotal", "display_type", "is_downpayment", "product_type"], cids, order="sequence,id")
+        # la «Entrega estándar» a 0 € y el «3% en su pedido» de la web (ya pasado a cada línea) no se enseñan
+        lines = [l for l in lines if not (not l.get("display_type") and l.get("product_type") == "service" and not l.get("product_uom_qty")
+                                          and not l.get("qty_invoiced") and re.search(r"entrega|en su pedido", l.get("name") or "", re.I))]
         msgs = odoo.search_read("mail.message", [("model", "=", "sale.order"), ("res_id", "=", oid)],
                                 ["date", "author_id", "body", "subtype_id", "tracking_value_ids"], cids,
                                 order="date desc", limit=60)
