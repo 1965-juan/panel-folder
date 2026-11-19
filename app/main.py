@@ -627,6 +627,23 @@ async def admin_factura_libre(request: Request):
     return guard(run)
 
 
+def lanzar_compras_entre_empresas():
+    """Las compras que Odoo crea en Logipaper (u otra empresa) a Distriplus por un pedido de venta (origen S0xxxx) se quedan en borrador
+    y no salen para recibir. Cuando Distriplus ya ha servido ese pedido entero, se lanzan solas: la entrada aparece en Recepciones."""
+    T = [1, 2, 3, 4, 5]
+    cos = odoo.search_read("res.company", [], ["partner_id"], T)
+    pids = [c["partner_id"][0] for c in cos]
+    pos = odoo.search_read("purchase.order", [("state", "in", ["draft", "sent"]), ("partner_id", "in", pids), ("origin", "=like", "S0%")],
+                           ["name", "origin", "company_id"], T, limit=100)
+    hechos = []
+    for p in pos:
+        so = odoo.search_read("sale.order", [("name", "=", p["origin"]), ("state", "=", "sale"), ("delivery_status", "=", "full")], ["id"], T, limit=1)
+        if so:
+            odoo.call("purchase.order", "button_confirm", [p["company_id"][0]], ids=[p["id"]])
+            hechos.append(p["name"])
+    return hechos
+
+
 @app.post("/api/admin/descuento_web")
 async def admin_descuento_web(request: Request):
     _solo_admin(request)
@@ -640,7 +657,9 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
 
     def run():
         try:
-            convertir_descuento_web()
+            if convertir_descuento_web() is not None and time.time() - _DTO_WEB_HECHO.get("ee", 0) > 300:
+                _DTO_WEB_HECHO["ee"] = time.time()
+                lanzar_compras_entre_empresas()
         except Exception:
             pass
         cids, cd = scope(u, company)
