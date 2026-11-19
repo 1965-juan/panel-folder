@@ -2144,7 +2144,7 @@ async def admin_odoo_accion(request: Request):
     _solo_admin(request)
     b = await request.json()
     permitidas = {("purchase.order", "button_cancel"), ("product.product", "action_archive"), ("product.template", "action_archive"),
-                  ("stock.picking", "action_cancel")}
+                  ("stock.picking", "action_cancel"), ("purchase.order", "button_confirm")}
     if (b.get("model"), b.get("metodo")) not in permitidas:
         raise HTTPException(400, "Acción no permitida")
     ids = [int(i) for i in b.get("ids") or []]
@@ -2152,6 +2152,13 @@ async def admin_odoo_accion(request: Request):
         raise HTTPException(400, "Faltan ids")
 
     def run():
+        if b["model"] == "purchase.order" and b["metodo"] == "button_confirm":
+            ps = odoo.search_read("purchase.order", [("id", "in", ids)], ["name", "state", "company_id"], [1, 2, 3, 4, 5])
+            for p in ps:
+                if p["state"] in ("draft", "sent"):
+                    odoo.call("purchase.order", "button_confirm", [p["company_id"][0]], ids=[p["id"]])
+            ps = odoo.search_read("purchase.order", [("id", "in", ids)], ["name", "state", "picking_ids"], [1, 2, 3, 4, 5])
+            return {"ok": True, "hecho": [[p["name"], p["state"], p["picking_ids"]] for p in ps]}
         if b["model"] == "purchase.order":
             ps = odoo.search_read("purchase.order", [("id", "in", ids)], ["name", "state", "company_id"], [1, 2, 3, 4, 5])
             if any(p["state"] not in ("draft", "sent", "to approve") for p in ps):
