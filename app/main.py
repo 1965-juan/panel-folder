@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Form
@@ -551,11 +552,57 @@ def _gimeno_ids(cids):
     return gim
 
 
+_DTO_WEB_HECHO = {"t": 0}
+
+
+def convertir_descuento_web(order_ids=None, forzar=False):
+    """El 3 % de la web entra como una línea de descuento («3% en su pedido», recompensa de la promoción) que no se sirve ni se factura
+    con lo entregado. En los pedidos ya confirmados se pasa a un 3 % de descuento en cada línea de artículo y la línea de recompensa se deja a 0."""
+    if not forzar and time.time() - _DTO_WEB_HECHO["t"] < 120:
+        return []
+    _DTO_WEB_HECHO["t"] = time.time()
+    T = [1, 2, 3, 4, 5]
+    dom = [("is_reward_line", "=", True), ("product_uom_qty", ">", 0), ("order_id.state", "=", "sale")]
+    if order_ids:
+        dom.append(("order_id", "in", order_ids))
+    rw = odoo.search_read("sale.order.line", dom, ["order_id", "price_unit", "product_uom_qty", "company_id", "name"], T, limit=200)
+    hechos = []
+    for r in rw:
+        oid, c = r["order_id"][0], [r["company_id"][0]]
+        m = re.search(r"(\d+(?:[.,]\d+)?)\s*%", r.get("name") or "")
+        if not m:
+            continue
+        pct = float(m.group(1).replace(",", "."))
+        dl = [("order_id", "=", oid), ("display_type", "=", False), ("is_reward_line", "=", False), ("is_downpayment", "=", False), ("price_unit", ">", 0)]
+        try:
+            ls = odoo.search_read("sale.order.line", dl, ["discount", "price_unit", "product_uom_qty", "is_delivery", "qty_invoiced"], c, limit=1000)
+        except Exception:
+            ls = odoo.search_read("sale.order.line", dl, ["discount", "price_unit", "product_uom_qty", "qty_invoiced"], c, limit=1000)
+        ls = [l for l in ls if not l.get("is_delivery") and not l.get("qty_invoiced")]
+        for l in ls:
+            nuevo = round(100 - (100 - (l.get("discount") or 0)) * (1 - pct / 100), 4)   # se suma al descuento que ya tuviera
+            odoo.call("sale.order.line", "write", c, ids=[l["id"]], vals={"discount": nuevo})
+        odoo.call("sale.order.line", "write", c, ids=[r["id"]], vals={"product_uom_qty": 0})
+        hechos.append({"pedido": r["order_id"][1], "lineas": len(ls), "pct": pct})
+    return hechos
+
+
+@app.post("/api/admin/descuento_web")
+async def admin_descuento_web(request: Request):
+    _solo_admin(request)
+    b = await request.json()
+    return guard(lambda: convertir_descuento_web(b.get("pedidos"), forzar=True))
+
+
 @app.get("/api/ventas")
 def api_ventas(request: Request, company: str = "all", q: str = ""):
     u = current_user(request)
 
     def run():
+        try:
+            convertir_descuento_web()
+        except Exception:
+            pass
         cids, cd = scope(u, company)
         cli = [("partner_id", "ilike", q)] if q else []
         today = dt.date.today().isoformat()
