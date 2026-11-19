@@ -288,6 +288,6 @@ function acHojaReparto(hoja, traspasos, wYa) {
     h1{font-size:20px;margin:0 0 2px}.m{color:#555;font-size:12px;margin:0 0 10px}table{width:100%;border-collapse:collapse;font-size:12px}
     th,td{border:1px solid #bbb;padding:4px 6px;text-align:left}th{background:#eee}.n{text-align:right}.c{text-align:center;width:24px}
     .t{font-size:12px;margin-top:6px}.f{margin-top:28px;font-size:12px}</style></head><body>${pag}
-    <script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+    <script>window.onafterprint=()=>close();window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
   w.document.close();
 }
