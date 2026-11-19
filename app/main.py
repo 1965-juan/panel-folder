@@ -562,7 +562,7 @@ def convertir_descuento_web(order_ids=None, forzar=False):
         return []
     _DTO_WEB_HECHO["t"] = time.time()
     T = [1, 2, 3, 4, 5]
-    dom = [("is_reward_line", "=", True), ("product_uom_qty", ">", 0), ("order_id.state", "=", "sale")]
+    dom = [("reward_id", "!=", False), ("product_uom_qty", ">", 0), ("order_id.state", "=", "sale")]
     if order_ids:
         dom.append(("order_id", "in", order_ids))
     rw = odoo.search_read("sale.order.line", dom, ["order_id", "price_unit", "product_uom_qty", "company_id", "name"], T, limit=200)
@@ -573,7 +573,7 @@ def convertir_descuento_web(order_ids=None, forzar=False):
         if not m:
             continue
         pct = float(m.group(1).replace(",", "."))
-        dl = [("order_id", "=", oid), ("display_type", "=", False), ("is_reward_line", "=", False), ("is_downpayment", "=", False), ("price_unit", ">", 0)]
+        dl = [("order_id", "=", oid), ("display_type", "=", False), ("reward_id", "=", False), ("is_downpayment", "=", False), ("price_unit", ">", 0)]
         try:
             ls = odoo.search_read("sale.order.line", dl, ["discount", "price_unit", "product_uom_qty", "is_delivery", "qty_invoiced"], c, limit=1000)
         except Exception:
