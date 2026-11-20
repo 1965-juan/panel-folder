@@ -609,8 +609,81 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             with lock, con() as c:
                 c.execute("UPDATE lineas SET product_id=?, nombre=?, ref=? WHERE id=?", (pp["id"], pp["display_name"], pp.get("default_code") or "", lid))
             cache["t"] = 0
-            return {"ok": True, "product_id": pp["id"], "nombre": pp["display_name"]}
+            sumado = sumar_si_aplicado(x, pp["id"])
+            return {"ok": True, "product_id": pp["id"], "nombre": pp["display_name"], "sumado_stock": sumado}
         return guard(run)
+
+    def sumar_si_aplicado(x, pid):
+        """Si el recuento de esa línea ya se aplicó en Odoo (el código se quedó pendiente), al identificarlo se suma su cantidad al stock de esa ubicación."""
+        with con() as c:
+            r = c.execute("SELECT * FROM recuentos WHERE id=?", (x["rid"],)).fetchone()
+        if not r or r["estado"] != "aplicado" or not x["cant"]:
+            return 0
+        U = U_(r["ubic"])
+        E = U["empresa"]
+        ctx = {"inventory_mode": True, "inventory_name": f"Recuento panel #{r['id']}: código {x['codigo']} identificado"[:120]}
+        q = odoo.search_read("stock.quant", [("product_id", "=", pid), ("location_id", "=", U["loc"]), ("lot_id", "=", False)], ["id", "quantity"], [E], limit=1)
+        if q:
+            odoo.call("stock.quant", "write", [E], ids=[q[0]["id"]], vals={"inventory_quantity": q[0]["quantity"] + x["cant"]}, context=dict(ctx))
+            qid = q[0]["id"]
+        else:
+            qid = odoo.call("stock.quant", "create", [E], vals_list=[{"product_id": pid, "location_id": U["loc"], "inventory_quantity": x["cant"]}], context=dict(ctx))
+            qid = qid[0] if isinstance(qid, list) else qid
+        odoo.call("stock.quant", "action_apply_inventory", [E], ids=[qid], context=dict(ctx))
+        return x["cant"]
+
+    @app.post("/api/inv/linea/{lid}/asignar")
+    async def asignar(lid: int, request: Request):
+        """Solo admin: une un código pendiente a un artículo que ya existe (aunque el recuento ya esté aplicado). {product_id, poner_ean}"""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador")
+        b = await request.json()
+        pid = int(b.get("product_id") or 0)
+        with con() as c:
+            x = c.execute("SELECT * FROM lineas WHERE id=?", (lid,)).fetchone()
+        if not x or x["product_id"]:
+            raise HTTPException(400, "Esa línea ya tiene artículo")
+        x = dict(x)
+
+        def run():
+            pr = odoo.search_read("product.product", [("id", "=", pid)], ["display_name", "default_code", "barcode"], TODAS, limit=1)
+            if not pr:
+                raise HTTPException(404, "No encuentro el artículo")
+            if b.get("poner_ean") and not pr[0].get("barcode") and (x["codigo"] or "").strip() \
+                    and not odoo.search_read("product.product", [("barcode", "=", x["codigo"].strip())], ["id"], TODAS, limit=1):
+                odoo.call("product.product", "write", TODAS, ids=[pid], vals={"barcode": x["codigo"].strip()})
+                cache["t"] = 0
+            with lock, con() as c:
+                c.execute("UPDATE lineas SET product_id=?, nombre=?, ref=? WHERE id=?", (pid, pr[0]["display_name"], pr[0].get("default_code") or "", lid))
+            return {"ok": True, "sumado_stock": sumar_si_aplicado(x, pid)}
+        return guard(run)
+
+    def pendientes():
+        with con() as c:
+            return [dict(x) for x in c.execute("""SELECT l.id, l.codigo, l.nombre descripcion, l.cant, l.usuario, l.cuando, r.id rid, r.nombre zona, r.ubic, r.estado,
+                                                  i.nombre inventario FROM lineas l JOIN recuentos r ON r.id=l.rid LEFT JOIN inventarios i ON i.id=r.inv_id
+                                                  WHERE l.product_id IS NULL ORDER BY l.cuando DESC""").fetchall()]
+
+    @app.get("/api/inv/pendientes")
+    def ver_pendientes(request: Request, formato: str = ""):
+        """Códigos contados que no tenemos en Odoo: para buscarlos luego (proveedor, fabricante) y darlos de alta o unirlos a otro artículo."""
+        u = current_user(request)
+        us = puede(u)
+        ps = [p for p in pendientes() if p["ubic"] in us]
+        for p in ps:
+            p["ubic_nombre"] = UBIC[p["ubic"]]["nombre"]
+        if formato != "csv":
+            return {"pendientes": ps, "admin": es_admin(u)}
+        f = io.StringIO()
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["Código de barras", "Qué es (descripción)", "Unidades", "Dónde", "Zona", "Inventario", "Contado por", "Fecha",
+                    "Proveedor / fabricante", "Nombre correcto", "PVP", "Coste", "Unir a la referencia"])
+        for p in ps:
+            w.writerow([p["codigo"], p["descripcion"], str(p["cant"]).replace(".", ","), p["ubic_nombre"], p["zona"], p["inventario"] or "",
+                        p["usuario"], dt.datetime.fromtimestamp(p["cuando"]).strftime("%d/%m/%Y"), "", "", "", "", ""])
+        return Response("﻿" + f.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="codigos_por_identificar.csv"'})
 
     # ---------- lote provisional: lo que hay sin repartir y repartirlo a almacén / tiendas ----------
     DESTINOS = ["AC", "T1", "T2"]   # Distriplus (Logipaper es otra empresa: se le pasa con pedido entre empresas)

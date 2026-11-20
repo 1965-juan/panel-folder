@@ -53,6 +53,9 @@ td input{width:70px;padding:6px;text-align:right}
     <div class="card" id="ig-card"><h2>📋 Inventario general</h2><div id="ig-lista"></div>
       <div id="ig-nuevo" hidden><label>Abrir un inventario general en</label><div class="row"><select id="ig-ub"></select><button class="big pu" id="ig-go" style="margin:0">Abrir</button></div>
         <p class="muted">Se cuenta por zonas, en días distintos y con varios ordenadores a la vez, mientras se sigue vendiendo. Al final se aplica todo junto: suma las zonas y descuenta lo vendido desde que se contó cada artículo.</p></div></div>
+    <div class="card" id="pd-card" hidden><h2>🔎 Códigos por identificar <span class="bdg b-ab" id="pd-n"></span></h2>
+      <p class="muted">Lo contado que no tenemos en Odoo. Se queda aquí aparte hasta darlo de alta o unirlo a un artículo parecido (y entonces entra en el stock).</p>
+      <button class="big pu" id="pd-go">Ver la lista</button></div>
     <div class="card" id="lt-card" hidden><h2>📦 Lote provisional</h2>
       <p class="muted">Material contado en el «Lote provisional»: está en stock pero no es de ninguna tienda. Desde aquí lo mandas a donde haga falta.</p>
       <button class="big pu" id="lt-go">Ver y repartir el lote</button></div>
@@ -97,6 +100,16 @@ td input{width:70px;padding:6px;text-align:right}
     <button class="big sec" id="e-salir">← Volver a la lista (sigue abierto)</button>
   </section>
 
+  <!-- códigos por identificar -->
+  <section id="v-pend" hidden>
+    <div class="card"><h2>🔎 Códigos por identificar</h2>
+      <p class="muted">Busca cada código en internet (🔍), y cuando sepas qué es: <b>dar de alta</b> como artículo nuevo o <b>unir</b> a uno que ya tengamos. Si el recuento ya se aplicó, sus unidades entran en el stock en ese momento.</p>
+      <a class="big sec" style="text-align:center;text-decoration:none" href="/api/inv/pendientes?formato=csv">📥 Descargar en Excel</a></div>
+    <div class="card"><div id="pd-body"><p class="muted">Cargando…</p></div>
+      <div id="pd-bus" hidden><input id="pd-bq" placeholder="Busca el artículo al que unirlo" style="margin-top:8px"><div class="sug" id="pd-bres"></div></div></div>
+    <button class="big sec" id="pd-vol">← Volver</button>
+  </section>
+
   <!-- lote provisional: repartir -->
   <section id="v-lote" hidden>
     <div class="card"><h2>📦 Repartir el lote provisional</h2><p class="muted">Pon cuántas unidades van a cada sitio. Lo que no repartas se queda en el lote. Entre paréntesis, lo que ya tiene cada sitio.</p>
@@ -133,7 +146,7 @@ async function api(p, b) {
 }
 let INI = null, R = null, LIN = [], modo = localStorage.getItem('inv-modo') || 'rapido';
 const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar', 'b-ce'], aplicado: ['Aplicado en Odoo', 'b-ap'] };
-function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv', 'lote'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
+function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv', 'lote', 'pend'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
 
 /* ---------- lista ---------- */
 async function inicio() {
@@ -158,12 +171,57 @@ async function inicio() {
   $('#ig-lista').querySelectorAll('[data-i]').forEach(b => b.onclick = () => verInv(+b.dataset.i));
   $('#ig-nuevo').hidden = !INI.admin;
   $('#lt-card').hidden = !INI.ubicaciones.some(u => u.codigo === 'LOTE');
+  api('/api/inv/pendientes').then(p => { $('#pd-n').textContent = p.pendientes.length; $('#pd-card').hidden = !p.pendientes.length; }).catch(() => { });
   const libres = INI.ubicaciones.filter(u => !IV.some(i => i.estado === 'abierto' && i.ubic === u.codigo));
   $('#ig-ub').innerHTML = libres.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
   $('#ig-go').disabled = !libres.length;
   const abiertos = IV.filter(i => i.estado === 'abierto').map(i => i.ubic);
   if (!INI.admin) { $('#n-ub').innerHTML = INI.ubicaciones.filter(u => abiertos.includes(u.codigo)).map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join(''); $('#n-go').disabled = !abiertos.length; }
 }
+/* ---------- códigos por identificar ---------- */
+let PD = null, PDU = null;
+async function verPend() {
+  vista('pend'); history.replaceState(null, '', '/inventario#pend'); $('#pd-bus').hidden = true;
+  try { PD = await api('/api/inv/pendientes'); } catch (e) { $('#pd-body').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
+  $('#pd-body').innerHTML = PD.pendientes.length ? `<table><thead><tr><th>Código / qué es</th><th class="n">Uds</th><th></th></tr></thead><tbody>${PD.pendientes.map(p => `<tr>
+    <td><b>${escH(p.codigo)}</b> <a target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(p.codigo)}">🔍</a>${p.descripcion ? `<br>${escH(p.descripcion)}` : ''}
+      <br><small class="muted">${escH(p.ubic_nombre)} · ${escH(p.zona)} · ${fecha(p.cuando)}${p.estado === 'aplicado' ? ' · pendiente de entrar en stock' : ''}</small></td>
+    <td class="n">${num(p.cant)}</td>
+    <td>${PD.admin ? `<button class="big pu" style="width:auto;margin:0 0 4px;padding:7px 10px;font-size:14px" data-alta="${p.id}">＋ Alta</button>
+      <button class="big sec" style="width:auto;margin:0;padding:7px 10px;font-size:14px" data-unir="${p.id}">🔗 Unir</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No queda ningún código por identificar 🎉</p>';
+  $('#pd-body').querySelectorAll('[data-alta]').forEach(b => b.onclick = async () => {
+    const p = PD.pendientes.find(x => x.id === +b.dataset.alta);
+    const nom = prompt(`Nombre del artículo nuevo (código ${p.codigo}):`, p.descripcion || ''); if (!nom) return;
+    const pvp = prompt('Precio de venta (PVP sin IVA):', '0'); if (pvp === null) return;
+    const coste = prompt('Coste (sin IVA):', '0'); if (coste === null) return;
+    b.disabled = true;
+    try { const r = await api(`/api/inv/linea/${p.id}/crear_articulo`, { nombre: nom, pvp: pvp.replace(',', '.'), coste: coste.replace(',', '.') });
+      alert(`Creado: ${r.nombre}${r.sumado_stock ? ` · ${num(r.sumado_stock)} uds entradas en stock` : ''}`); verPend(); }
+    catch (e) { alert(e.message); b.disabled = false; }
+  });
+  $('#pd-body').querySelectorAll('[data-unir]').forEach(b => b.onclick = () => {
+    PDU = PD.pendientes.find(x => x.id === +b.dataset.unir); $('#pd-bus').hidden = false; $('#pd-bq').value = PDU.descripcion || ''; $('#pd-bq').focus(); $('#pd-bq').oninput();
+  });
+}
+let ptm;
+$('#pd-bq').oninput = () => {
+  clearTimeout(ptm); ptm = setTimeout(async () => {
+    const q = $('#pd-bq').value.trim(); if (q.length < 2) { $('#pd-bres').innerHTML = ''; return; }
+    const r = await api(`/api/inv/buscar?q=${encodeURIComponent(q)}`).catch(() => []);
+    $('#pd-bres').innerHTML = r.length ? r.map(p => `<a href="#" data-p="${p.id}"><b>${escH(p.nombre)}</b><br><small class="muted">${escH(p.ref)} ${escH(p.ean)}</small></a>`).join('') : '<p class="muted" style="padding:8px">Nada</p>';
+    $('#pd-bres').querySelectorAll('[data-p]').forEach(a => a.onclick = async ev => {
+      ev.preventDefault(); const p = r.find(x => x.id === +a.dataset.p);
+      if (!confirm(`¿Unir el código ${PDU.codigo} (${num(PDU.cant)} uds) a «${p.nombre}»?`)) return;
+      const ean = !p.ean && confirm(`Ese artículo no tiene código de barras. ¿Le pongo el ${PDU.codigo} para que la próxima vez se lea solo?`);
+      try { const x = await api(`/api/inv/linea/${PDU.id}/asignar`, { product_id: p.id, poner_ean: ean }); alert(`Unido${x.sumado_stock ? ` · ${num(x.sumado_stock)} uds entradas en stock` : ''}`); verPend(); }
+      catch (e) { alert(e.message); }
+    });
+  }, 300);
+};
+$('#pd-go').onclick = () => verPend();
+$('#pd-vol').onclick = () => inicio();
+
 /* ---------- lote provisional ---------- */
 let LT = null; const REP = {};
 async function verLote() {
@@ -428,7 +486,7 @@ $('#se-scan').addEventListener('keydown', async e => {
   catch (er) { pita(false); $('#se-res').innerHTML = `<div class="err">${escH(er.message)}</div>`; }
 });
 const hs = location.hash.slice(1), h0 = +hs;
-hs === 'lote' ? verLote() : hs.startsWith('i') && +hs.slice(1) ? verInv(+hs.slice(1)) : h0 ? abrir(h0) : inicio();
+hs === 'pend' ? verPend() : hs === 'lote' ? verLote() : hs.startsWith('i') && +hs.slice(1) ? verInv(+hs.slice(1)) : h0 ? abrir(h0) : inicio();
 </script>
 </body>
 </html>
