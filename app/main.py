@@ -808,8 +808,9 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             out.pop("facturas", None)   # almacén y compras no ven facturas
             out.pop("borradores", None)
         if "*" not in regla_empresas(u):
-            # usuarios limitados: no ven ventas entre empresas del grupo
-            grupo = ["DISTRIPLUS", "LOGIPAPER", "INGRAF", "FERMASA"]
+            # usuarios limitados: no ven ventas entre empresas del grupo, salvo Logipaper,
+            # que para Distriplus es un cliente más (sus pedidos, albaranes y servidos salen como los de cualquiera)
+            grupo = ["DISTRIPLUS", "INGRAF", "FERMASA"]
             out = {k: [c for c in v if not any(g in c["cliente"].upper() for g in grupo)] for k, v in out.items()}
         return out
 
