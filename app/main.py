@@ -672,6 +672,22 @@ def admin_web_sin_stock(request: Request):
     return guard(lambda: {"cambiados": web_sin_stock(3000)})
 
 
+@app.post("/api/admin/web_mensaje_pago")
+async def admin_web_mensaje_pago(request: Request):
+    """Solo admin: cambia el mensaje que ve el cliente en la web al terminar el pedido (payment.provider.pending_msg).
+    {provider_id, html}"""
+    _solo_admin(request)
+    b = await request.json()
+    pid, html = int(b.get("provider_id") or 0), (b.get("html") or "").strip()
+    if not pid or not html:
+        raise HTTPException(400, "Faltan provider_id o html")
+
+    def run():
+        odoo.call("payment.provider", "write", [1, 2, 3, 4, 5], ids=[pid], vals={"pending_msg": html})
+        return {"ok": True}
+    return guard(run)
+
+
 @app.post("/api/admin/descuento_web")
 async def admin_descuento_web(request: Request):
     _solo_admin(request)
