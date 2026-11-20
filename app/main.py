@@ -765,7 +765,7 @@ async def admin_documentos_neutros(request: Request):
                 continue
             extra = ('<xpath expr="//*[contains(@t-if, \'_get_edi_builders\')]" position="replace"/>'
                      if "_get_edi_builders" in v["arch_db"] else '')   # «Conecte su software con DISTRIPLUS…»
-            arch = (f'<data><xpath expr="//t[@t-call=\'{de}\']" position="attributes">'
+            arch = (f'<data><xpath expr="//*[@t-call=\'{de}\']" position="attributes">'
                     f'<attribute name="t-call">{a}</attribute></xpath>{extra}</data>')
             hecho[key] = guardar("folder_neutro.inh_" + key.replace(".", "_"), arch, inherit_id=v["id"], nombre=f"Folder neutro: {key}")
         # la página del pedido en la web («Mis pedidos»): fuera el «Conecte su software con DISTRIPLUS…»
