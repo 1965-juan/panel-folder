@@ -693,7 +693,7 @@ NEUTRO_HTML = ('<div class="folder-neutro" style="line-height:1.35"><strong>Fold
 NEUTRO_PIE = '<div class="folder-neutro text-center">Folder Castellón · Tel. 964 27 04 31 · info@foldercastellon.es · www.foldercastellon.com</div>'
 
 
-def _layout_neutro(arch, nuevo_nombre):
+def _layout_neutro(arch, nuevo_nombre, blanco=False):
     """Copia de un layout de informe (boxed, wave…) sin datos de la empresa: solo el logo y el contacto de Folder."""
     import xml.etree.ElementTree as ET
     root = ET.fromstring(arch)
@@ -718,6 +718,13 @@ def _layout_neutro(arch, nuevo_nombre):
             el.remove(c)
         el.tag = "div"
         el.append(nuevo)
+    if blanco:   # albaranes: se imprimen en papel con membrete → cabecera y pie vacíos
+        for el in root.iter():
+            cls = (el.get("t-attf-class") or el.get("class") or "").strip()
+            if cls.startswith(("header", "footer")):
+                el.text = None
+                for c in list(el):
+                    el.remove(c)
     return ET.tostring(root, encoding="unicode")
 
 
@@ -752,22 +759,30 @@ async def admin_documentos_neutros(request: Request):
         # porque otras copias de Nextdoo (membrete) heredan del albarán y buscan su t-call original
         wave = vista("web.external_layout_wave")
         xs = []
-        for campo, html in (("company.company_details", NEUTRO_HTML), ("company.partner_id", NEUTRO_HTML), ("company.report_footer", NEUTRO_PIE)):
+        for campo, html in (("company.company_details", NEUTRO_HTML), ("company.partner_id", NEUTRO_HTML)):
             if f't-field="{campo}"' in wave["arch_db"]:
                 xs.append(f'<xpath expr="//*[@t-field=\'{campo}\']" position="replace">{html}</xpath>')
         if "vat_label" in wave["arch_db"]:
             xs.append('<xpath expr="//*[*[contains(@t-esc, \'vat_label\')]]" position="replace"/>')
         hecho["wave"] = guardar("folder_neutro.inh_layout_wave", "<data>" + "".join(xs) + "</data>", inherit_id=wave["id"], nombre="Folder neutro: layout wave")
-        # el «elegidor» igual que web.external_layout pero llamando a la copia neutra
-        ext = vista("web.external_layout")["arch_db"]
-        ext = ext.replace('t-name="web.external_layout"', 't-name="folder_neutro.external_layout"')
-        ext = ext.replace('t-call="{{company.external_report_layout_id.sudo().key}}"', 't-call="folder_neutro.layout_boxed"')
-        ext = ext.replace('t-call="web.external_layout_standard"', 't-call="folder_neutro.layout_boxed"')
-        hecho["folder_neutro.external_layout"] = guardar("folder_neutro.external_layout", ext, nombre="Folder neutro (external_layout)")
-        # documentos no oficiales que pasan a la cabecera neutra
+        hecho["blanco"] = guardar("folder_neutro.layout_blanco", _layout_neutro(vista("web.external_layout_boxed")["arch_db"], "folder_neutro.layout_blanco", blanco=True),
+                                  nombre="Folder neutro: albarán en blanco (papel con membrete)")
+        # el «elegidor» igual que web.external_layout pero llamando a la copia neutra; INGRAF (5) sigue con su propio diseño y logo
+        base = vista("web.external_layout")["arch_db"]
+        orig_if = 't-if="company.external_report_layout_id" t-call="{{company.external_report_layout_id.sudo().key}}"'
+        orig_else = 't-else="else" t-call="web.external_layout_standard"'
+        if orig_if not in base or orig_else not in base:
+            raise HTTPException(500, "web.external_layout ha cambiado: no lo toco")
+        for nombre, destino in (("folder_neutro.external_layout", "folder_neutro.layout_boxed"), ("folder_neutro.external_layout_blanco", "folder_neutro.layout_blanco")):
+            ext = base.replace('t-name="web.external_layout"', f't-name="{nombre}"')
+            cond = "True" if destino.endswith("blanco") else "company.id != 5"   # albaranes en blanco para todas
+            ext = ext.replace(orig_if, f't-if="{cond}" t-call="{destino}"')
+            ext = ext.replace(orig_else, 't-else="else" t-call="{{company.external_report_layout_id.sudo().key or \'web.external_layout_standard\'}}"')
+            hecho[nombre] = guardar(nombre, ext, nombre=f"Folder neutro ({nombre})")
+        # documentos no oficiales: pedidos/presupuestos con logo y contacto de Folder; albaranes en blanco
         for key, de, a in (("sale.report_saleorder_document", "web.external_layout", "folder_neutro.external_layout"),
-                           ("stock.report_delivery_document", "web.external_layout", "folder_neutro.external_layout"),
-                           ("stock.report_delivery_document_copy_1_copy_1", "web.external_layout", "folder_neutro.external_layout")):
+                           ("stock.report_delivery_document", "web.external_layout", "folder_neutro.external_layout_blanco"),
+                           ("stock.report_delivery_document_copy_1_copy_1", "web.external_layout", "folder_neutro.external_layout_blanco")):
             v = vista(key)
             if not v or f't-call="{de}"' not in v["arch_db"]:
                 hecho[key] = "sin cambio"
@@ -783,6 +798,27 @@ async def admin_documentos_neutros(request: Request):
             hecho["portal"] = guardar("folder_neutro.inh_sale_portal", '<data><xpath expr="//*[contains(@t-if, \'_get_edi_builders\')]" position="replace"/></data>',
                                       inherit_id=v["id"], nombre="Folder neutro: portal pedido")
         return hecho
+    return guard(run)
+
+
+@app.post("/api/admin/web_acceso")
+async def admin_web_acceso(request: Request):
+    """Solo admin: cómo se entra en la tienda web. {checkout: optional|mandatory|disabled, registro: b2b|b2c}
+    b2b = solo se registra quien invitamos; mandatory = hay que entrar con usuario para hacer el pedido."""
+    _solo_admin(request)
+    b = await request.json()
+    vals = {}
+    if b.get("checkout") in ("optional", "mandatory", "disabled"):
+        vals["account_on_checkout"] = b["checkout"]
+    if b.get("registro") in ("b2b", "b2c"):
+        vals["auth_signup_uninvited"] = b["registro"]
+    if not vals:
+        raise HTTPException(400, "Nada que cambiar")
+
+    def run():
+        ws = odoo.search_read("website", [("company_id", "=", 1)], ["id"], [1, 2, 3, 4, 5])
+        odoo.call("website", "write", [1, 2, 3, 4, 5], ids=[w["id"] for w in ws], vals=vals)
+        return odoo.search_read("website", [("id", "in", [w["id"] for w in ws])], ["name", "account_on_checkout", "auth_signup_uninvited"], [1, 2, 3, 4, 5])
     return guard(run)
 
 
@@ -925,7 +961,10 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["email"] = "" if c["anonimo"] else ems.get(c.get("pid"), "")
                 if c["anonimo"]:
                     c["cliente"] = "Visitante sin identificar"
-        pids = [c["id"] for c in presu + caduc + carritos]
+            # los carritos de visitantes sin identificar no se enseñan: no se puede hacer nada con ellos
+            # (para comprar hay que entrar con usuario, y solo se registra quien invitamos)
+            carritos[:] = [c for c in carritos if not c["anonimo"]]
+        pids =[c["id"] for c in presu + caduc + carritos]
         if pids:
             try:
                 msgs = odoo.search_read("mail.message", [("model", "=", "sale.order"), ("res_id", "in", pids), ("message_type", "in", ["email", "comment", "email_outgoing"]),
