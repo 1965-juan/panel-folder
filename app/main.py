@@ -746,8 +746,18 @@ async def admin_documentos_neutros(request: Request):
 
     def run():
         hecho = {}
-        for base, nuevo in (("web.external_layout_boxed", "folder_neutro.layout_boxed"), ("web.external_layout_wave", "folder_neutro.layout_wave")):
-            hecho[nuevo] = guardar(nuevo, _layout_neutro(vista(base)["arch_db"], nuevo), nombre=f"Folder neutro ({base})")
+        hecho["boxed"] = guardar("folder_neutro.layout_boxed", _layout_neutro(vista("web.external_layout_boxed")["arch_db"], "folder_neutro.layout_boxed"),
+                                 nombre="Folder neutro (web.external_layout_boxed)")
+        # «wave» solo lo usan los albaranes valorados (las facturas van con «boxed»): se neutraliza en el propio diseño,
+        # porque otras copias de Nextdoo (membrete) heredan del albarán y buscan su t-call original
+        wave = vista("web.external_layout_wave")
+        xs = []
+        for campo, html in (("company.company_details", NEUTRO_HTML), ("company.partner_id", NEUTRO_HTML), ("company.report_footer", NEUTRO_PIE)):
+            if f't-field="{campo}"' in wave["arch_db"]:
+                xs.append(f'<xpath expr="//*[@t-field=\'{campo}\']" position="replace">{html}</xpath>')
+        if "vat_label" in wave["arch_db"]:
+            xs.append('<xpath expr="//*[*[contains(@t-esc, \'vat_label\')]]" position="replace"/>')
+        hecho["wave"] = guardar("folder_neutro.inh_layout_wave", "<data>" + "".join(xs) + "</data>", inherit_id=wave["id"], nombre="Folder neutro: layout wave")
         # el «elegidor» igual que web.external_layout pero llamando a la copia neutra
         ext = vista("web.external_layout")["arch_db"]
         ext = ext.replace('t-name="web.external_layout"', 't-name="folder_neutro.external_layout"')
@@ -757,8 +767,7 @@ async def admin_documentos_neutros(request: Request):
         # documentos no oficiales que pasan a la cabecera neutra
         for key, de, a in (("sale.report_saleorder_document", "web.external_layout", "folder_neutro.external_layout"),
                            ("stock.report_delivery_document", "web.external_layout", "folder_neutro.external_layout"),
-                           ("stock.report_delivery_document_copy_1_copy_1", "web.external_layout", "folder_neutro.external_layout"),
-                           ("stock.report_delivery_document_copy_2", "web.external_layout_wave", "folder_neutro.layout_wave")):
+                           ("stock.report_delivery_document_copy_1_copy_1", "web.external_layout", "folder_neutro.external_layout")):
             v = vista(key)
             if not v or f't-call="{de}"' not in v["arch_db"]:
                 hecho[key] = "sin cambio"
