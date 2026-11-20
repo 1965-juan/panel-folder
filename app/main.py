@@ -763,9 +763,16 @@ async def admin_documentos_neutros(request: Request):
             if not v or f't-call="{de}"' not in v["arch_db"]:
                 hecho[key] = "sin cambio"
                 continue
+            extra = ('<xpath expr="//*[contains(@t-if, \'_get_edi_builders\')]" position="replace"/>'
+                     if "_get_edi_builders" in v["arch_db"] else '')   # «Conecte su software con DISTRIPLUS…»
             arch = (f'<data><xpath expr="//t[@t-call=\'{de}\']" position="attributes">'
-                    f'<attribute name="t-call">{a}</attribute></xpath></data>')
+                    f'<attribute name="t-call">{a}</attribute></xpath>{extra}</data>')
             hecho[key] = guardar("folder_neutro.inh_" + key.replace(".", "_"), arch, inherit_id=v["id"], nombre=f"Folder neutro: {key}")
+        # la página del pedido en la web («Mis pedidos»): fuera el «Conecte su software con DISTRIPLUS…»
+        v = vista("sale.sale_order_portal_template")
+        if v and "_get_edi_builders" in v["arch_db"]:
+            hecho["portal"] = guardar("folder_neutro.inh_sale_portal", '<data><xpath expr="//*[contains(@t-if, \'_get_edi_builders\')]" position="replace"/></data>',
+                                      inherit_id=v["id"], nombre="Folder neutro: portal pedido")
         return hecho
     return guard(run)
 
