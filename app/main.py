@@ -688,6 +688,88 @@ async def admin_web_mensaje_pago(request: Request):
     return guard(run)
 
 
+NEUTRO_HTML = ('<div class="folder-neutro" style="line-height:1.35"><strong>Folder Castellón</strong><br/>Tel. 964 27 04 31<br/>'
+               'info@foldercastellon.es<br/>www.foldercastellon.com</div>')
+NEUTRO_PIE = '<div class="folder-neutro text-center">Folder Castellón · Tel. 964 27 04 31 · info@foldercastellon.es · www.foldercastellon.com</div>'
+
+
+def _layout_neutro(arch, nuevo_nombre):
+    """Copia de un layout de informe (boxed, wave…) sin datos de la empresa: solo el logo y el contacto de Folder."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(arch)
+    root.set("t-name", nuevo_nombre)
+    padres = {c: p for p in root.iter() for c in p}
+    for el in list(root.iter()):
+        tf = el.get("t-field") or el.get("t-esc") or el.get("t-out") or ""
+        if not tf.startswith("company."):
+            continue
+        if tf.startswith(("company.logo", "company.report_header", "company.layout_background")):
+            continue
+        if "vat_label" in tf:   # la línea del NIF: fuera
+            li = padres.get(el)
+            if li is not None:
+                li.attrib.clear()
+                li.set("t-if", "False")
+            continue
+        pie = tf == "company.report_footer"
+        nuevo = ET.fromstring(NEUTRO_PIE if pie else NEUTRO_HTML)
+        el.attrib.clear(); el.text = None
+        for c in list(el):
+            el.remove(c)
+        el.tag = "div"
+        el.append(nuevo)
+    return ET.tostring(root, encoding="unicode")
+
+
+@app.post("/api/admin/documentos_neutros")
+async def admin_documentos_neutros(request: Request):
+    """Solo admin: pedidos, presupuestos y albaranes salen sin Distriplus (solo logo y contacto de Folder).
+    Las facturas no se tocan. {informes: [ids de ir.ui.view a cambiar], probar: bool}"""
+    _solo_admin(request)
+    b = await request.json()
+    T = [1, 2, 3, 4, 5]
+
+    def vista(key):
+        r = odoo.search_read("ir.ui.view", [("key", "=", key)], ["id", "arch_db"], T, limit=1)
+        return r[0] if r else None
+
+    def guardar(key, arch, inherit_id=None, nombre=None):
+        v = vista(key)
+        vals = {"arch_db": arch}
+        if v:
+            odoo.call("ir.ui.view", "write", T, ids=[v["id"]], vals=vals)
+            return v["id"]
+        vals.update({"name": nombre or key, "key": key, "type": "qweb"})
+        if inherit_id:
+            vals.update({"inherit_id": inherit_id, "mode": "extension"})
+        return odoo.call("ir.ui.view", "create", T, vals_list=[vals])
+
+    def run():
+        hecho = {}
+        for base, nuevo in (("web.external_layout_boxed", "folder_neutro.layout_boxed"), ("web.external_layout_wave", "folder_neutro.layout_wave")):
+            hecho[nuevo] = guardar(nuevo, _layout_neutro(vista(base)["arch_db"], nuevo), nombre=f"Folder neutro ({base})")
+        # el «elegidor» igual que web.external_layout pero llamando a la copia neutra
+        ext = vista("web.external_layout")["arch_db"]
+        ext = ext.replace('t-name="web.external_layout"', 't-name="folder_neutro.external_layout"')
+        ext = ext.replace('t-call="{{company.external_report_layout_id.sudo().key}}"', 't-call="folder_neutro.layout_boxed"')
+        ext = ext.replace('t-call="web.external_layout_standard"', 't-call="folder_neutro.layout_boxed"')
+        hecho["folder_neutro.external_layout"] = guardar("folder_neutro.external_layout", ext, nombre="Folder neutro (external_layout)")
+        # documentos no oficiales que pasan a la cabecera neutra
+        for key, de, a in (("sale.report_saleorder_document", "web.external_layout", "folder_neutro.external_layout"),
+                           ("stock.report_delivery_document", "web.external_layout", "folder_neutro.external_layout"),
+                           ("stock.report_delivery_document_copy_1_copy_1", "web.external_layout", "folder_neutro.external_layout"),
+                           ("stock.report_delivery_document_copy_2", "web.external_layout_wave", "folder_neutro.layout_wave")):
+            v = vista(key)
+            if not v or f't-call="{de}"' not in v["arch_db"]:
+                hecho[key] = "sin cambio"
+                continue
+            arch = (f'<data><xpath expr="//t[@t-call=\'{de}\']" position="attributes">'
+                    f'<attribute name="t-call">{a}</attribute></xpath></data>')
+            hecho[key] = guardar("folder_neutro.inh_" + key.replace(".", "_"), arch, inherit_id=v["id"], nombre=f"Folder neutro: {key}")
+        return hecho
+    return guard(run)
+
+
 @app.post("/api/admin/descuento_web")
 async def admin_descuento_web(request: Request):
     _solo_admin(request)
