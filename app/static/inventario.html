@@ -53,6 +53,9 @@ td input{width:70px;padding:6px;text-align:right}
     <div class="card" id="ig-card"><h2>📋 Inventario general</h2><div id="ig-lista"></div>
       <div id="ig-nuevo" hidden><label>Abrir un inventario general en</label><div class="row"><select id="ig-ub"></select><button class="big pu" id="ig-go" style="margin:0">Abrir</button></div>
         <p class="muted">Se cuenta por zonas, en días distintos y con varios ordenadores a la vez, mientras se sigue vendiendo. Al final se aplica todo junto: suma las zonas y descuenta lo vendido desde que se contó cada artículo.</p></div></div>
+    <div class="card" id="lt-card" hidden><h2>📦 Lote provisional</h2>
+      <p class="muted">Material contado en el «Lote provisional»: está en stock pero no es de ninguna tienda. Desde aquí lo mandas a donde haga falta.</p>
+      <button class="big pu" id="lt-go">Ver y repartir el lote</button></div>
     <div class="card">
       <h2>Contar una zona</h2>
       <label>Dónde se cuenta</label><select id="n-ub"></select>
@@ -94,6 +97,15 @@ td input{width:70px;padding:6px;text-align:right}
     <button class="big sec" id="e-salir">← Volver a la lista (sigue abierto)</button>
   </section>
 
+  <!-- lote provisional: repartir -->
+  <section id="v-lote" hidden>
+    <div class="card"><h2>📦 Repartir el lote provisional</h2><p class="muted">Pon cuántas unidades van a cada sitio. Lo que no repartas se queda en el lote. Entre paréntesis, lo que ya tiene cada sitio.</p>
+      <input id="lt-q" placeholder="Filtrar por nombre o referencia"></div>
+    <div class="card" style="overflow-x:auto"><div id="lt-body"><p class="muted">Cargando…</p></div></div>
+    <button class="big" id="lt-ok">✅ Repartir lo marcado</button>
+    <button class="big sec" id="lt-vol">← Volver</button>
+  </section>
+
   <!-- inventario general -->
   <section id="v-inv" hidden>
     <div class="card"><h2 id="i-tit"></h2><div id="i-info" class="muted"></div></div>
@@ -121,7 +133,7 @@ async function api(p, b) {
 }
 let INI = null, R = null, LIN = [], modo = localStorage.getItem('inv-modo') || 'rapido';
 const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar', 'b-ce'], aplicado: ['Aplicado en Odoo', 'b-ap'] };
-function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
+function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv', 'lote'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
 
 /* ---------- lista ---------- */
 async function inicio() {
@@ -145,12 +157,47 @@ async function inicio() {
     : `<p class="muted">${INI.admin ? 'No hay ninguno abierto.' : 'No hay ningún inventario abierto. Lo abre el administrador los días de recuento.'}</p>`;
   $('#ig-lista').querySelectorAll('[data-i]').forEach(b => b.onclick = () => verInv(+b.dataset.i));
   $('#ig-nuevo').hidden = !INI.admin;
+  $('#lt-card').hidden = !INI.ubicaciones.some(u => u.codigo === 'LOTE');
   const libres = INI.ubicaciones.filter(u => !IV.some(i => i.estado === 'abierto' && i.ubic === u.codigo));
   $('#ig-ub').innerHTML = libres.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
   $('#ig-go').disabled = !libres.length;
   const abiertos = IV.filter(i => i.estado === 'abierto').map(i => i.ubic);
   if (!INI.admin) { $('#n-ub').innerHTML = INI.ubicaciones.filter(u => abiertos.includes(u.codigo)).map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join(''); $('#n-go').disabled = !abiertos.length; }
 }
+/* ---------- lote provisional ---------- */
+let LT = null; const REP = {};
+async function verLote() {
+  vista('lote'); history.replaceState(null, '', '/inventario#lote'); $('#lt-body').innerHTML = '<p class="muted">Cargando…</p>';
+  try { LT = await api('/api/inv/lote'); } catch (e) { $('#lt-body').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
+  $('#lt-ok').hidden = !LT.admin; pintaLote();
+}
+function pintaLote() {
+  const q = ($('#lt-q').value || '').toLowerCase(), D = LT.destinos;
+  const L = LT.lineas.filter(l => !q || (l.nombre + ' ' + (l.ref || '')).toLowerCase().includes(q));
+  $('#lt-body').innerHTML = LT.lineas.length ? `<table><thead><tr><th>Artículo</th><th class="n">En lote</th>${D.map(x => `<th class="n">${escH(x.codigo)}</th>`).join('')}</tr></thead><tbody>
+    ${L.map(l => `<tr><td>${escH(l.nombre)}<br><small class="muted">PVP ${eur(l.pvp || 0)} · coste ${eur(l.coste || 0)}</small></td><td class="n"><b>${num(l.lote)}</b></td>
+      ${D.map(x => `<td class="n"><input type="number" inputmode="decimal" min="0" data-p="${l.product_id}" data-d="${x.codigo}" value="${(REP[l.product_id] || {})[x.codigo] || ''}" ${LT.admin ? '' : 'disabled'}><br><small class="muted">(${num(l[x.codigo] || 0)})</small></td>`).join('')}</tr>`).join('')}
+    </tbody></table>` : '<p class="muted">El lote está vacío. Cuenta el material en «Lote provisional» y aplica el inventario para que aparezca aquí.</p>';
+  $('#lt-body').querySelectorAll('input[data-p]').forEach(i => i.oninput = () => { (REP[+i.dataset.p] ||= {})[i.dataset.d] = i.value; });
+}
+$('#lt-q').oninput = () => LT && pintaLote();
+$('#lt-go').onclick = () => verLote();
+$('#lt-vol').onclick = () => inicio();
+$('#lt-ok').onclick = async () => {
+  const rep = Object.entries(REP).map(([p, v]) => ({ product_id: +p, ...Object.fromEntries(Object.entries(v).map(([k, x]) => [k, +String(x).replace(',', '.') || 0])) }))
+    .filter(r => LT.destinos.some(d => r[d.codigo] > 0));
+  if (!rep.length) { alert('No has puesto ninguna cantidad'); return; }
+  for (const r of rep) { const l = LT.lineas.find(x => x.product_id === r.product_id); const t = LT.destinos.reduce((a, d) => a + (r[d.codigo] || 0), 0);
+    if (l && t > l.lote + 0.0001) { alert(`De ${l.nombre} repartes ${num(t)} y en el lote hay ${num(l.lote)}`); return; } }
+  const res = LT.destinos.map(d => [d.nombre, rep.reduce((a, r) => a + (r[d.codigo] || 0), 0)]).filter(x => x[1] > 0).map(x => `${x[0]}: ${num(x[1])} uds`).join('\n');
+  if (!confirm(`¿Hacer los traspasos desde el lote?\n\n${res}`)) return;
+  const b = $('#lt-ok'); b.disabled = true; b.textContent = 'Haciendo los traspasos en Odoo…';
+  try { const x = await api('/api/inv/lote/repartir', { reparto: rep });
+    alert('Hecho:\n' + x.traspasos.map(t => `${t.destino}: ${t.albaran} (${t.articulos} artículos)${t.estado === 'done' ? '' : ' — revisar, no se validó'}`).join('\n'));
+    Object.keys(REP).forEach(k => delete REP[k]); verLote(); }
+  catch (e) { alert(e.message); }
+  b.disabled = false; b.textContent = '✅ Repartir lo marcado';
+};
 $('#ig-go').onclick = async () => {
   const ub = $('#ig-ub').value, nom = INI.ubicaciones.find(u => u.codigo === ub).nombre;
   if (!confirm(`¿Abrir el inventario general de ${nom}? A partir de ahora las zonas que se cuenten allí entran en él.`)) return;
@@ -181,7 +228,9 @@ async function verInv(id) {
       <td class="n">${num(l.contado)}</td><td class="n">${l.salido ? '−' + num(l.salido) : ''}</td><td class="n"><b>${num(l.final)}</b></td><td class="n">${num(l.teorico)}</td>
       <td class="n ${l.dif > 0 ? 'pos' : l.dif < 0 ? 'neg' : ''}">${l.dif > 0 ? '+' : ''}${num(l.dif)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Todo cuadra</td></tr>'}
     </tbody></table></div>`;
-  if (d.sin_articulo.length) h += `<div class="card"><b>⚠️ Códigos no encontrados (no se ajustan hasta asignarles artículo):</b><br>${d.sin_articulo.map(l => `${escH(l.codigo)} × ${num(l.cant)} (${escH(l.zona)})`).join(' · ')}</div>`;
+  if (d.sin_articulo.length) h += `<div class="card"><h2>⚠️ Códigos que no tenemos (${d.sin_articulo.length})</h2><p class="muted">No entran en el stock hasta darlos de alta o asignarles un artículo.</p>
+    <table><thead><tr><th>Código / qué es</th><th class="n">Uds</th><th></th></tr></thead><tbody>${d.sin_articulo.map(l => `<tr><td><b>${escH(l.codigo)}</b>${l.nombre ? `<br>${escH(l.nombre)}` : ''}<br><small class="muted">${escH(l.zona)}</small></td>
+      <td class="n">${num(l.cant)}</td><td>${d.admin ? `<button class="big pu" style="width:auto;margin:0;padding:7px 10px;font-size:14px" data-alta="${l.id}">＋ Dar de alta</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
   if (I.estado === 'abierto' && d.admin) h += `<button class="big" id="i-apl" ${S.abiertas ? 'disabled' : ''}>✅ Aplicar el inventario en Odoo (${S.con_dif} ajustes)</button>
     <p class="muted">${S.abiertas ? `Quedan ${S.abiertas} zonas contando: terminadlas antes de aplicar. ` : ''}Hay que aplicarlo con la caja de la tienda cerrada.</p>`;
   h += `<button class="big sec" id="i-vol">← Volver</button>`;
@@ -189,6 +238,15 @@ async function verInv(id) {
   $('#i-sd').onchange = () => { try { localStorage.setItem('inv-solodif', $('#i-sd').checked ? '1' : '0'); } catch (e) { } verInv(id); };
   $('#i-vol').onclick = () => inicio();
   $('#i-body').querySelectorAll('[data-z]').forEach(b => b.onclick = () => abrir(+b.dataset.z));
+  $('#i-body').querySelectorAll('[data-alta]').forEach(b => b.onclick = async () => {
+    const l = d.sin_articulo.find(x => x.id === +b.dataset.alta);
+    const nom = prompt(`Nombre del artículo nuevo (código ${l.codigo}):`, l.nombre || ''); if (!nom) return;
+    const pvp = prompt('Precio de venta (PVP sin IVA):', '0'); if (pvp === null) return;
+    const coste = prompt('Coste (lo que nos cuesta, sin IVA):', '0'); if (coste === null) return;
+    b.disabled = true; b.textContent = 'Creando…';
+    try { await api(`/api/inv/linea/${l.id}/crear_articulo`, { nombre: nom, pvp: pvp.replace(',', '.'), coste: coste.replace(',', '.') }); verInv(id); }
+    catch (e) { alert(e.message); b.disabled = false; b.textContent = '＋ Dar de alta'; }
+  });
   const ap = $('#i-apl'); if (ap) ap.onclick = async () => {
     if (!confirm(`¿Aplicar el inventario de ${d.ubic_nombre}? Se ajustarán ${S.con_dif} artículos en Odoo. Lo no contado no se toca.`)) return;
     ap.disabled = true; ap.textContent = 'Aplicando en Odoo…';
@@ -219,7 +277,7 @@ function foco() { if (!$('#v-esc').hidden && $('#qbox').hidden && $('#bus').hidd
 function pinta() {
   const nf = LIN.filter(l => !l.product_id);
   $('#k-ref').textContent = LIN.length; $('#k-uds').textContent = num(LIN.reduce((a, l) => a + l.cant, 0)); $('#k-nf').textContent = nf.length;
-  $('#e-lin').innerHTML = LIN.map(l => `<tr class="${l.product_id ? '' : 'ko'}"><td>${l.product_id ? escH(l.nombre) : `<b>No encontrado:</b> ${escH(l.codigo)}<br><a href="#" data-asig="${l.id}">asignar artículo</a>`}
+  $('#e-lin').innerHTML = LIN.map(l => `<tr class="${l.product_id ? '' : 'ko'}"><td>${l.product_id ? escH(l.nombre) : `<b>No encontrado:</b> ${escH(l.codigo)}${l.nombre ? `<br><i>${escH(l.nombre)}</i>` : ''}<br><a href="#" data-asig="${l.id}">asignar artículo</a> · <a href="#" data-desc="${l.id}">${l.nombre ? 'cambiar descripción' : '✏️ describir qué es'}</a>`}
     ${l.ref ? `<br><small class="muted">${escH(l.ref)}</small>` : ''}</td>
     <td class="n"><input type="number" inputmode="decimal" min="0" value="${+l.cant}" data-l="${l.id}"></td></tr>`).join('');
   $('#e-lin').querySelectorAll('[data-l]').forEach(i => i.onchange = async () => {
@@ -227,6 +285,12 @@ function pinta() {
     foco();
   });
   $('#e-lin').querySelectorAll('[data-asig]').forEach(a => a.onclick = e => { e.preventDefault(); buscador(+a.dataset.asig); });
+  $('#e-lin').querySelectorAll('[data-desc]').forEach(a => a.onclick = async e => {
+    e.preventDefault(); const l = LIN.find(x => x.id === +a.dataset.desc);
+    const t = prompt('¿Qué es? (marca, tipo, color, medida… para darlo de alta luego)', l.nombre || ''); if (t === null) return foco();
+    try { await api(`/api/inv/r/${R.id}/linea`, { id: l.id, descripcion: t }); await recarga(); } catch (er) { alert(er.message); }
+    foco();
+  });
 }
 async function recarga() { const d = await api(`/api/inv/r/${R.id}`); LIN = d.lineas; pinta(); }
 let pend = null;
@@ -364,7 +428,7 @@ $('#se-scan').addEventListener('keydown', async e => {
   catch (er) { pita(false); $('#se-res').innerHTML = `<div class="err">${escH(er.message)}</div>`; }
 });
 const hs = location.hash.slice(1), h0 = +hs;
-hs.startsWith('i') && +hs.slice(1) ? verInv(+hs.slice(1)) : h0 ? abrir(h0) : inicio();
+hs === 'lote' ? verLote() : hs.startsWith('i') && +hs.slice(1) ? verInv(+hs.slice(1)) : h0 ? abrir(h0) : inicio();
 </script>
 </body>
 </html>

@@ -21,9 +21,12 @@ UBIC = {
     "T1": {"nombre": "Tienda 1", "empresa": 1, "loc": 34},
     "T2": {"nombre": "Tienda 2", "empresa": 1, "loc": 40},
     "VP": {"nombre": "Logipaper (Tienda Logipaper / VP)", "empresa": 4, "loc": 46},
+    # almacén provisional (Distriplus) para material que entra sin saber aún a qué tienda va: no es de ninguna tienda ni del almacén central
+    "LOTE": {"nombre": "Lote provisional (sin repartir)", "empresa": 1, "loc": None},
 }
 # usuario del panel -> ubicaciones que puede contar (el resto de usuarios con el módulo: todas)
-POR_USUARIO = {"almacen": ["AC"], "tienda1": ["T1"], "tienda2": ["T2"], "tiendalogipaper": ["VP"]}
+POR_USUARIO = {"almacen": ["AC", "LOTE"], "tienda1": ["T1"], "tienda2": ["T2"], "tiendalogipaper": ["VP"]}
+LOTE_BARCODE = "LOTE-PROVISIONAL"
 
 
 def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario):
@@ -75,18 +78,37 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
                 pass
             cache.update(t=time.time(), cod=cod, ref=ref)
 
+    def lote_loc():
+        """La ubicación del lote provisional en Odoo (AC/Lote provisional, al lado de AC/Stock, fuera de él). Se crea la primera vez."""
+        if UBIC["LOTE"]["loc"]:
+            return UBIC["LOTE"]["loc"]
+        x = odoo.search_read("stock.location", [("barcode", "=", LOTE_BARCODE)], ["id"], [1], limit=1)
+        if not x:
+            padre = odoo.search_read("stock.location", [("id", "=", UBIC["AC"]["loc"])], ["location_id"], [1], limit=1)[0]["location_id"][0]
+            nid = odoo.call("stock.location", "create", [1], vals_list=[{"name": "Lote provisional", "location_id": padre, "usage": "internal",
+                                                                          "company_id": 1, "barcode": LOTE_BARCODE}])
+            x = [{"id": nid[0] if isinstance(nid, list) else nid}]
+        UBIC["LOTE"]["loc"] = x[0]["id"]
+        return UBIC["LOTE"]["loc"]
+
+    def U_(k):
+        if k == "LOTE":
+            lote_loc()
+        return UBIC[k]
+
     etq = {"t": 0, "m": {}}
 
     def etiquetas(k):
         """Códigos de barras de la etiqueta de cada ubicación (los de Odoo, aunque los renombréis: AC-STOCK, T1-STOCK…)."""
         if time.time() - etq["t"] > 900:
             try:
-                ls = odoo.search_read("stock.location", [("id", "in", [v["loc"] for v in UBIC.values()])], ["barcode"], TODAS)
+                ls = odoo.search_read("stock.location", [("id", "in", [v["loc"] for v in UBIC.values() if v["loc"]])], ["barcode"], TODAS)
                 etq["m"] = {x["id"]: (x.get("barcode") or "").upper() for x in ls}
                 etq["t"] = time.time()
             except Exception:
                 pass
-        base = {"AC": {"WHSTOCK", "AC-STOCK", "ACSTOCK"}, "T1": {"T1STOCK", "T1-STOCK"}, "T2": {"T2STOCK", "T2-STOCK"}, "VP": {"LOGIPSTOCK", "VP-STOCK", "VPSTOCK"}}[k]
+        base = {"AC": {"WHSTOCK", "AC-STOCK", "ACSTOCK"}, "T1": {"T1STOCK", "T1-STOCK"}, "T2": {"T2STOCK", "T2-STOCK"}, "VP": {"LOGIPSTOCK", "VP-STOCK", "VPSTOCK"},
+                "LOTE": {LOTE_BARCODE}}[k]
         b = etq["m"].get(UBIC[k]["loc"])
         return base | ({b} if b else set())
 
@@ -226,6 +248,9 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             x = c.execute("SELECT * FROM lineas WHERE id=? AND rid=?", (lid, rid)).fetchone()
             if not x:
                 raise HTTPException(404, "No encuentro esa línea")
+            if "descripcion" in b and not x["product_id"]:   # código que no conocemos: qué es (para darlo de alta luego)
+                c.execute("UPDATE lineas SET nombre=? WHERE id=?", ((b.get("descripcion") or "").strip()[:200], lid))
+                return {"ok": True}
             if b.get("product_id"):
                 pid = int(b["product_id"])
                 pr = guard(lambda: odoo.search_read("product.product", [("id", "=", pid)], ["display_name", "default_code"], TODAS))
@@ -321,7 +346,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
     def diferencias(rid: int, request: Request):
         u = current_user(request)
         r = recuento(rid, u)
-        U = UBIC[r["ubic"]]
+        U = guard(lambda: U_(r["ubic"]))
         ls = lineas(rid)
 
         def run():
@@ -353,7 +378,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             raise HTTPException(400, "Este recuento ya está aplicado")
         if r.get("inv_id"):
             raise HTTPException(400, "Esta zona es parte de un inventario general: se aplica todo junto desde el inventario")
-        U = UBIC[r["ubic"]]
+        U = guard(lambda: U_(r["ubic"]))
         E = U["empresa"]
         ls = [l for l in lineas(rid) if l["product_id"]]
         if not ls:
@@ -424,7 +449,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
 
     def calc_inventario(i):
         """Suma todas las zonas y resta lo que ha salido (ventas del TPV, albaranes, traspasos) desde que se contó cada artículo."""
-        U = UBIC[i["ubic"]]
+        U = guard(lambda: U_(i["ubic"]))
         with con() as c:
             zonas = [dict(x) for x in c.execute("SELECT * FROM recuentos WHERE inv_id=? ORDER BY id", (i["id"],)).fetchall()]
             ls = [dict(x) for x in c.execute("""SELECT l.*, r.nombre zona, r.cuando zona_t FROM lineas l JOIN recuentos r ON r.id=l.rid
@@ -445,7 +470,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             # 1) ventas del TPV por fecha de venta (los albaranes del TPV llevan la fecha del cierre de caja: esos se saltan abajo)
             pos = odoo.search_read("pos.order.line", [("product_id", "in", pids), ("order_id.config_id", "=", POS[i["ubic"]]),
                                                       ("order_id.date_order", ">", tmin), ("order_id.state", "not in", ["draft", "cancel"])],
-                                   ["product_id", "qty", "order_id", "create_date"], [U["empresa"]], limit=100000)
+                                   ["product_id", "qty", "order_id", "create_date"], [U["empresa"]], limit=100000) if POS.get(i["ubic"]) else []
             fechas = {}
             if pos:
                 oids = list({x["order_id"][0] for x in pos})
@@ -512,11 +537,11 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         i = inventario(iid, u)
         if i["estado"] != "abierto":
             raise HTTPException(400, "Este inventario ya está aplicado")
-        U = UBIC[i["ubic"]]
+        U = guard(lambda: U_(i["ubic"]))
         E = U["empresa"]
 
         def run():
-            ses = odoo.search_read("pos.session", [("config_id", "=", POS[i["ubic"]]), ("state", "!=", "closed")], ["name"], [E], limit=1)
+            ses = odoo.search_read("pos.session", [("config_id", "=", POS[i["ubic"]]), ("state", "!=", "closed")], ["name"], [E], limit=1) if POS.get(i["ubic"]) else []
             if ses:
                 raise HTTPException(400, f"La caja de {U['nombre']} está abierta ({ses[0]['name']}): aplícalo con la caja cerrada, si no se descontarían dos veces las ventas de hoy")
             d = calc_inventario(i)
@@ -554,6 +579,111 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
                 else:
                     c.execute("UPDATE inventarios SET resultado=? WHERE id=?", (json.dumps(res, ensure_ascii=False), iid))
             return res
+        return guard(run)
+
+    @app.post("/api/inv/linea/{lid}/crear_articulo")
+    async def crear_articulo(lid: int, request: Request):
+        """Solo admin: da de alta en Odoo un código que no conocíamos (sin stock, sin publicar en la web) y lo asigna a la línea.
+        {nombre, pvp, coste}"""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador da de alta artículos")
+        b = await request.json()
+        nom = (b.get("nombre") or "").strip()
+        if len(nom) < 3:
+            raise HTTPException(400, "Pon el nombre del artículo")
+        with con() as c:
+            x = c.execute("SELECT * FROM lineas WHERE id=?", (lid,)).fetchone()
+        if not x or x["product_id"]:
+            raise HTTPException(400, "Esa línea ya tiene artículo")
+
+        def run():
+            vals = {"name": nom.upper(), "list_price": float(b.get("pvp") or 0), "standard_price": float(b.get("coste") or 0),
+                    "is_storable": True, "sale_ok": True, "purchase_ok": True, "is_published": False}
+            cod = (x["codigo"] or "").strip()
+            if cod and not odoo.search_read("product.product", [("barcode", "=", cod)], ["id"], TODAS, limit=1):
+                vals["barcode"] = cod
+            tid = odoo.call("product.template", "create", [1], vals_list=[vals])
+            tid = tid[0] if isinstance(tid, list) else tid
+            pp = odoo.search_read("product.product", [("product_tmpl_id", "=", tid)], ["id", "display_name", "default_code"], [1], limit=1)[0]
+            with lock, con() as c:
+                c.execute("UPDATE lineas SET product_id=?, nombre=?, ref=? WHERE id=?", (pp["id"], pp["display_name"], pp.get("default_code") or "", lid))
+            cache["t"] = 0
+            return {"ok": True, "product_id": pp["id"], "nombre": pp["display_name"]}
+        return guard(run)
+
+    # ---------- lote provisional: lo que hay sin repartir y repartirlo a almacén / tiendas ----------
+    DESTINOS = ["AC", "T1", "T2"]   # Distriplus (Logipaper es otra empresa: se le pasa con pedido entre empresas)
+
+    @app.get("/api/inv/lote")
+    def lote_ver(request: Request):
+        u = current_user(request)
+        if "LOTE" not in puede(u):
+            raise HTTPException(403, "No puedes ver el lote")
+
+        def run():
+            L = lote_loc()
+            qs = odoo.search_read("stock.quant", [("location_id", "child_of", L), ("quantity", ">", 0)], ["product_id", "quantity"], [1], limit=20000)
+            arts = {}
+            for q in qs:
+                a = arts.setdefault(q["product_id"][0], {"product_id": q["product_id"][0], "nombre": q["product_id"][1], "lote": 0})
+                a["lote"] += q["quantity"]
+            pids = list(arts)
+            if pids:
+                for k in DESTINOS:
+                    for q in odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id", "child_of", UBIC[k]["loc"])], ["product_id", "quantity"], [1], limit=50000):
+                        arts[q["product_id"][0]][k] = arts[q["product_id"][0]].get(k, 0) + q["quantity"]
+                for p in odoo.search_read("product.product", [("id", "in", pids)], ["default_code", "list_price", "standard_price"], [1], limit=20000):
+                    arts[p["id"]].update(ref=p.get("default_code") or "", pvp=p.get("list_price") or 0, coste=p.get("standard_price") or 0)
+            return {"destinos": [{"codigo": k, "nombre": UBIC[k]["nombre"]} for k in DESTINOS], "admin": es_admin(u),
+                    "lineas": sorted(arts.values(), key=lambda a: a["nombre"].lower())}
+        return guard(run)
+
+    @app.post("/api/inv/lote/repartir")
+    async def lote_repartir(request: Request):
+        """Solo admin: {reparto: [{product_id, AC: n, T1: n, T2: n}]} → un traspaso interno validado por destino desde el lote."""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador reparte el lote")
+        b = await request.json()
+
+        def run():
+            L = lote_loc()
+            hay = {}
+            for q in odoo.search_read("stock.quant", [("location_id", "child_of", L), ("quantity", ">", 0)], ["product_id", "quantity"], [1], limit=20000):
+                hay[q["product_id"][0]] = hay.get(q["product_id"][0], 0) + q["quantity"]
+            por_dest = {k: [] for k in DESTINOS}
+            for r in b.get("reparto") or []:
+                pid = int(r.get("product_id") or 0)
+                tot = sum(float(r.get(k) or 0) for k in DESTINOS)
+                if tot <= 0:
+                    continue
+                if tot > hay.get(pid, 0) + 0.0001:
+                    raise HTTPException(400, f"Del artículo {pid} repartes {tot} y en el lote hay {hay.get(pid, 0)}")
+                for k in DESTINOS:
+                    q = float(r.get(k) or 0)
+                    if q > 0:
+                        por_dest[k].append((pid, q))
+            tipo = odoo.search_read("stock.picking.type", [("code", "=", "internal"), ("company_id", "=", 1)], ["id"], [1], limit=1)
+            if not tipo:
+                raise HTTPException(500, "No encuentro el tipo de operación de traspaso interno en Distriplus")
+            hechos = []
+            for k, ls in por_dest.items():
+                if not ls:
+                    continue
+                dest = UBIC[k]["loc"]
+                pid_ = odoo.call("stock.picking", "create", [1], vals_list=[{
+                    "picking_type_id": tipo[0]["id"], "location_id": L, "location_dest_id": dest, "origin": "Reparto lote provisional",
+                    "move_ids": [(0, 0, {"product_id": p, "product_uom_qty": q, "location_id": L, "location_dest_id": dest, "name": "Reparto lote"}) for p, q in ls]}])
+                pk = pid_[0] if isinstance(pid_, list) else pid_
+                odoo.call("stock.picking", "action_confirm", [1], ids=[pk])
+                odoo.call("stock.picking", "action_assign", [1], ids=[pk])
+                for m in odoo.search_read("stock.move", [("picking_id", "=", pk)], ["id", "product_uom_qty"], [1], limit=5000):
+                    odoo.call("stock.move", "write", [1], ids=[m["id"]], vals={"quantity": m["product_uom_qty"], "picked": True})
+                odoo.call("stock.picking", "button_validate", [1], ids=[pk], context={"skip_backorder": True, "skip_sms": True})
+                nm = odoo.search_read("stock.picking", [("id", "=", pk)], ["name", "state"], [1], limit=1)[0]
+                hechos.append({"destino": UBIC[k]["nombre"], "albaran": nm["name"], "estado": nm["state"], "articulos": len(ls)})
+            return {"ok": True, "traspasos": hechos}
         return guard(run)
 
     # ---------- artículos nuevos sin código de barras: se les pone escaneándolos con la PDA ----------
