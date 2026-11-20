@@ -685,6 +685,38 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         return Response("﻿" + f.getvalue(), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="codigos_por_identificar.csv"'})
 
+    @app.post("/api/inv/negativos_a_cero")
+    async def negativos_a_cero(request: Request):
+        """Solo admin: pone a 0 el stock negativo de las ubicaciones indicadas. Los artículos archivados se dejan
+        (suelen ser duplicados que hay que juntar con el bueno). {ubics: ["T1",…], nombre}"""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador")
+        b = await request.json()
+        ubics = [k for k in (b.get("ubics") or []) if k in UBIC and k != "LOTE"]
+        nombre = (b.get("nombre") or f"Regularización negativos {dt.date.today().strftime('%d/%m/%Y')}")[:120]
+
+        def run():
+            out = {}
+            for k in ubics:
+                U = U_(k)
+                E = U["empresa"]
+                qs = odoo.search_read("stock.quant", [("location_id", "child_of", U["loc"]), ("quantity", "<", 0)], ["product_id", "quantity"], [E], limit=10000)
+                act = {p["id"] for p in odoo.search_read("product.product", [("id", "in", list({q["product_id"][0] for q in qs})), ("active", "=", True)], ["id"], TODAS, limit=10000)} if qs else set()
+                hechos, archivados = [], []
+                ctx = {"inventory_mode": True, "inventory_name": nombre}
+                for q in qs:
+                    if q["product_id"][0] not in act:
+                        archivados.append({"producto": q["product_id"][1], "cant": q["quantity"]})
+                        continue
+                    odoo.call("stock.quant", "write", [E], ids=[q["id"]], vals={"inventory_quantity": 0}, context=dict(ctx))
+                    hechos.append(q["id"])
+                for i in range(0, len(hechos), 100):
+                    odoo.call("stock.quant", "action_apply_inventory", [E], ids=hechos[i:i + 100], context=dict(ctx))
+                out[k] = {"a_cero": len(hechos), "archivados": archivados}
+            return out
+        return guard(run)
+
     # ---------- lote provisional: lo que hay sin repartir y repartirlo a almacén / tiendas ----------
     DESTINOS = ["AC", "T1", "T2"]   # Distriplus (Logipaper es otra empresa: se le pasa con pedido entre empresas)
 
