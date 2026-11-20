@@ -789,6 +789,14 @@ async def admin_documentos_neutros(request: Request):
                 continue
             extra = ('<xpath expr="//*[contains(@t-if, \'_get_edi_builders\')]" position="replace"/>'
                      if "_get_edi_builders" in v["arch_db"] else '')   # «Conecte su software con DISTRIPLUS…»
+            if key == "sale.report_saleorder_document":
+                # la forma de pago solo va en la factura: en pedidos y presupuestos, «Forma de pago: habitual»
+                if 'name="order_note"' in v["arch_db"]:
+                    extra += ('<xpath expr="//span[@name=\'order_note\']" position="attributes">'
+                              '<attribute name="t-if">doc.note and \'realice su pago\' not in str(doc.note) and \'transferencia\' not in str(doc.note).lower()</attribute></xpath>')
+                if "doc.payment_term_id.note" in v["arch_db"]:
+                    extra += ('<xpath expr="//p[span[@t-field=\'doc.payment_term_id.note\']]" position="replace">'
+                              '<p name="forma_pago_habitual"><strong>Forma de pago:</strong> habitual</p></xpath>')
             arch = (f'<data><xpath expr="//*[@t-call=\'{de}\']" position="attributes">'
                     f'<attribute name="t-call">{a}</attribute></xpath>{extra}</data>')
             hecho[key] = guardar("folder_neutro.inh_" + key.replace(".", "_"), arch, inherit_id=v["id"], nombre=f"Folder neutro: {key}")
