@@ -39,7 +39,13 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         CREATE TABLE IF NOT EXISTS lineas (id INTEGER PRIMARY KEY AUTOINCREMENT, rid INTEGER, product_id INTEGER, codigo TEXT, nombre TEXT, ref TEXT,
             cant REAL, usuario TEXT, cuando REAL);
         CREATE INDEX IF NOT EXISTS ix_lin ON lineas (rid, product_id);
+        CREATE TABLE IF NOT EXISTS inventarios (id INTEGER PRIMARY KEY AUTOINCREMENT, ubic TEXT, nombre TEXT, estado TEXT, usuario TEXT, cuando REAL,
+            aplicado_por TEXT, aplicado REAL, resultado TEXT);
         """)
+        try:
+            c.execute("ALTER TABLE recuentos ADD COLUMN inv_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
         return c
 
     # ---------- caché de códigos de barras (para que cada lectura sea instantánea) ----------
@@ -128,11 +134,23 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             rs = [dict(x) for x in c.execute(f"""SELECT r.*, COUNT(l.id) refs, COALESCE(SUM(l.cant),0) uds FROM recuentos r LEFT JOIN lineas l ON l.rid=r.id
                   WHERE r.ubic IN ({','.join('?' * len(us))}) AND (r.estado!='aplicado' OR r.aplicado > ?) GROUP BY r.id ORDER BY r.id DESC""",
                                               (*us, time.time() - 30 * 86400)).fetchall()]
+            invs = [dict(x) for x in c.execute(f"""SELECT i.id, i.ubic, i.nombre, i.estado, i.usuario, i.cuando, i.aplicado,
+                  (SELECT COUNT(*) FROM recuentos r WHERE r.inv_id=i.id) zonas,
+                  (SELECT COUNT(*) FROM recuentos r WHERE r.inv_id=i.id AND r.estado='abierto') abiertas
+                  FROM inventarios i WHERE i.ubic IN ({','.join('?' * len(us))}) AND (i.estado='abierto' OR i.aplicado > ?) ORDER BY i.id DESC""",
+                                                (*us, time.time() - 30 * 86400)).fetchall()]
         for r in rs:
             r.pop("resultado", None)
             r["ubic_nombre"] = UBIC[r["ubic"]]["nombre"]
-        return {"ubicaciones": [{"codigo": k, "nombre": UBIC[k]["nombre"]} for k in us], "recuentos": rs, "admin": es_admin(u),
+        for i in invs:
+            i["ubic_nombre"] = UBIC[i["ubic"]]["nombre"]
+        return {"ubicaciones": [{"codigo": k, "nombre": UBIC[k]["nombre"]} for k in us], "recuentos": rs, "inventarios": invs, "admin": es_admin(u),
                 "usuario": nombre_usuario(u)}
+
+    def inv_abierto(ub):
+        with con() as c:
+            x = c.execute("SELECT * FROM inventarios WHERE ubic=? AND estado='abierto' ORDER BY id DESC LIMIT 1", (ub,)).fetchone()
+        return dict(x) if x else None
 
     @app.post("/api/inv/nuevo")
     async def nuevo(request: Request):
@@ -142,9 +160,13 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         if ub not in puede(u):
             raise HTTPException(400, "No puedes contar en esa ubicación")
         nom = (b.get("nombre") or "").strip()[:80] or f"Recuento {dt.date.today().strftime('%d/%m/%Y')}"
+        inv = inv_abierto(ub)   # si hay un inventario general abierto en esa ubicación, la zona va dentro
+        if not inv and not es_admin(u):   # las tiendas solo cuentan cuando el administrador abre el inventario
+            raise HTTPException(400, f"No hay ningún inventario abierto en {UBIC[ub]['nombre']}. Lo abre el administrador los días de recuento.")
         with lock, con() as c:
-            rid = c.execute("INSERT INTO recuentos (ubic, nombre, estado, usuario, cuando) VALUES (?,?,?,?,?)", (ub, nom, "abierto", u, time.time())).lastrowid
-        return {"id": rid}
+            rid = c.execute("INSERT INTO recuentos (ubic, nombre, estado, usuario, cuando, inv_id) VALUES (?,?,?,?,?,?)",
+                            (ub, nom, "abierto", u, time.time(), inv["id"] if inv else None)).lastrowid
+        return {"id": rid, "inv_id": inv["id"] if inv else None}
 
     @app.get("/api/inv/r/{rid}")
     def ver(rid: int, request: Request):
@@ -247,7 +269,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         b = await request.json()
         pid = int(b.get("product_id") or 0)
         cant = float(b.get("cant") or 0)
-        if cant <= 0:
+        if cant < 0:   # 0 vale: «lo he buscado y no hay» (p. ej. los que están en negativo)
             raise HTTPException(400, "Pon una cantidad")
         pr = guard(lambda: odoo.search_read("product.product", [("id", "=", pid)], ["display_name", "default_code", "barcode"], TODAS))
         if not pr:
@@ -329,6 +351,8 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         r = recuento(rid, u)
         if r["estado"] == "aplicado":
             raise HTTPException(400, "Este recuento ya está aplicado")
+        if r.get("inv_id"):
+            raise HTTPException(400, "Esta zona es parte de un inventario general: se aplica todo junto desde el inventario")
         U = UBIC[r["ubic"]]
         E = U["empresa"]
         ls = [l for l in lineas(rid) if l["product_id"]]
@@ -366,6 +390,169 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             with lock, con() as c:
                 c.execute("UPDATE recuentos SET estado=?, aplicado_por=?, aplicado=?, resultado=? WHERE id=?",
                           ("aplicado" if not errores else "cerrado", u, time.time(), json.dumps(res, ensure_ascii=False), rid))
+            return res
+        return guard(run)
+
+    # ---------- inventario general por zonas: se cuenta poco a poco mientras se vende y se aplica todo junto ----------
+    POS = {"AC": 1, "T1": 2, "T2": 4, "VP": 5}   # TPV de cada ubicación
+
+    def utc(t):
+        return dt.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+
+    def inventario(iid, u):
+        with con() as c:
+            i = c.execute("SELECT * FROM inventarios WHERE id=?", (iid,)).fetchone()
+        if not i or i["ubic"] not in puede(u):
+            raise HTTPException(404, "No encuentro ese inventario")
+        return dict(i)
+
+    @app.post("/api/inv/inventario/nuevo")
+    async def inv_nuevo(request: Request):
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "El inventario lo abre el administrador")
+        b = await request.json()
+        ub = (b.get("ubic") or "").upper()
+        if ub not in puede(u):
+            raise HTTPException(400, "No puedes contar en esa ubicación")
+        if inv_abierto(ub):
+            raise HTTPException(400, f"Ya hay un inventario general abierto en {UBIC[ub]['nombre']}")
+        nom = (b.get("nombre") or "").strip()[:80] or f"Inventario {UBIC[ub]['nombre']} {dt.date.today().strftime('%m/%Y')}"
+        with lock, con() as c:
+            iid = c.execute("INSERT INTO inventarios (ubic, nombre, estado, usuario, cuando) VALUES (?,?,?,?,?)", (ub, nom, "abierto", u, time.time())).lastrowid
+        return {"id": iid}
+
+    def calc_inventario(i):
+        """Suma todas las zonas y resta lo que ha salido (ventas del TPV, albaranes, traspasos) desde que se contó cada artículo."""
+        U = UBIC[i["ubic"]]
+        with con() as c:
+            zonas = [dict(x) for x in c.execute("SELECT * FROM recuentos WHERE inv_id=? ORDER BY id", (i["id"],)).fetchall()]
+            ls = [dict(x) for x in c.execute("""SELECT l.*, r.nombre zona, r.cuando zona_t FROM lineas l JOIN recuentos r ON r.id=l.rid
+                                                WHERE r.inv_id=?""", (i["id"],)).fetchall()]
+        arts, sin = {}, []
+        for l in ls:
+            if not l["product_id"]:
+                sin.append(l)
+                continue
+            a = arts.setdefault(l["product_id"], {"product_id": l["product_id"], "nombre": l["nombre"], "ref": l["ref"], "zonas": [], "contado": 0, "t": l["zona_t"]})
+            a["zonas"].append({"zona": l["zona"], "cant": l["cant"]})
+            a["contado"] += l["cant"]
+            a["t"] = min(a["t"], l["zona_t"])
+        pids = list(arts)
+        salidas = {p: 0.0 for p in pids}
+        if pids:
+            tmin = utc(min(a["t"] for a in arts.values()))
+            # 1) ventas del TPV por fecha de venta (los albaranes del TPV llevan la fecha del cierre de caja: esos se saltan abajo)
+            pos = odoo.search_read("pos.order.line", [("product_id", "in", pids), ("order_id.config_id", "=", POS[i["ubic"]]),
+                                                      ("order_id.date_order", ">", tmin), ("order_id.state", "not in", ["draft", "cancel"])],
+                                   ["product_id", "qty", "order_id", "create_date"], [U["empresa"]], limit=100000)
+            fechas = {}
+            if pos:
+                oids = list({x["order_id"][0] for x in pos})
+                fechas = {o["id"]: o["date_order"] for o in odoo.search_read("pos.order", [("id", "in", oids)], ["date_order"], [U["empresa"]], limit=100000)}
+            for x in pos:
+                p = x["product_id"][0]
+                if fechas.get(x["order_id"][0], "") > utc(arts[p]["t"]):
+                    salidas[p] += x["qty"]
+            # 2) el resto de movimientos hechos (albaranes a clientes, traspasos, recepciones) desde que se contó
+            locs = {l["id"] for l in odoo.search_read("stock.location", [("id", "child_of", U["loc"])], ["id"], TODAS, limit=5000)}
+            mls = odoo.search_read("stock.move.line", [("product_id", "in", pids), ("state", "=", "done"), ("date", ">", tmin),
+                                                       "|", ("location_id", "child_of", U["loc"]), ("location_dest_id", "child_of", U["loc"])],
+                                   ["product_id", "quantity", "location_id", "location_dest_id", "date", "picking_id"], [U["empresa"]], limit=100000)
+            pk = list({m["picking_id"][0] for m in mls if m.get("picking_id")})
+            del_tpv = {p["id"] for p in odoo.search_read("stock.picking", [("id", "in", pk), ("pos_session_id", "!=", False)], ["id"], [U["empresa"]], limit=100000)} if pk else set()
+            for m in mls:
+                if m.get("picking_id") and m["picking_id"][0] in del_tpv:
+                    continue
+                p = m["product_id"][0]
+                if m["date"] <= utc(arts[p]["t"]):
+                    continue
+                sale, entra = m["location_id"][0] in locs, m["location_dest_id"][0] in locs
+                if sale and not entra:
+                    salidas[p] += m["quantity"]
+                elif entra and not sale:
+                    salidas[p] -= m["quantity"]
+        st = teorico(U, pids)
+        out = []
+        for p, a in arts.items():
+            t = round(sum(x["quantity"] for x in st.get(p, [])), 3)
+            final = round(a["contado"] - salidas[p], 3)
+            out.append({**a, "salido": round(salidas[p], 3), "final": final, "teorico": t, "dif": round(final - t, 3)})
+        out.sort(key=lambda x: (x["nombre"] or "").lower())
+        # artículos en negativo en esa ubicación (vendidos sin stock): hay que buscarlos
+        neg = odoo.search_read("stock.quant", [("location_id", "child_of", U["loc"]), ("quantity", "<", 0)], ["product_id", "quantity"], [U["empresa"]], limit=5000)
+        negs = {}
+        for q in neg:
+            negs.setdefault(q["product_id"][0], {"product_id": q["product_id"][0], "nombre": q["product_id"][1], "cant": 0})["cant"] += q["quantity"]
+        negativos = sorted(({**v, "contado": v["product_id"] in arts} for v in negs.values()), key=lambda x: x["nombre"].lower())
+        return {"zonas": zonas, "lineas": out, "sin_articulo": sin, "negativos": negativos}
+
+    @app.get("/api/inv/inventario/{iid}")
+    def inv_ver(iid: int, request: Request):
+        u = current_user(request)
+        i = inventario(iid, u)
+
+        def run():
+            d = calc_inventario(i)
+            for z in d["zonas"]:
+                z.pop("resultado", None)
+            ls = d["lineas"]
+            return {"inventario": {k: v for k, v in i.items() if k != "resultado"}, "ubic_nombre": UBIC[i["ubic"]]["nombre"], **d,
+                    "resultado": json.loads(i["resultado"]) if i.get("resultado") else None, "admin": es_admin(u),
+                    "resumen": {"refs": len(ls), "con_dif": sum(1 for x in ls if abs(x["dif"]) > 0.0001),
+                                "abiertas": sum(1 for z in d["zonas"] if z["estado"] == "abierto")}}
+        return guard(run)
+
+    @app.post("/api/inv/inventario/{iid}/aplicar")
+    async def inv_aplicar(iid: int, request: Request):
+        """Solo administrador: deja en Odoo el stock de cada artículo contado = suma de zonas − lo salido desde que se contó."""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador aplica el inventario en Odoo")
+        i = inventario(iid, u)
+        if i["estado"] != "abierto":
+            raise HTTPException(400, "Este inventario ya está aplicado")
+        U = UBIC[i["ubic"]]
+        E = U["empresa"]
+
+        def run():
+            ses = odoo.search_read("pos.session", [("config_id", "=", POS[i["ubic"]]), ("state", "!=", "closed")], ["name"], [E], limit=1)
+            if ses:
+                raise HTTPException(400, f"La caja de {U['nombre']} está abierta ({ses[0]['name']}): aplícalo con la caja cerrada, si no se descontarían dos veces las ventas de hoy")
+            d = calc_inventario(i)
+            if any(z["estado"] == "abierto" for z in d["zonas"]):
+                raise HTTPException(400, "Hay zonas sin terminar de contar")
+            st = teorico(U, [l["product_id"] for l in d["lineas"]])
+            ctx = {"inventory_mode": True, "inventory_name": f"Inventario panel #{iid} {i['nombre']}"[:120]}
+            qids, cambios, errores = [], [], []
+            for l in d["lineas"]:
+                if abs(l["dif"]) < 0.0001:
+                    continue
+                qs = st.get(l["product_id"], [])
+                try:
+                    principal = [x for x in qs if x["location_id"][0] == U["loc"] and not x.get("lot_id")]
+                    otros = sum(x["quantity"] for x in qs if not principal or x["id"] != principal[0]["id"])
+                    objetivo = l["final"] - otros
+                    if principal:
+                        odoo.call("stock.quant", "write", [E], ids=[principal[0]["id"]], vals={"inventory_quantity": objetivo}, context=dict(ctx))
+                        qid = principal[0]["id"]
+                    else:
+                        qid = odoo.call("stock.quant", "create", [E], vals_list=[{"product_id": l["product_id"], "location_id": U["loc"],
+                                                                                  "inventory_quantity": objetivo}], context=dict(ctx))
+                        qid = qid[0] if isinstance(qid, list) else qid
+                    qids.append(qid)
+                    cambios.append({"producto": l["nombre"], "antes": l["teorico"], "ahora": l["final"]})
+                except Exception as e:
+                    errores.append({"producto": l["nombre"], "error": str(e)[:200]})
+            for k in range(0, len(qids), 100):
+                odoo.call("stock.quant", "action_apply_inventory", [E], ids=qids[k:k + 100], context=dict(ctx))
+            res = {"ajustados": len(cambios), "sin_cambio": len(d["lineas"]) - len(cambios) - len(errores), "errores": errores, "cambios": cambios}
+            with lock, con() as c:
+                if not errores:
+                    c.execute("UPDATE inventarios SET estado='aplicado', aplicado_por=?, aplicado=?, resultado=? WHERE id=?", (u, time.time(), json.dumps(res, ensure_ascii=False), iid))
+                    c.execute("UPDATE recuentos SET estado='aplicado', aplicado_por=?, aplicado=? WHERE inv_id=?", (u, time.time(), iid))
+                else:
+                    c.execute("UPDATE inventarios SET resultado=? WHERE id=?", (json.dumps(res, ensure_ascii=False), iid))
             return res
         return guard(run)
 

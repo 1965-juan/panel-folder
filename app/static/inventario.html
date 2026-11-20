@@ -50,12 +50,15 @@ td input{width:70px;padding:6px;text-align:right}
 <main>
   <!-- inicio: recuentos -->
   <section id="v-ini">
+    <div class="card" id="ig-card"><h2>📋 Inventario general</h2><div id="ig-lista"></div>
+      <div id="ig-nuevo" hidden><label>Abrir un inventario general en</label><div class="row"><select id="ig-ub"></select><button class="big pu" id="ig-go" style="margin:0">Abrir</button></div>
+        <p class="muted">Se cuenta por zonas, en días distintos y con varios ordenadores a la vez, mientras se sigue vendiendo. Al final se aplica todo junto: suma las zonas y descuenta lo vendido desde que se contó cada artículo.</p></div></div>
     <div class="card">
-      <h2>Empezar un recuento</h2>
+      <h2>Contar una zona</h2>
       <label>Dónde se cuenta</label><select id="n-ub"></select>
-      <label>Nombre (zona, estantería…)</label><input id="n-nom" placeholder="p. ej. Pasillo 3 · carpetas">
+      <label>Zona (solo para saber qué se ha contado)</label><input id="n-nom" placeholder="p. ej. Estantería trasera · libretas">
       <button class="big" id="n-go">▶ Empezar a contar</button>
-      <p class="muted">Los recuentos son <b>parciales</b>: solo se ajusta lo que contéis. Lo que no se cuente se queda como está en Odoo.</p>
+      <p class="muted" id="n-ayuda">Si hay un inventario general abierto, la zona entra en él y no toca el stock hasta que se aplique todo junto.</p>
     </div>
     <div class="card" id="se-card" hidden><h2>🏷 Artículos nuevos sin código de barras <span class="bdg b-ab" id="se-n"></span></h2>
       <p class="muted">Se han dado de alta sin código. Con el artículo en la mano: tócalo en la lista y escanea su código.</p>
@@ -91,6 +94,12 @@ td input{width:70px;padding:6px;text-align:right}
     <button class="big sec" id="e-salir">← Volver a la lista (sigue abierto)</button>
   </section>
 
+  <!-- inventario general -->
+  <section id="v-inv" hidden>
+    <div class="card"><h2 id="i-tit"></h2><div id="i-info" class="muted"></div></div>
+    <div id="i-body"></div>
+  </section>
+
   <!-- revisión / diferencias -->
   <section id="v-rev" hidden>
     <div class="card"><h2 id="r-tit"></h2><div id="r-info" class="muted"></div></div>
@@ -112,7 +121,7 @@ async function api(p, b) {
 }
 let INI = null, R = null, LIN = [], modo = localStorage.getItem('inv-modo') || 'rapido';
 const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar', 'b-ce'], aplicado: ['Aplicado en Odoo', 'b-ap'] };
-function vista(v) { ['ini', 'esc', 'rev', 'ean'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
+function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
 
 /* ---------- lista ---------- */
 async function inicio() {
@@ -127,6 +136,65 @@ async function inicio() {
       <button class="big ${r.estado === 'abierto' ? '' : 'pu'}" style="width:auto;margin:0;padding:9px 12px" data-r="${r.id}" data-e="${r.estado}">${r.estado === 'abierto' ? 'Seguir' : 'Ver'}</button></div>`).join('')
     : '<p class="muted">Todavía no hay recuentos.</p>';
   $('#lista').querySelectorAll('[data-r]').forEach(b => b.onclick = () => b.dataset.e === 'abierto' ? abrir(+b.dataset.r) : revisar(+b.dataset.r));
+  // inventarios generales
+  const IV = INI.inventarios || [];
+  $('#ig-lista').innerHTML = IV.length ? IV.map(i => `<div class="rc"><div class="t"><b>${escH(i.nombre)}</b>
+      <small>${escH(i.ubic_nombre)} · ${i.zonas} zonas${i.abiertas ? ` (${i.abiertas} contando)` : ''} · desde ${fecha(i.cuando)}</small></div>
+      <span class="bdg ${i.estado === 'abierto' ? 'b-ab' : 'b-ap'}">${i.estado === 'abierto' ? 'Abierto' : 'Aplicado'}</span>
+      <button class="big pu" style="width:auto;margin:0;padding:9px 12px" data-i="${i.id}">Ver</button></div>`).join('')
+    : `<p class="muted">${INI.admin ? 'No hay ninguno abierto.' : 'No hay ningún inventario abierto. Lo abre el administrador los días de recuento.'}</p>`;
+  $('#ig-lista').querySelectorAll('[data-i]').forEach(b => b.onclick = () => verInv(+b.dataset.i));
+  $('#ig-nuevo').hidden = !INI.admin;
+  const libres = INI.ubicaciones.filter(u => !IV.some(i => i.estado === 'abierto' && i.ubic === u.codigo));
+  $('#ig-ub').innerHTML = libres.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
+  $('#ig-go').disabled = !libres.length;
+  const abiertos = IV.filter(i => i.estado === 'abierto').map(i => i.ubic);
+  if (!INI.admin) { $('#n-ub').innerHTML = INI.ubicaciones.filter(u => abiertos.includes(u.codigo)).map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join(''); $('#n-go').disabled = !abiertos.length; }
+}
+$('#ig-go').onclick = async () => {
+  const ub = $('#ig-ub').value, nom = INI.ubicaciones.find(u => u.codigo === ub).nombre;
+  if (!confirm(`¿Abrir el inventario general de ${nom}? A partir de ahora las zonas que se cuenten allí entran en él.`)) return;
+  try { const r = await api('/api/inv/inventario/nuevo', { ubic: ub }); verInv(r.id); } catch (e) { alert(e.message); }
+};
+
+/* ---------- inventario general ---------- */
+async function verInv(id) {
+  vista('inv'); history.replaceState(null, '', `/inventario#i${id}`);
+  $('#i-body').innerHTML = '<p class="muted">Sumando zonas y descontando lo vendido desde que se contó… (tarda unos segundos)</p>';
+  let d; try { d = await api(`/api/inv/inventario/${id}`); } catch (e) { $('#i-body').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
+  const I = d.inventario, S = d.resumen;
+  $('#i-tit').innerHTML = `${escH(I.nombre)} <span class="bdg ${I.estado === 'abierto' ? 'b-ab' : 'b-ap'}">${I.estado === 'abierto' ? 'Abierto' : 'Aplicado'}</span>`;
+  $('#i-info').textContent = `${d.ubic_nombre} · abierto ${fecha(I.cuando)}${I.aplicado ? ' · aplicado ' + fecha(I.aplicado) : ''}`;
+  let h = `<div class="kp"><div><b>${d.zonas.length}</b><span class="muted">zonas</span></div><div><b>${S.refs}</b><span class="muted">artículos</span></div><div><b>${S.con_dif}</b><span class="muted">con diferencia</span></div></div>`;
+  if (d.resultado) h += `<div class="card"><b>Resultado en Odoo:</b> ${d.resultado.ajustados} ajustados · ${d.resultado.sin_cambio} ya cuadraban${d.resultado.errores.length ? `<div class="err">${d.resultado.errores.map(x => `${escH(x.producto)}: ${escH(x.error)}`).join('<br>')}</div>` : ''}</div>`;
+  h += `<div class="card"><h2>Zonas contadas</h2>${d.zonas.map(z => `<div class="rc"><div class="t"><b>${escH(z.nombre)}</b><small>${escH(z.usuario)} · ${fecha(z.cuando)}</small></div>
+    <span class="bdg ${ESTADO[z.estado][1]}">${ESTADO[z.estado][0]}</span>${z.estado === 'abierto' ? `<button class="big" style="width:auto;margin:0;padding:9px 12px" data-z="${z.id}">Seguir</button>` : ''}</div>`).join('') || '<p class="muted">Todavía ninguna. Empieza una desde «Contar una zona».</p>'}</div>`;
+  if (d.negativos.length) {
+    const nc = d.negativos.filter(n => !n.contado);
+    h += `<div class="card"><h2>⚠️ En negativo (vendidos sin stock) · ${nc.length} sin contar</h2><p class="muted">Búscalos y cuéntalos. Si no aparece ninguno, al aplicar se quedan en negativo: cuéntalo como 0 con «🔎 Sin código» en cualquier zona.</p>
+      <table><thead><tr><th>Artículo</th><th class="n">Odoo</th><th></th></tr></thead><tbody>${d.negativos.map(n => `<tr><td>${escH(n.nombre)}</td><td class="n neg">${num(n.cant)}</td><td>${n.contado ? '✅ contado' : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  const solo = localStorage.getItem('inv-solodif') !== '0';
+  h += `<div class="card"><label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" id="i-sd" style="width:auto" ${solo ? 'checked' : ''}> Solo los que tienen diferencia</label>
+    <table><thead><tr><th>Artículo</th><th class="n">Contado</th><th class="n">Vendido después</th><th class="n">Queda</th><th class="n">Odoo</th><th class="n">Dif.</th></tr></thead><tbody>
+    ${d.lineas.filter(l => !solo || Math.abs(l.dif) > 0.0001).map(l => `<tr><td>${escH(l.nombre)}${l.ref ? `<br><small class="muted">${escH(l.ref)}</small>` : ''}<br><small class="muted">${l.zonas.map(z => `${escH(z.zona)}: ${num(z.cant)}`).join(' · ')}</small></td>
+      <td class="n">${num(l.contado)}</td><td class="n">${l.salido ? '−' + num(l.salido) : ''}</td><td class="n"><b>${num(l.final)}</b></td><td class="n">${num(l.teorico)}</td>
+      <td class="n ${l.dif > 0 ? 'pos' : l.dif < 0 ? 'neg' : ''}">${l.dif > 0 ? '+' : ''}${num(l.dif)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Todo cuadra</td></tr>'}
+    </tbody></table></div>`;
+  if (d.sin_articulo.length) h += `<div class="card"><b>⚠️ Códigos no encontrados (no se ajustan hasta asignarles artículo):</b><br>${d.sin_articulo.map(l => `${escH(l.codigo)} × ${num(l.cant)} (${escH(l.zona)})`).join(' · ')}</div>`;
+  if (I.estado === 'abierto' && d.admin) h += `<button class="big" id="i-apl" ${S.abiertas ? 'disabled' : ''}>✅ Aplicar el inventario en Odoo (${S.con_dif} ajustes)</button>
+    <p class="muted">${S.abiertas ? `Quedan ${S.abiertas} zonas contando: terminadlas antes de aplicar. ` : ''}Hay que aplicarlo con la caja de la tienda cerrada.</p>`;
+  h += `<button class="big sec" id="i-vol">← Volver</button>`;
+  $('#i-body').innerHTML = h;
+  $('#i-sd').onchange = () => { try { localStorage.setItem('inv-solodif', $('#i-sd').checked ? '1' : '0'); } catch (e) { } verInv(id); };
+  $('#i-vol').onclick = () => inicio();
+  $('#i-body').querySelectorAll('[data-z]').forEach(b => b.onclick = () => abrir(+b.dataset.z));
+  const ap = $('#i-apl'); if (ap) ap.onclick = async () => {
+    if (!confirm(`¿Aplicar el inventario de ${d.ubic_nombre}? Se ajustarán ${S.con_dif} artículos en Odoo. Lo no contado no se toca.`)) return;
+    ap.disabled = true; ap.textContent = 'Aplicando en Odoo…';
+    try { const x = await api(`/api/inv/inventario/${id}/aplicar`, {}); alert(`Hecho: ${x.ajustados} artículos ajustados${x.errores.length ? `, ${x.errores.length} con error` : ''}`); verInv(id); }
+    catch (e) { alert(e.message); ap.disabled = false; ap.textContent = '✅ Aplicar el inventario en Odoo'; }
+  };
 }
 $('#n-go').onclick = async () => {
   try { const r = await api('/api/inv/nuevo', { ubic: $('#n-ub').value, nombre: $('#n-nom').value }); $('#n-nom').value = ''; abrir(r.id); }
@@ -253,7 +321,8 @@ async function revisar(id) {
   if (d.sin_articulo.length) h += `<div class="card"><b>⚠️ Códigos no encontrados (no se ajustan):</b><br>${d.sin_articulo.map(l => `${escH(l.codigo)} × ${num(l.cant)}`).join(' · ')}</div>`;
   h += `<a class="big sec" style="text-align:center;text-decoration:none" href="/api/inv/r/${id}/excel">📥 Descargar Excel</a>`;
   if (r.estado !== 'aplicado') {
-    if (d.admin && r.estado === 'cerrado') h += `<button class="big" id="r-apl">✅ Aplicar en Odoo (${S.con_dif} ajustes)</button>`;
+    if (r.inv_id) h += `<p class="muted">Esta zona es parte del inventario general: se aplica todo junto desde allí.</p><button class="big pu" id="r-inv">📋 Ver el inventario general</button>`;
+    else if (d.admin && r.estado === 'cerrado') h += `<button class="big" id="r-apl">✅ Aplicar en Odoo (${S.con_dif} ajustes)</button>`;
     if (r.estado === 'cerrado') h += `<button class="big sec" id="r-reab">↺ Reabrir para seguir contando</button>`;
     if (r.estado === 'cerrado' && !d.admin) h += `<p class="muted">Pendiente de que el administrador lo revise y lo aplique en Odoo.</p>`;
     h += `<button class="big rd" id="r-del">🗑 Borrar recuento</button>`;
@@ -262,6 +331,7 @@ async function revisar(id) {
   $('#r-body').innerHTML = h;
   $('#r-sd').onchange = () => { try { localStorage.setItem('inv-solodif', $('#r-sd').checked ? '1' : '0'); } catch (e) { } revisar(id); };
   $('#r-vol').onclick = () => inicio();
+  const ri = $('#r-inv'); if (ri) ri.onclick = () => verInv(r.inv_id);
   const ap = $('#r-apl'); if (ap) ap.onclick = async () => {
     if (!confirm(`¿Ajustar ya el stock en Odoo de ${S.con_dif} artículos en ${d.ubic_nombre}? Solo se tocan los contados.`)) return;
     ap.disabled = true; ap.textContent = 'Aplicando en Odoo…';
@@ -293,8 +363,8 @@ $('#se-scan').addEventListener('keydown', async e => {
     SE = SE.filter(x => x.id !== SEL.id); SEL = null; $('#se-scan').hidden = true; $('#se-sel').textContent = 'Toca el siguiente artículo y escanea su código.'; sePinta(); }
   catch (er) { pita(false); $('#se-res').innerHTML = `<div class="err">${escH(er.message)}</div>`; }
 });
-const h0 = +location.hash.slice(1);
-h0 ? abrir(h0) : inicio();
+const hs = location.hash.slice(1), h0 = +hs;
+hs.startsWith('i') && +hs.slice(1) ? verInv(+hs.slice(1)) : h0 ? abrir(h0) : inicio();
 </script>
 </body>
 </html>
