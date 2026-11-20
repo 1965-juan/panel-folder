@@ -786,6 +786,24 @@ async def admin_documentos_neutros(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/vista_neutra_activa")
+async def admin_vista_neutra_activa(request: Request):
+    """Solo admin: activar/desactivar una de nuestras vistas folder_neutro.* (para comparar). {key, activa}"""
+    _solo_admin(request)
+    b = await request.json()
+    key = b.get("key") or ""
+    if not key.startswith("folder_neutro."):
+        raise HTTPException(400, "Solo vistas folder_neutro.*")
+
+    def run():
+        v = odoo.search_read("ir.ui.view", [("key", "=", key), ("active", "in", [True, False])], ["id"], [1, 2, 3, 4, 5], limit=1)
+        if not v:
+            raise HTTPException(404, "No existe")
+        odoo.call("ir.ui.view", "write", [1, 2, 3, 4, 5], ids=[v[0]["id"]], vals={"active": bool(b.get("activa"))})
+        return {"ok": True}
+    return guard(run)
+
+
 @app.post("/api/admin/descuento_web")
 async def admin_descuento_web(request: Request):
     _solo_admin(request)
