@@ -648,7 +648,28 @@ def lanzar_compras_entre_empresas():
             hechos.append(s["name"])
         except Exception:
             pass
+    try:
+        web_sin_stock(500)
+    except Exception:
+        pass
     return hechos
+
+
+def web_sin_stock(maximo=2000):
+    """Todo artículo vendible se puede comprar en la web aunque no haya stock, y la web no enseña el stock
+    (los proveedores reponen en 24 h). Se repasa cada 5 min para los artículos nuevos."""
+    T = [1, 2, 3, 4, 5]
+    ids = [p["id"] for p in odoo.search_read("product.template", [("sale_ok", "=", True), "|", ("allow_out_of_stock_order", "=", False), ("show_availability", "=", True)],
+                                             ["id"], T, limit=maximo)]
+    for i in range(0, len(ids), 200):
+        odoo.call("product.template", "write", T, ids=ids[i:i + 200], vals={"allow_out_of_stock_order": True, "show_availability": False})
+    return len(ids)
+
+
+@app.post("/api/admin/web_sin_stock")
+def admin_web_sin_stock(request: Request):
+    _solo_admin(request)
+    return guard(lambda: {"cambiados": web_sin_stock(3000)})
 
 
 @app.post("/api/admin/descuento_web")
