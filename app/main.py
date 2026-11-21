@@ -998,7 +998,7 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 c["enviado"] = mk.get("enviado") or ("sí" if st.get(c["id"]) == "sent" else "")
                 c["reclamado"] = mk.get("reclamado", "")
         # los de transferencia primero: se facturan nada más servirlos para que paguen
-        albaranes.sort(key=lambda c: not re.search(r"transfer", c.get("pago") or "", re.I))
+        albaranes.sort(key=lambda c: not re.fullmatch(r"\s*transferencia\s*", c.get("pago") or "", re.I))
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos, "carritos": carritos,
                "albaranes": albaranes, "facturas": facturas, "borradores": borradores}
         ocul = _ventas_ocultas_t()
