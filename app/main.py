@@ -520,7 +520,7 @@ def short_company(name):
 
 
 SO_FIELDS = ["name", "partner_id", "date_order", "validity_date", "amount_total", "state",
-             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref", "website_id", "write_date"]
+             "delivery_status", "invoice_status", "company_id", "user_id", "client_order_ref", "website_id", "write_date", "payment_term_id"]
 
 
 def so_card(r, kind):
@@ -536,6 +536,7 @@ def so_card(r, kind):
         "estado": kind, "entrega": r.get("delivery_status") or "",
         "su_ref": r.get("client_order_ref") or "",
         "web": bool(r.get("website_id")),
+        "pago": (r.get("payment_term_id") or [0, ""])[1] if r.get("payment_term_id") else "",
     }
 
 
@@ -996,6 +997,8 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
                 mk = marca.get(c["id"], {})
                 c["enviado"] = mk.get("enviado") or ("sí" if st.get(c["id"]) == "sent" else "")
                 c["reclamado"] = mk.get("reclamado", "")
+        # los de transferencia primero: se facturan nada más servirlos para que paguen
+        albaranes.sort(key=lambda c: not re.search(r"transfer", c.get("pago") or "", re.I))
         out = {"presupuestos": presu, "caducados": caduc, "pedidos": pedidos, "carritos": carritos,
                "albaranes": albaranes, "facturas": facturas, "borradores": borradores}
         ocul = _ventas_ocultas_t()
@@ -1092,6 +1095,30 @@ def api_detalle(request: Request, oid: int, company: str = "all"):
                         "pide_ord": bool(em) and em[0]["commercial_partner_id"][0] in _gimeno_ids(cids),
                         "diarios": [{"id": j["id"], "nombre": j["name"]} for j in odoo.search_read(
                             "account.journal", [("type", "=", "sale"), ("company_id", "=", c)], ["name"], [c], order="sequence,id")]})
+            # qué empresa factura: se puede elegir (Distriplus/Logipaper/Ingraf). Por defecto la de la última factura a ese cliente
+            emps = [x for x in (1, 4, 5) if x in cids]
+            out["empresa"] = c
+            out["empresas"] = [{"id": e, "nombre": n, "diarios": [{"id": j["id"], "nombre": j["name"]} for j in odoo.search_read(
+                "account.journal", [("type", "=", "sale"), ("company_id", "=", e)], ["name"], [e], order="sequence,id")]}
+                for e, n in ((x["id"], short_company(x["name"])) for x in odoo.search_read("res.company", [("id", "in", emps)], ["name"], cids))]
+            out["empresa_def"] = c
+            if em and c in (1, 4):
+                ult = odoo.search_read("account.move", [("move_type", "=", "out_invoice"), ("state", "=", "posted"),
+                                                        ("commercial_partner_id", "=", em[0]["commercial_partner_id"][0]), ("company_id", "in", [1, 4])],
+                                       ["company_id"], [1, 4], order="invoice_date desc, id desc", limit=1)
+                if ult and ult[0]["company_id"][0] in cids:
+                    out["empresa_def"] = ult[0]["company_id"][0]
+        # lo que falta por servir (para no facturar hoy 5 cosas y mañana otra suelta)
+        if so["state"] == "sale":
+            falta = []
+            for l in odoo.search_read("sale.order.line", [("order_id", "=", oid), ("display_type", "=", False), ("is_downpayment", "=", False)],
+                                      ["name", "product_uom_qty", "qty_delivered", "product_type", "price_unit"], cids, limit=500):
+                f = (l.get("product_uom_qty") or 0) - (l.get("qty_delivered") or 0)
+                if l.get("product_type") != "service" and (l.get("price_unit") or 0) >= 0 and f > 0.001:
+                    falta.append({"articulo": (l.get("name") or "").splitlines()[0][:80], "cant": round(f, 2)})
+            out["por_servir"] = falta
+        pt = odoo.search_read("sale.order", [("id", "=", oid)], ["payment_term_id"], cids)
+        out["pago"] = (pt[0].get("payment_term_id") or [0, ""])[1] if pt else ""
         return out
 
     return guard(run)
@@ -1589,6 +1616,54 @@ async def admin_reintentar_correos(request: Request):
     return guard(run)
 
 
+def _facturar_otra_empresa(so, oid, emp, cids, jid, fecha, ref, b):
+    """Factura lo servido de un pedido por OTRA empresa del grupo (p. ej. pedido de Distriplus facturado por Logipaper),
+    con el asistente «Facturación Albaranes» de Nextdoo, que enlaza la factura al pedido."""
+    T = [1, 2, 3, 4, 5]
+    if emp not in cids or emp not in (1, 4, 5):
+        raise HTTPException(403, "Esa empresa no está permitida")
+    pk = [p["id"] for p in odoo.search_read("stock.picking", [("sale_id", "=", oid), ("picking_type_code", "=", "outgoing"), ("state", "=", "done")],
+                                            ["invoice_state"], T, limit=200) if p.get("invoice_state") in (False, "pending")]
+    if not pk:
+        raise HTTPException(400, "No hay albaranes servidos pendientes de facturar en este pedido")
+    if jid and not odoo.search_read("account.journal", [("id", "=", jid), ("type", "=", "sale"), ("company_id", "=", emp)], ["id"], [emp]):
+        raise HTTPException(400, "Esa serie no es de la empresa elegida")
+    if not jid:
+        jid = odoo.search_read("account.journal", [("type", "=", "sale"), ("company_id", "=", emp)], ["id"], [emp], order="sequence, id", limit=1)[0]["id"]
+    ctx_w = {"active_model": "stock.picking", "active_ids": pk, "allowed_company_ids": [emp] + [x for x in T if x != emp]}
+    wid = odoo.call("stock.picking.invoice.wizard", "create", T, vals_list=[{"picking_ids": [[6, 0, pk]], "company_id": emp, "journal_id": jid}], context=ctx_w)
+    wid = wid[0] if isinstance(wid, list) else wid
+    res = odoo.call("stock.picking.invoice.wizard", "action_create_draft", T, ids=[wid], context=ctx_w) or {}
+    fids = [res["res_id"]] if res.get("res_id") else next((d[2] for d in res.get("domain") or [] if isinstance(d, (list, tuple)) and d[0] == "id"), [])
+    if not fids:
+        raise HTTPException(400, "Odoo no ha generado la factura")
+    vals = {"invoice_date": fecha, "date": fecha}
+    if ref:
+        vals["ref"] = ref
+    odoo.call("account.move", "write", T, ids=fids, vals=vals)
+    # la cuenta del banco tiene que ser la de la empresa que factura
+    try:
+        cp = odoo.search_read("res.company", [("id", "=", emp)], ["partner_id"], T)[0]["partner_id"][0]
+        bk = {4: 1}.get(emp) or next((x["id"] for x in odoo.search_read("res.partner.bank", [("partner_id", "=", cp)], ["id"], T, order="id", limit=1)), None)
+        if bk:
+            odoo.call("account.move", "write", T, ids=fids, vals={"partner_bank_id": bk})
+    except Exception:
+        pass
+    if ref:
+        try:
+            odoo.call("sale.order", "write", [so["company_id"][0]], ids=[oid], vals={"client_order_ref": ref})
+        except Exception:
+            pass
+    nom_emp = short_company(odoo.search_read("res.company", [("id", "=", emp)], ["name"], T)[0]["name"])
+    if b.get("borrador"):
+        return {"ok": True, "mensaje": f"Factura de {so['name']} por {nom_emp} creada en borrador (sale en «Facturas borrador»)"}
+    odoo.call("account.move", "action_post", T, ids=fids)
+    fs = odoo.search_read("account.move", [("id", "in", fids)], ["name"], T)
+    aviso = _enviar_factura(emp, fids) if b.get("enviar") else ""
+    return {"ok": True, "mensaje": f"{so['name']} facturado por {nom_emp}: {', '.join(f['name'] for f in fs)}" + (" · enviada por email" if b.get("enviar") and not aviso else "")
+            + (f" · ⚠️ no se pudo enviar: {aviso}" if aviso else ""), "facturas": [{"id": f["id"], "nombre": f["name"]} for f in fs], "cid": emp}
+
+
 @app.post("/api/ventas/{oid}/accion")
 async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     """{accion}: 'cancelar' (presupuesto o pedido sin servir: se cancela en Odoo, se puede recuperar),
@@ -1623,10 +1698,13 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
             if sin_facturas(u):
                 raise HTTPException(403, "Este usuario no hace facturas")
             jid = int(b.get("diario") or 0)
-            if jid and not odoo.search_read("account.journal", [("id", "=", jid), ("type", "=", "sale"), ("company_id", "=", c)], ["id"], [c]):
-                raise HTTPException(400, "Esa serie no es de la empresa del pedido")
+            emp = int(b.get("empresa") or c)
             fecha = (b.get("fecha") or dt.date.today().isoformat())[:10]
             ref = (b.get("ref") or "").strip()
+            if emp != c:
+                return _facturar_otra_empresa(so, oid, emp, cids, jid, fecha, ref, b)
+            if jid and not odoo.search_read("account.journal", [("id", "=", jid), ("type", "=", "sale"), ("company_id", "=", c)], ["id"], [c]):
+                raise HTTPException(400, "Esa serie no es de la empresa del pedido")
             antes = {f["id"] for f in odoo.search_read("account.move", [("invoice_origin", "ilike", so["name"]), ("move_type", "=", "out_invoice")], ["id"], [c])}
             ctx_so = {"active_model": "sale.order", "active_ids": [oid], "active_id": oid}
             w = odoo.call("sale.advance.payment.inv", "create", [c], vals_list=[{"advance_payment_method": "delivered", "sale_order_ids": [[6, 0, [oid]]]}], context=ctx_so)

@@ -35,6 +35,8 @@ function card(c) {
   if (c.enviado || c.reclamado) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${c.enviado ? `<span class="mk mk-env">📧 Enviado${/\d/.test(c.enviado) ? ' ' + fdate(c.enviado) : ''}</span>` : ''}${c.reclamado ? `<span class="mk mk-rec">🔔 Reclamado ${fdate(c.reclamado)}</span>` : ''}</div>`);
   if (c.borrador) d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas">${faltaOrd(c) ? '<span class="mk mk-rec">⚠ Falta la ORD / nº pedido del cliente (Gimeno)</span>' : `${c.su_ref ? `<span class="mk mk-env">Ref. ${escH(c.su_ref)}</span>` : ''}<span class="mk">Sin validar ni enviar</span>`}</div>`);
   if (c.web) d.querySelector('.ref').insertAdjacentHTML('afterend', '<span class="tag-web">WEB</span>');
+  if (/transfer/i.test(c.pago || '') && (c.estado === 'servido' || (c.estado === 'pedido' && c.entrega === 'partial')))
+    d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas"><span class="mk mk-rec" style="background:#ffe08a;color:#5a3d00;font-weight:700">💶 TRANSFERENCIA · facturar ya${c.entrega === 'partial' ? ' (falta servir algo)' : ''}</span></div>`);
   if (c.estado === 'carrito') d.querySelector('.cli').insertAdjacentHTML('afterend', `<div class="marcas"><span class="mk mk-rec">🛒 Carrito web sin terminar · no es un pedido</span>${c.avisado ? `<span class="mk mk-env">📧 Ayuda ofrecida ${fdate(c.avisado)}</span>` : (c.anonimo ? '<span class="mk">Visitante sin identificar</span>' : (c.email ? '' : '<span class="mk">Sin email</span>'))}</div>`);
   d.querySelector('.cli').textContent = c.cliente;
   d.querySelector('.emp').textContent = c.empresa;
@@ -264,8 +266,13 @@ function dAcciones(c, d) {
   }
   if (d.facturar) {
     const hoy = new Date().toISOString().slice(0, 10);
+    const E = d.empresas || [], ed = d.empresa_def || d.empresa;
+    const dias = id => ((E.find(e => e.id === id) || {}).diarios || d.diarios || []).map(j => `<option value="${j.id}">${escH(j.nombre)}</option>`).join('');
     h += `<div class="d-fac"><b>🧾 Facturar lo servido</b>
-      <label>Serie <select id="f-dia">${(d.diarios || []).map(j => `<option value="${j.id}">${escH(j.nombre)}</option>`).join('')}</select></label>
+      ${/transfer/i.test(d.pago || '') ? `<div class="mk mk-rec" style="display:block;background:#ffe08a;color:#5a3d00;font-weight:700;margin:6px 0">💶 Cliente de TRANSFERENCIA (${escH(d.pago)}): facturar y enviar ya para que pague</div>` : d.pago ? `<small class="muted">Forma de pago: ${escH(d.pago)}</small>` : ''}
+      ${(d.por_servir || []).length ? `<div class="err" style="margin:6px 0">⚠️ <b>Queda por servir</b>: ${d.por_servir.map(x => `${escH(x.articulo)} (${x.cant})`).join(' · ')}.<br>Si facturas ahora, lo que falta irá en otra factura. Mejor esperar a servirlo todo, o «Dar por terminado» si ya no se va a servir.</div>` : ''}
+      ${E.length > 1 ? `<label>Factura la empresa <select id="f-emp">${E.map(e => `<option value="${e.id}" ${e.id === ed ? 'selected' : ''}>${escH(e.nombre)}${e.id === d.empresa ? ' (la del pedido)' : ''}</option>`).join('')}</select></label>` : ''}
+      <label>Serie <select id="f-dia">${dias(ed)}</select></label>
       <label>Fecha factura <input type="date" id="f-fec" value="${hoy}"></label>
       ${d.pide_ord ? `<label>ORD / nº pedido del cliente (Gimeno) <input id="f-ref" value="${escH(/^S\d{4,}$/i.test(d.su_ref || '') ? '' : (d.su_ref || ''))}" placeholder="obligatorio para subirla a su plataforma"></label>`
         : `<label>Ref. cliente (opcional) <input id="f-ref" value="${escH(d.su_ref || '')}"></label>`}
@@ -314,14 +321,16 @@ function dAcciones(c, d) {
     try { await jpost(`/api/ventas/${c.id}/email?company=${company}`, { tipo: m.dataset.m }); m.textContent = '✅ Enviado'; alertBox(`Email enviado a ${d.email}`); load(); }
     catch (e) { alertBox(e.message); m.disabled = false; m.textContent = t0; }
   });
+  const fe = $('#f-emp'); if (fe) fe.onchange = () => { const e = (d.empresas || []).find(x => x.id === +fe.value); $('#f-dia').innerHTML = (e ? e.diarios : []).map(j => `<option value="${j.id}">${escH(j.nombre)}</option>`).join(''); };
   const fac = async borrador => {
     const ref = ($('#f-ref').value || '').trim(), env = $('#f-env').checked && !borrador;
-    const dia = $('#f-dia'), serie = dia.options[dia.selectedIndex]?.text || '';
+    const dia = $('#f-dia'), emp = fe ? +fe.value : d.empresa, serie = (fe ? fe.selectedOptions[0].text.replace(' (la del pedido)', '') + ' · ' : '') + (dia.options[dia.selectedIndex]?.text || '');
+    if ((d.por_servir || []).length && !confirm(`⚠️ A ${c.ref} todavía le queda por servir:\n${d.por_servir.map(x => `· ${x.articulo} (${x.cant})`).join('\n')}\n\nSi facturas ahora, lo que falta irá en otra factura. ¿Facturar igualmente?`)) return;
     if (!borrador && d.pide_ord && !ref) { if (!confirm('Es del Grupo Gimeno y no tiene ORD: sin ella no la aceptan en su plataforma. ¿Dejarla en borrador hasta tener la ORD?')) return; return fac(true); }
     if (!confirm(borrador ? `¿Crear la factura de ${c.ref} en borrador (${serie})?` : `¿Facturar ${c.ref} en ${serie} con fecha ${fdate($('#f-fec').value)}${env ? ` y enviarla a ${d.email_factura}` : ''}?`)) return;
     const bt = $('#f-go'); bt.disabled = true; bt.textContent = 'Facturando…';
     try {
-      const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: 'facturar', diario: dia.value, fecha: $('#f-fec').value, ref, enviar: env, borrador });
+      const r = await jpost(`/api/ventas/${c.id}/accion?company=${company}`, { accion: 'facturar', diario: dia.value, empresa: emp, fecha: $('#f-fec').value, ref, enviar: env, borrador });
       alertBox(r.mensaje); $('#drawer').hidden = true; load();
       if (r.facturas) r.facturas.forEach(f => window.open(`${ODOO}/report/pdf/account.report_invoice/${f.id}?context=${encodeURIComponent(JSON.stringify({ allowed_company_ids: [r.cid] }))}`, '_blank'));
     } catch (e) { alertBox(e.message); bt.disabled = false; bt.textContent = '🧾 Facturar'; }
