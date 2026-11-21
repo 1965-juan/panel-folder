@@ -242,6 +242,26 @@ function dAcciones(c, d) {
     h += `<div class="d-alb">${d.albaranes.map(a => `<a class="btn" target="_blank" rel="noopener" href="${albPdf(a.id, c.cid)}">🖨 Albarán ${escH(a.nombre)}</a>
       <small class="muted">${est[a.estado] || a.estado}</small>`).join(' ')}</div>`;
   }
+  if (c.model === 'sale.order') {   // escribir al cliente sobre su pedido, con el albarán con membrete o el pedido
+    const albs = (d.albaranes || []).filter(a => a.estado !== 'cancel');
+    h += `<div class="d-msg" style="border:1px solid var(--line,#e4e1da);border-radius:10px;padding:10px 12px;margin:10px 0">
+      <button class="btn" id="m-abre">✉️ Escribir al cliente</button>
+      <div id="m-form" hidden style="margin-top:8px">
+        <label>Para <input id="m-para" value="${escH(d.email || '')}" placeholder="email del cliente (puedes poner varios separados por coma)"></label>
+        <label>Asunto <input id="m-asu" value="${escH(`Su pedido ${c.ref} · Folder Castellón`)}"></label>
+        <div class="marcas" style="margin:6px 0">${[
+          ['📄 Falta la ORD', 'Para poder facturar su pedido nos falta el número de pedido (ORD). ¿Nos lo puede facilitar respondiendo a este correo?'],
+          ['📍 ¿Dónde se envía?', '¿A qué dirección y a la atención de quién le enviamos el material?'],
+          ['✅ Preparado', 'Su pedido ya está preparado. Le adjuntamos el albarán.'],
+          ['⏳ Falta material', 'Le preparamos el pedido, pero nos falta algún artículo que esperamos recibir en breve. ¿Prefiere que le enviemos ya lo que tenemos y el resto cuando llegue?']
+        ].map(([t, x]) => `<button type="button" class="mk" style="cursor:pointer;border:0" data-txt="${escH(x)}">${t}</button>`).join('')}</div>
+        <label>Mensaje <textarea id="m-txt" rows="6" style="width:100%;font:inherit;padding:8px;border-radius:8px;border:1px solid #ccc">Buenos días:\n\n</textarea></label>
+        <label>Adjuntar <select id="m-adj">${albs.map((a, i) => `<option value="albaran:${a.id}" ${i === albs.length - 1 ? 'selected' : ''}>📎 Albarán ${escH(a.nombre)} con membrete</option>`).join('')}
+          <option value="pedido" ${albs.length ? '' : 'selected'}>📎 ${c.estado === 'presupuesto' || c.estado === 'caducado' ? 'Presupuesto' : 'Pedido'} ${escH(c.ref)} en PDF</option><option value="">Sin adjunto</option></select></label>
+        <div class="d-mails"><button class="ac-go" id="m-env">📨 Enviar desde info@foldercastellon.es</button></div>
+        <small class="muted">La respuesta del cliente llega a info@. El mensaje queda anotado en el pedido.</small>
+      </div></div>`;
+  }
   if (d.facturar) {
     const hoy = new Date().toISOString().slice(0, 10);
     h += `<div class="d-fac"><b>🧾 Facturar lo servido</b>
@@ -263,6 +283,22 @@ function dAcciones(c, d) {
     h += `<div class="d-del">${bs.map(x => `<button class="btn" data-ac="${x[0]}" data-q="${escH(x[2])}">${x[1]}</button>`).join('')}</div>`;
   }
   A.innerHTML = h;
+  const mab = $('#m-abre'); if (mab) {
+    mab.onclick = () => { $('#m-form').hidden = !$('#m-form').hidden; if (!$('#m-form').hidden) $('#m-txt').focus(); };
+    A.querySelectorAll('[data-txt]').forEach(b => b.onclick = () => { const t = $('#m-txt'); t.value = t.value.replace(/\s*$/, '') + (t.value.trim().endsWith(':') ? '\n\n' : '\n\n') + b.dataset.txt + '\n'; t.focus(); });
+    $('#m-env').onclick = async () => {
+      const para = $('#m-para').value.trim(), adj = $('#m-adj').value, txt = $('#m-txt').value.trim();
+      if (!para) { alertBox('Pon el email del cliente'); return; }
+      if (txt.replace(/^Buenos días:?/i, '').trim().length < 3) { alertBox('Escribe el mensaje'); return; }
+      if (!confirm(`¿Enviar el mensaje a ${para}${adj ? ' con ' + $('#m-adj').selectedOptions[0].textContent.replace('📎 ', '') : ''}?`)) return;
+      const b = $('#m-env'); b.disabled = true; b.textContent = 'Enviando…';
+      try {
+        await jpost(`/api/ventas/${c.id}/mensaje?company=${company}`, { para, asunto: $('#m-asu').value, texto: txt,
+          adjunto: adj.startsWith('albaran') ? 'albaran' : adj, albaran_id: adj.startsWith('albaran') ? +adj.split(':')[1] : 0 });
+        alertBox(`Mensaje enviado a ${para}`); b.textContent = '✅ Enviado'; $('#m-form').hidden = true;
+      } catch (e) { alertBox(e.message); b.disabled = false; b.textContent = '📨 Enviar desde info@foldercastellon.es'; }
+    };
+  }
   A.querySelectorAll('[data-ac]').forEach(x => x.onclick = async () => {
     if (!confirm(x.dataset.q)) return;
     x.disabled = true;

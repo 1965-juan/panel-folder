@@ -1235,6 +1235,81 @@ async def api_email_presu(request: Request, oid: int, company: str = "all"):
     return guard(run)
 
 
+PLANTILLA_MSG = {"albaran": ("Panel - Mensaje al cliente con albarán", "stock.picking", "folder_albaran_membrete.report_delivery_membrete"),
+                 "pedido": ("Panel - Mensaje al cliente con pedido", "sale.order", "sale.report_saleorder")}
+
+
+def _plantilla_msg(tipo, c):
+    """Plantilla de Odoo que solo sirve para adjuntar el PDF (albarán con membrete o pedido): el texto lo pone el panel. Se crea si no está."""
+    nombre, modelo, informe = PLANTILLA_MSG[tipo]
+    T = [1, 2, 3, 4, 5]
+    t = odoo.search_read("mail.template", [("name", "=", nombre)], ["id"], T, limit=1)
+    if t:
+        return t[0]["id"]
+    rep = odoo.search_read("ir.actions.report", [("report_name", "=", informe)], ["id"], T, limit=1)
+    mod = odoo.search_read("ir.model", [("model", "=", modelo)], ["id"], T, limit=1)
+    if not rep or not mod:
+        raise HTTPException(500, f"No encuentro el informe {informe} en Odoo")
+    r = odoo.call("mail.template", "create", [c], vals_list=[{
+        "name": nombre, "model_id": mod[0]["id"], "subject": "{{ object.name }}", "body_html": "<p></p>",
+        "email_from": "Folder Castellón <info@foldercastellon.es>", "reply_to": "info@foldercastellon.es",
+        "report_template_ids": [(6, 0, [rep[0]["id"]])], "auto_delete": False}])
+    return r[0] if isinstance(r, list) else r
+
+
+@app.post("/api/ventas/{oid}/mensaje")
+async def api_mensaje_cliente(request: Request, oid: int, company: str = "all"):
+    """Escribir al cliente sobre su pedido (falta la ORD, dónde se envía…) desde info@, con el albarán con membrete
+    o el pedido en PDF. {para, asunto, texto, adjunto: 'albaran'|'pedido'|'', albaran_id}. Queda anotado en el pedido."""
+    u = current_user(request)
+    b = await request.json()
+    para = ",".join(x.strip() for x in re.split(r"[;,\s]+", b.get("para") or "") if x.strip())
+    if not para or not all(re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", x) for x in para.split(",")):
+        raise HTTPException(400, "Revisa el email del destinatario")
+    texto = (b.get("texto") or "").strip()
+    if len(texto) < 3:
+        raise HTTPException(400, "Escribe el mensaje")
+    adj = b.get("adjunto") or ""
+
+    def run():
+        cids, cd = scope(u, company)
+        so = odoo.search_read("sale.order", cd + [("id", "=", oid)], ["name", "company_id", "partner_id", "picking_ids"], cids)
+        if not so:
+            raise HTTPException(404, "No encontrado")
+        so = so[0]
+        c = so["company_id"][0]
+        asunto = (b.get("asunto") or "").strip() or f"Su pedido {so['name']} · Folder Castellón"
+        e = lambda t: str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        cuerpo = "".join(f"<p>{e(p).replace(chr(10), '<br>')}</p>" for p in re.split(r"\n\s*\n", texto))
+        html = f"""<div style="font-family:Arial,Helvetica,sans-serif;color:#1f1b2e;max-width:600px;margin:auto;font-size:15px;line-height:1.5">
+<div style="background:#3A1F73;color:#fff;padding:14px 20px;border-radius:8px 8px 0 0"><b style="font-size:19px">Folder Castellón</b>
+<span style="float:right;font-size:13px;opacity:.85">Pedido {e(so['name'])}</span></div>
+<div style="border:1px solid #e4e1da;border-top:0;padding:18px 20px;border-radius:0 0 8px 8px">{cuerpo}
+<p>Un saludo,<br><b>Folder Castellón</b><br><span style="color:#6b6778;font-size:13px">info@foldercastellon.es · Tel. 964 27 04 31 · WhatsApp 673 10 96 93 · www.foldercastellon.com</span></p>
+</div></div>"""
+        ev = {"email_to": para, "subject": asunto, "body_html": html, "email_from": "Folder Castellón <info@foldercastellon.es>",
+              "reply_to": "info@foldercastellon.es", "recipient_ids": [(6, 0, [])]}
+        if adj == "albaran":
+            pid = int(b.get("albaran_id") or 0)
+            if pid not in (so.get("picking_ids") or []):
+                raise HTTPException(400, "Ese albarán no es de este pedido")
+            odoo.call("mail.template", "send_mail", [c], ids=[_plantilla_msg("albaran", c)], res_id=pid, force_send=True, email_values=ev)
+        elif adj == "pedido":
+            odoo.call("mail.template", "send_mail", [c], ids=[_plantilla_msg("pedido", c)], res_id=oid, force_send=True, email_values=ev)
+        else:
+            r = odoo.call("mail.mail", "create", [c], vals_list=[{**ev, "model": "sale.order", "res_id": oid, "auto_delete": False}])
+            mid = r[0] if isinstance(r, list) else r
+            odoo.call("mail.mail", "send", [c], ids=[mid])
+        nota = {"albaran": " (con el albarán con membrete)", "pedido": " (con el pedido en PDF)"}.get(adj, "")
+        try:
+            odoo.call("sale.order", "message_post", [c], ids=[oid], body=f"Email enviado desde el panel por {e(nombre_usuario(u))} a {e(para)}{nota}:<br><b>{e(asunto)}</b><br>{e(texto).replace(chr(10), '<br>')}",
+                      message_type="comment", subtype_xmlid="mail.mt_note")
+        except Exception:
+            pass
+        return {"ok": True, "para": para}
+    return guard(run)
+
+
 def _email_carrito(u, oid, company):
     """Carrito de la web sin terminar: email al cliente ofreciendo ayuda para completarlo. Queda anotado en el pedido."""
     cids, cd = scope(u, company)
