@@ -25,7 +25,7 @@ UBIC = {
     "LOTE": {"nombre": "Lote provisional (sin repartir)", "empresa": 1, "loc": None},
 }
 # usuario del panel -> ubicaciones que puede contar (el resto de usuarios con el módulo: todas)
-POR_USUARIO = {"almacen": ["AC", "LOTE"], "tienda1": ["T1"], "tienda2": ["T2"], "tiendalogipaper": ["VP"]}
+POR_USUARIO = {"almacen": ["AC", "LOTE"], "tienda1": ["T1"], "tienda2": ["T2"], "tiendalogipaper": ["VP", "LOTE"]}
 LOTE_BARCODE = "LOTE-PROVISIONAL"
 
 
