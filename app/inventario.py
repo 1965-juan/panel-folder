@@ -528,6 +528,61 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
                                 "abiertas": sum(1 for z in d["zonas"] if z["estado"] == "abierto")}}
         return guard(run)
 
+    @app.get("/api/inv/inventario/{iid}/valoracion")
+    def inv_valoracion(iid: int, request: Request, formato: str = ""):
+        """Para hacer una oferta por un lote antes de comprarlo: lo contado con nuestro coste y PVP, lo que tenemos ya en stock
+        y lo que hemos vendido de cada artículo en el último año (para ver si nos sirve). No toca nada en Odoo."""
+        u = current_user(request)
+        i = inventario(iid, u)
+
+        def run():
+            with con() as c:
+                ls = [dict(x) for x in c.execute("""SELECT l.product_id, l.codigo, l.nombre, l.ref, SUM(l.cant) cant FROM lineas l JOIN recuentos r ON r.id=l.rid
+                                                    WHERE r.inv_id=? GROUP BY COALESCE(l.product_id, 'c'||l.codigo)""", (iid,)).fetchall()]
+            pids = [l["product_id"] for l in ls if l["product_id"]]
+            pr, stock, vend = {}, {}, {}
+            if pids:
+                pr = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids), ("active", "in", [True, False])],
+                                                           ["standard_price", "list_price", "default_code", "seller_ids"], TODAS, limit=20000)}
+                for q in odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id.usage", "=", "internal")], ["product_id", "quantity", "location_id"], TODAS, limit=50000):
+                    if q["location_id"][0] != UBIC["LOTE"].get("loc"):
+                        stock[q["product_id"][0]] = stock.get(q["product_id"][0], 0) + q["quantity"]
+                desde = (dt.date.today() - dt.timedelta(days=365)).isoformat()
+                for x in odoo.search_read("sale.order.line", [("product_id", "in", pids), ("state", "=", "sale"), ("order_id.date_order", ">=", desde)],
+                                          ["product_id", "qty_delivered"], TODAS, limit=100000):
+                    vend[x["product_id"][0]] = vend.get(x["product_id"][0], 0) + (x.get("qty_delivered") or 0)
+                for x in odoo.search_read("pos.order.line", [("product_id", "in", pids), ("order_id.date_order", ">=", desde), ("order_id.state", "not in", ["draft", "cancel"])],
+                                          ["product_id", "qty"], TODAS, limit=200000):
+                    vend[x["product_id"][0]] = vend.get(x["product_id"][0], 0) + (x.get("qty") or 0)
+            out = []
+            for l in ls:
+                p = pr.get(l["product_id"], {})
+                coste, pvp = p.get("standard_price") or 0, p.get("list_price") or 0
+                out.append({"codigo": l["codigo"], "ref": l["ref"] or p.get("default_code") or "", "articulo": l["nombre"] or "(sin identificar)",
+                            "conocido": bool(l["product_id"]), "cant": l["cant"], "coste": round(coste, 4), "pvp": round(pvp, 4),
+                            "valor_coste": round(coste * l["cant"], 2), "valor_pvp": round(pvp * l["cant"], 2),
+                            "stock_nuestro": round(stock.get(l["product_id"], 0), 2), "vendido_12m": round(vend.get(l["product_id"], 0), 2)})
+            out.sort(key=lambda x: (not x["conocido"], -x["valor_coste"]))
+            tot = {"lineas": len(out), "unidades": round(sum(x["cant"] for x in out), 2), "valor_coste": round(sum(x["valor_coste"] for x in out), 2),
+                   "valor_pvp": round(sum(x["valor_pvp"] for x in out), 2), "sin_identificar": sum(1 for x in out if not x["conocido"]),
+                   "sin_ventas": sum(1 for x in out if x["conocido"] and x["vendido_12m"] <= 0)}
+            return out, tot
+        out, tot = guard(run)
+        if formato != "csv":
+            return {"lineas": out, "totales": tot, "nombre": i["nombre"]}
+        f = io.StringIO()
+        w = csv.writer(f, delimiter=";")
+        n = lambda v: str(v).replace(".", ",")
+        w.writerow(["Código", "Referencia", "Artículo", "Unidades", "Coste ud", "Valor a coste", "PVP ud", "Valor a PVP", "Stock que ya tenemos",
+                    "Vendido últimos 12 meses", "¿Me sirve?", "Precio oferta ud"])
+        for x in out:
+            w.writerow([x["codigo"], x["ref"], x["articulo"], n(x["cant"]), n(x["coste"]), n(x["valor_coste"]), n(x["pvp"]), n(x["valor_pvp"]),
+                        n(x["stock_nuestro"]), n(x["vendido_12m"]), "", ""])
+        w.writerow([])
+        w.writerow(["", "", "TOTAL", n(tot["unidades"]), "", n(tot["valor_coste"]), "", n(tot["valor_pvp"])])
+        return Response("﻿" + f.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="valoracion_lote_{iid}.csv"'})
+
     @app.post("/api/inv/inventario/{iid}/aplicar")
     async def inv_aplicar(iid: int, request: Request):
         """Solo administrador: deja en Odoo el stock de cada artículo contado = suma de zonas − lo salido desde que se contó."""

@@ -289,6 +289,8 @@ async function verInv(id) {
   if (d.sin_articulo.length) h += `<div class="card"><h2>⚠️ Códigos que no tenemos (${d.sin_articulo.length})</h2><p class="muted">No entran en el stock hasta darlos de alta o asignarles un artículo.</p>
     <table><thead><tr><th>Código / qué es</th><th class="n">Uds</th><th></th></tr></thead><tbody>${d.sin_articulo.map(l => `<tr><td><b>${escH(l.codigo)}</b>${l.nombre ? `<br>${escH(l.nombre)}` : ''}<br><small class="muted">${escH(l.zona)}</small></td>
       <td class="n">${num(l.cant)}</td><td>${d.admin ? `<button class="big pu" style="width:auto;margin:0;padding:7px 10px;font-size:14px" data-alta="${l.id}">＋ Dar de alta</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  h += `<div class="card"><h2>💰 Valoración (para ofertar un lote)</h2><p class="muted">Lo contado con nuestro coste y PVP, el stock que ya tenemos de cada artículo y lo vendido en el último año, para decidir qué te sirve y cuánto ofrecer. No toca nada en Odoo.</p>
+    <a class="big pu" style="display:block;text-align:center;text-decoration:none" href="/api/inv/inventario/${id}/valoracion?formato=csv">📥 Descargar valoración en Excel</a></div>`;
   if (I.estado === 'abierto' && d.admin) h += `<button class="big" id="i-apl" ${S.abiertas ? 'disabled' : ''}>✅ Aplicar el inventario en Odoo (${S.con_dif} ajustes)</button>
     <p class="muted">${S.abiertas ? `Quedan ${S.abiertas} zonas contando: terminadlas antes de aplicar. ` : ''}Hay que aplicarlo con la caja de la tienda cerrada.</p>`;
   h += `<button class="big sec" id="i-vol">← Volver</button>`;
