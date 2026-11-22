@@ -161,7 +161,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
             return {"ok": True, "cliente": so["partner_id"][1], "facturas": [f["name"] for f in pend], "importe": round(sum(f["amount_residual"] for f in pend), 2)}
         return guard(run)
 
-    def facturar_so(T, so_id):
+    def facturar_so(T, so_id, de_la_tienda=True):
         """Factura lo servido del pedido (si falta) y la contabiliza. Devuelve (pedido, facturas pendientes de cobro)."""
         E = T["empresa"]
         so = odoo.search_read("sale.order", [("id", "=", so_id), ("company_id", "=", E)], ["name", "invoice_status", "user_id", "warehouse_id", "partner_id"],
@@ -169,7 +169,7 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
         if not so:
             raise HTTPException(404, "No encuentro el pedido")
         so = so[0]
-        if (T["usuario_odoo"] and (so.get("user_id") or [0])[0] != T["usuario_odoo"]) or (not T["usuario_odoo"] and (so.get("warehouse_id") or [0])[0] != T["almacen"]):
+        if de_la_tienda and ((T["usuario_odoo"] and (so.get("user_id") or [0])[0] != T["usuario_odoo"]) or (not T["usuario_odoo"] and (so.get("warehouse_id") or [0])[0] != T["almacen"])):
             raise HTTPException(403, "Ese pedido no es de esta tienda")
         ctx_so = {"active_model": "sale.order", "active_ids": [so_id], "active_id": so_id}
         if so["invoice_status"] == "to invoice":
@@ -201,6 +201,34 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
             return str(e)[:200]
         return ""
 
+    @app.get("/api/tienda/buscar_cobro")
+    def buscar_cobro(request: Request, q: str = "", t: str = ""):
+        """Facturas pendientes de cobro y albaranes servidos sin facturar de la empresa de la tienda, por cliente, NIF o número.
+        Para cobrar en la tienda cualquier cosa (aunque el pedido lo hiciera otra tienda o el almacén) y que el dinero entre en SU caja."""
+        u, t = ctx(request, t)
+        E = TIENDAS[t]["empresa"]
+        q = q.strip()
+        if len(q) < 2:
+            return []
+
+        def run():
+            pq = ["|", "|", ("partner_id.name", "ilike", q), ("partner_id.vat", "ilike", q), ("partner_id.commercial_partner_id.name", "ilike", q)]
+            fs = odoo.search_read("account.move", [("company_id", "=", E), ("move_type", "=", "out_invoice"), ("state", "=", "posted"),
+                                                   ("payment_state", "in", ["not_paid", "partial"]), "|", ("name", "ilike", q)] + pq,
+                                  ["name", "partner_id", "invoice_date", "amount_residual", "invoice_origin", "invoice_payment_term_id"], company_ids=[E], limit=40, order="invoice_date desc")
+            sv = odoo.search_read("sale.order", [("company_id", "=", E), ("state", "=", "sale"), ("invoice_status", "=", "to invoice"), ("delivery_status", "in", ["full", "partial"]),
+                                                 "|", ("name", "ilike", q)] + pq,
+                                  ["name", "partner_id", "date_order", "amount_total", "client_order_ref", "payment_term_id"], company_ids=[E], limit=40, order="date_order desc")
+            ems = {p["id"]: p.get("email") or "" for p in odoo.search_read("res.partner", [("id", "in", list({x["partner_id"][0] for x in fs + sv}))], ["email"],
+                                                                            company_ids=TODAS)} if fs or sv else {}
+            out = [{"tipo": "factura", "id": f["id"], "ref": f["name"], "cliente": f["partner_id"][1], "fecha": f.get("invoice_date") or "", "importe": round(f["amount_residual"], 2),
+                    "detalle": f.get("invoice_origin") or "", "plazo": (f.get("invoice_payment_term_id") or [0, ""])[1] or "Contado", "email": ems.get(f["partner_id"][0], "")} for f in fs]
+            out += [{"tipo": "albaran", "id": x["id"], "ref": x["name"], "cliente": x["partner_id"][1], "fecha": (x.get("date_order") or "")[:10], "importe": round(x["amount_total"], 2),
+                     "detalle": "servido, sin facturar" + (f" · {x['client_order_ref']}" if x.get("client_order_ref") else ""),
+                     "plazo": (x.get("payment_term_id") or [0, ""])[1] or "Contado", "email": ems.get(x["partner_id"][0], "")} for x in sv]
+            return out
+        return guard(run)
+
     @app.post("/api/tienda/cobrar")
     async def cobrar(request: Request):
         """{so_id, forma: efectivo|tarjeta, email?}: factura lo servido, lo cobra y envía la factura al cliente, todo sin salir del panel.
@@ -224,7 +252,15 @@ def setup(app, *, odoo, current_user, scope, guard, odoo_url, tienda_de, data_di
                 if not ses or not ses[0].get("cash_journal_id"):
                     raise HTTPException(400, f"La caja del TPV de {T['nombre']} no está abierta. Ábrela primero (botón «Abrir el TPV») para que el efectivo entre en la caja de hoy.")
                 ses = ses[0]
-            so, fs = facturar_so(T, int(b.get("so_id") or 0))
+            if b.get("factura_ids"):   # una factura cualquiera de la empresa de la tienda (buscada en «Cobrar otra factura o albarán»)
+                fs = odoo.search_read("account.move", [("id", "in", [int(x) for x in b["factura_ids"]]), ("company_id", "=", E), ("move_type", "=", "out_invoice"),
+                                                       ("state", "=", "posted")], ["name", "amount_residual", "payment_state", "partner_id"], company_ids=[E])
+                fs = [f for f in fs if f["payment_state"] not in ("paid", "in_payment", "reversed") and f["amount_residual"] > 0.009]
+                if fs and len({f["partner_id"][0] for f in fs}) > 1:
+                    raise HTTPException(400, "Cobra las facturas de un cliente cada vez")
+                so = {"name": ", ".join(f["name"] for f in fs), "partner_id": fs[0]["partner_id"] if fs else [0, ""]}
+            else:
+                so, fs = facturar_so(T, int(b.get("so_id") or 0), de_la_tienda=not b.get("libre"))
             if not fs:
                 raise HTTPException(400, "Este pedido ya está cobrado")
             total = round(sum(f["amount_residual"] for f in fs), 2)

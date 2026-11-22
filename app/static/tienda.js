@@ -24,29 +24,7 @@ async function tiOpen() {
       <br><small class="muted">${coDate(o.fecha)}${o.factura ? ' · ' + escH(o.factura) : ''}</small></td><td class="num"><b>${eur(o.importe)}</b></td>
       <td class="ti-cb"><button class="ac-go" data-c="${o.id}">💶 Cobrar</button></td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No hay nada servido pendiente de cobrar</p>';
-  $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = () => {
-    const o = cob.find(x => x.id === +b.dataset.c), P = $('#ti-paso');
-    P.hidden = false;
-    P.innerHTML = `<b>Cobrar ${eur(o.importe)} a ${escH(o.cliente)}</b> <span class="muted">(${escH(o.ref)})</span>
-      <p>Se hace la factura, se cobra y se le envía por email. El efectivo entra en la caja del TPV de la tienda (tiene que estar abierta).</p>
-      <label>Email para la factura <input id="ti-em" type="email" value="${escH(o.email || '')}" placeholder="correo del cliente" style="width:100%"></label>
-      <div class="ti-lz"><button class="ac-go" data-f="efectivo">💶 Efectivo</button><button class="ac-go" data-f="tarjeta">💳 Tarjeta</button>
-      <button class="btn" data-f="">Cancelar</button></div><div id="ti-res"></div>`;
-    P.scrollIntoView({ behavior: 'smooth' });
-    P.querySelectorAll('[data-f]').forEach(x => x.onclick = async () => {
-      const f = x.dataset.f; if (!f) { P.hidden = true; return; }
-      const em = $('#ti-em').value.trim();
-      if (!em && !confirm('El cliente no tiene email: se cobrará pero la factura no se enviará. ¿Seguir?')) return;
-      if (!confirm(`¿Cobrar ${eur(o.importe)} en ${f.toUpperCase()} a ${o.cliente}?`)) return;
-      P.querySelectorAll('button').forEach(z => z.disabled = true); $('#ti-res').innerHTML = '<p class="muted">Facturando y cobrando…</p>';
-      try {
-        const r = await jpost('/api/tienda/cobrar', { so_id: o.id, t: TI.tienda, forma: f, email: em !== (o.email || '') ? em : '' });
-        P.innerHTML = `✅ <b>Cobrado ${eur(r.importe)} en ${r.forma}</b> · ${escH(r.cliente)} · factura ${escH(r.facturas)}
-          <br>${r.enviada ? '📧 Factura enviada por email' : '⚠️ ' + escH(r.aviso)} <button class="btn" onclick="this.parentElement.hidden=true">Cerrar</button>`;
-        tiOpen();
-      } catch (e) { $('#ti-res').innerHTML = `<p class="err">${escH(e.message)}</p>`; P.querySelectorAll('button').forEach(z => z.disabled = false); }
-    });
-  });
+  $('#ti-cob').querySelectorAll('[data-c]').forEach(b => b.onclick = () => { const o = cob.find(x => x.id === +b.dataset.c); tiPaso(o, { so_id: o.id }); });
   if (!TI.solo_cobro) tiRepo();
   $('#ti-info').textContent = TI.solo_cobro ? `${cob.length} pendientes de cobrar` : `${rep.length} reposiciones · ${TI.encargos.length} encargos pendientes`;
 }
@@ -84,3 +62,46 @@ async function tiRepo() {
 })();
 $('#ti-sel').onchange = () => tiOpen();
 $('#ti-rec').onclick = () => tiOpen();
+
+// panel de cobro (efectivo a la caja abierta del TPV de esta tienda, o tarjeta)
+function tiPaso(o, cuerpo) {
+  const P = $('#ti-paso');
+  P.hidden = false;
+  P.innerHTML = `<b>Cobrar ${eur(o.importe)} a ${escH(o.cliente)}</b> <span class="muted">(${escH(o.ref)})</span>
+    <p>${cuerpo.factura_ids ? 'Se cobra la factura' : 'Se hace la factura, se cobra'} y se le envía por email. El efectivo entra en la caja del TPV de ${escH(TI.nombre)} (tiene que estar abierta), así cuadra al cerrar.</p>
+    <label>Email para la factura <input id="ti-em" type="email" value="${escH(o.email || '')}" placeholder="correo del cliente" style="width:100%"></label>
+    <div class="ti-lz"><button class="ac-go" data-f="efectivo">💶 Efectivo</button><button class="ac-go" data-f="tarjeta">💳 Tarjeta</button>
+    <button class="btn" data-f="">Cancelar</button></div><div id="ti-res"></div>`;
+  P.scrollIntoView({ behavior: 'smooth' });
+  P.querySelectorAll('[data-f]').forEach(x => x.onclick = async () => {
+    const f = x.dataset.f; if (!f) { P.hidden = true; return; }
+    const em = $('#ti-em').value.trim();
+    if (!em && !confirm('El cliente no tiene email: se cobrará pero la factura no se enviará. ¿Seguir?')) return;
+    if (!confirm(`¿Cobrar ${eur(o.importe)} en ${f.toUpperCase()} a ${o.cliente}?`)) return;
+    P.querySelectorAll('button').forEach(z => z.disabled = true); $('#ti-res').innerHTML = '<p class="muted">Cobrando…</p>';
+    try {
+      const r = await jpost('/api/tienda/cobrar', { ...cuerpo, t: TI.tienda, forma: f, email: em !== (o.email || '') ? em : '' });
+      P.innerHTML = `✅ <b>Cobrado ${eur(r.importe)} en ${r.forma}</b> · ${escH(r.cliente)} · factura ${escH(r.facturas)}
+        <br>${r.enviada ? '📧 Factura enviada por email' : '⚠️ ' + escH(r.aviso)} <button class="btn" onclick="this.parentElement.hidden=true">Cerrar</button>`;
+      $('#ti-bres').innerHTML = ''; $('#ti-bq').value = '';
+      tiOpen();
+    } catch (e) { $('#ti-res').innerHTML = `<p class="err">${escH(e.message)}</p>`; P.querySelectorAll('button').forEach(z => z.disabled = false); }
+  });
+}
+let TI_BT = null;
+$('#ti-bq').oninput = () => {
+  clearTimeout(TI_BT);
+  TI_BT = setTimeout(async () => {
+    const q = $('#ti-bq').value.trim(), box = $('#ti-bres');
+    if (q.length < 2) { box.innerHTML = ''; return; }
+    box.innerHTML = '<p class="muted">Buscando…</p>';
+    try {
+      const r = await api(`/api/tienda/buscar_cobro?t=${encodeURIComponent(TI.tienda)}&q=${encodeURIComponent(q)}`);
+      box.innerHTML = r.length ? `<table class="co-t ti-t"><tbody>${r.map((o, i) => `<tr><td><b>${escH(o.ref)}</b> ${escH(o.cliente)}
+          <br><small class="muted">${o.tipo === 'factura' ? '🧾 Factura' : '📦 Albarán'} · ${coDate(o.fecha)}${o.detalle ? ' · ' + escH(o.detalle) : ''} · ${escH(o.plazo)}</small></td>
+          <td class="num"><b>${eur(o.importe)}</b></td><td class="ti-cb"><button class="ac-go" data-i="${i}">💶 Cobrar</button></td></tr>`).join('')}</tbody></table>`
+        : '<p class="empty">No hay nada pendiente de cobro con eso</p>';
+      box.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { const o = r[+b.dataset.i]; tiPaso(o, o.tipo === 'factura' ? { factura_ids: [o.id] } : { so_id: o.id, libre: true }); });
+    } catch (e) { box.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+  }, 350);
+};
