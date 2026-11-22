@@ -292,7 +292,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
     @app.post("/api/compras/subir")
     async def subir(request: Request, tipo: str = Form(...), company: str = Form("all"), archivos: list[UploadFile] = File(...)):
+        """Sin elegir empresa: el albarán va a la empresa de su pedido y la factura a la que pone el PDF (se decide al cruzarla)."""
         u, cid, cids = una_empresa(request, company)
+        cid = 1
         if tipo not in ("albaran", "factura"):
             raise HTTPException(400, "Tipo no válido")
         out = []
@@ -943,6 +945,83 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             cx.execute("UPDATE docs SET compra=?, nota=NULL WHERE id=?", (json.dumps(comp, ensure_ascii=False), did))
         return True
 
+    def recibir_albaran(did, cantidades=None):
+        """El albarán del proveedor valida la entrada: lo que trae entra en stock en la empresa del pedido (sea cual sea).
+        Lo que el pedido tenía y no viene queda pendiente en otra entrada. El albarán queda esperando su factura."""
+        r = _doc(did)
+        if r["tipo"] != "albaran" or not r["compra"] or r["recepcion"]:
+            return None
+        comp = json.loads(r["compra"])
+        po_id = comp.get("pedido_id")
+        if not po_id:
+            return None
+        po = odoo.search_read("purchase.order", [("id", "=", po_id)], ["name", "company_id", "partner_id"], company_ids=TODAS)
+        if not po:
+            return None
+        po = po[0]
+        c1 = [po["company_id"][0]]
+        pks = odoo.search_read("stock.picking", [("purchase_id", "=", po_id), ("picking_type_code", "=", "incoming"), ("state", "not in", ["done", "cancel"])],
+                               ["name", "move_ids"], company_ids=c1, order="id")
+        if not pks:
+            return None
+        # cuánto trae el albarán de cada artículo
+        if cantidades is None:
+            lec = json.loads(r["lectura"] or "{}")
+            pls = _lineas_pedido(po_id, c1)
+            cantidades = {}
+            for l in lec.get("lineas") or []:
+                pid, _n, como = _identificar(l, po["partner_id"][0], TODAS, pls)
+                if pid:
+                    cantidades[pid] = cantidades.get(pid, 0) + _num(l.get("cantidad"))
+        if not cantidades:
+            raise HTTPException(400, "No sé qué artículos trae el albarán: recíbelo a mano en Recepciones")
+        resto = dict(cantidades)
+        pk = pks[0]
+        mvs = odoo.search_read("stock.move", [("id", "in", pk["move_ids"])], ["product_id", "product_uom_qty"], company_ids=c1)
+        hay = False
+        lineas_rec = []
+        for m in mvs:
+            pid = m["product_id"][0]
+            q = round(min(m["product_uom_qty"], max(resto.get(pid, 0), 0)), 4)
+            resto[pid] = resto.get(pid, 0) - q
+            odoo.call("stock.move", "write", c1, ids=[m["id"]], vals={"quantity": q, "picked": q > 0})
+            hay = hay or q > 0
+            lineas_rec.append({"articulo": m["product_id"][1], "pedido": m["product_uom_qty"], "recibido": q})
+        if not hay:
+            raise HTTPException(400, "Lo que trae el albarán no está en la entrada del pedido: recíbelo a mano en Recepciones")
+        num = (json.loads(r["lectura"] or "{}").get("numero") or "").strip()
+        if num:
+            try:
+                odoo.call("stock.picking", "write", c1, ids=[pk["id"]], vals={"origin": f"{po['name']} · Albarán {num}"})
+            except Exception:
+                pass
+        res = odoo.call("stock.picking", "button_validate", c1, ids=[pk["id"]])
+        pendiente = False
+        if isinstance(res, dict) and res.get("res_model") == "stock.backorder.confirmation":
+            wctx = dict(res.get("context") or {}, allowed_company_ids=c1)
+            w = odoo.call("stock.backorder.confirmation", "create", None, vals_list=[{}], context=wctx)
+            w = w[0] if isinstance(w, list) else w
+            odoo.call("stock.backorder.confirmation", "process", None, ids=[w], context=wctx)
+            pendiente = True
+        elif isinstance(res, dict) and res.get("res_model"):
+            raise HTTPException(400, f"Odoo pide confirmar algo más ({res.get('name')}): termínalo en Recepciones")
+        try:
+            poner_pdf("stock.picking", pk["id"], r["nombre"] or "albaran.pdf", (carpeta / r["fichero"]).read_bytes(), c1)
+        except Exception:
+            pass
+        rec = {"picking": pk["name"], "picking_id": pk["id"], "por": "con el albarán", "cuando": time.time(), "albaran": num, "lineas": lineas_rec,
+               "queda_pendiente": pendiente, "cancelado": False, "servir": [], "servir_pedidos": [], "faltas": [], "auto": True}
+        with lock, con() as c:
+            c.execute("UPDATE docs SET recepcion=?, empresa=?, nota=NULL WHERE id=?", (json.dumps(rec, ensure_ascii=False), c1[0], did))
+        return rec
+
+    def recibir_seguro(did):
+        try:
+            recibir_albaran(did)
+        except Exception as e:
+            with lock, con() as c:
+                c.execute("UPDATE docs SET nota=? WHERE id=?", (f"Cuadrado, pero no se pudo dar entrada solo: {getattr(e, 'detail', None) or str(e)[:150]}. Pulsa «Recibir la mercancía ahora»"[:300], did))
+
     def auto_cuadrar(did):
         """Al subir un albarán o factura: se cruza solo con compras. Si todo está identificado (o es nuevo con EAN) y la base cuadra,
         deja el pedido igual que el documento, mete lo nuevo, pasa lo que no llega a pendiente y saca la entrada para almacén.
@@ -967,6 +1046,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                         pass
                 with lock, con() as c:
                     c.execute("UPDATE docs SET compra=?, nota=NULL WHERE id=?", (json.dumps(comp, ensure_ascii=False), did))
+                if r["tipo"] == "albaran":
+                    recibir_seguro(did)
                 return
             if not info.get("proveedor"):
                 return nota("No encuentro el proveedor en Odoo: pulsa Cuadrar y elígelo")
@@ -975,6 +1056,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 try:   # no se crea otro pedido: lo que trae el albarán y no estaba se añade a ese pedido ya lanzado
                     hecho = sumar_a_confirmado(did, cp["id"], info["proveedor"]["id"])
                     if hecho:
+                        if r["tipo"] == "albaran":
+                            recibir_seguro(did)
                         return
                 except Exception as e:
                     return nota(f"Es del pedido {cp['name']} pero no pude añadirle lo que falta: {str(e)[:120]}. Pulsa Cuadrar")
@@ -989,6 +1072,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                         comp["aviso"] = str(e)[:150]
                 with lock, con() as c:
                     c.execute("UPDATE docs SET compra=?, nota=NULL WHERE id=?", (json.dumps(comp, ensure_ascii=False), did))
+                if r["tipo"] == "albaran":
+                    recibir_seguro(did)
                 return
             L = info.get("lineas") or []
             if not L:
@@ -1021,9 +1106,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             base = sum(round(_num(l["cantidad"]) * _num(l["precio"]) * (1 - _num(l.get("descuento")) / 100), 2) for l in L)
             if base_doc and abs(base - base_doc) > max(0.05, base_doc * 0.01):
                 return nota(f"Las líneas suman {base:.2f} € y el documento dice {base_doc:.2f} €: pulsa Cuadrar y revísalo")
-            aplicar_cuadre(_doc(did), TODAS, "automático", info["proveedor"]["id"], (info.get("pedido") or {}).get("id") or 0, L)
+            res = aplicar_cuadre(_doc(did), TODAS, "automático", info["proveedor"]["id"], (info.get("pedido") or {}).get("id") or 0, L)
             with lock, con() as c:
                 c.execute("UPDATE docs SET nota=NULL WHERE id=?", (did,))
+            if r["tipo"] == "albaran":
+                recibir_seguro(did)
         except Exception as e:
             nota(f"No se pudo cuadrar solo: {str(e)[:200]}. Pulsa Cuadrar")
 
@@ -1069,9 +1156,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
     async def doc_cuadrar(did: str, request: Request, releer: int = 0, pedido: int = 0):
         """Lee el documento y lo cruza con el pedido abierto del proveedor. Solo consulta, no cambia nada."""
         u, cids = ctx(request, "all")
+        cids = TODAS
         r = _doc(did)
-        if r["empresa"] not in cids:
-            raise HTTPException(403, "Documento de otra empresa")
         b = {}
         try:
             b = await request.json()
@@ -1083,10 +1169,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
     @app.post("/api/compras/docs/{did}/cuadrar/aplicar")
     async def doc_cuadrar_aplicar(did: str, request: Request):
         u, cids = ctx(request, "all")
+        cids = TODAS
         b = await request.json()
         r = _doc(did)
-        if r["empresa"] not in cids:
-            raise HTTPException(403, "Documento de otra empresa")
         if r["compra"]:
             raise HTTPException(400, "Este documento ya está cuadrado: " + json.loads(r["compra"]).get("pedido", ""))
         partner_id = int(b.get("partner_id") or 0)
@@ -1096,7 +1181,23 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             raise HTTPException(400, "Falta el proveedor o no hay líneas identificadas")
 
         nv = "cancelar" if b.get("no_vienen") == "cancelar" else "pendiente"
-        return guard(lambda: aplicar_cuadre(r, cids, u, partner_id, po_id, lineas, nv))
+
+        def run():
+            res = aplicar_cuadre(r, TODAS, u, partner_id, po_id, lineas, nv)
+            if r["tipo"] == "albaran":
+                cant = {}
+                for l in lineas:
+                    if l.get("product_id"):
+                        cant[int(l["product_id"])] = cant.get(int(l["product_id"]), 0) + _num(l.get("cantidad"))
+                try:
+                    rec = recibir_albaran(did, cant)
+                    res["recibido"] = bool(rec)
+                    if rec and rec.get("queda_pendiente"):
+                        res["avisos"].append("Lo que no ha venido queda pendiente en otra entrada")
+                except Exception as e:
+                    res["avisos"].append(f"No se pudo dar entrada sola: {getattr(e, 'detail', None) or str(e)[:150]}. Recíbelo con «Recibir la mercancía ahora»")
+            return res
+        return guard(run)
 
     @app.delete("/api/compras/docs/{did}")
     def borrar_doc(did: str, request: Request):
@@ -1671,11 +1772,112 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         pass
             return {"ok": True, "pedido": nombres, "base": t["amount_untaxed"], "total": t["amount_total"]}
 
+    EMP_NOMBRE = {1: "DISTRIPLUS", 4: "LOGIPAPER", 5: "INGRAF", 2: "FERMASA 2025", 3: "FERMASA INMUEBLES"}
+
+    @app.get("/api/compras/facturas/{mid}/cruce")
+    def factura_cruce(mid: int, request: Request):
+        """Albaranes recibidos y sin facturar del proveedor de la factura, en cualquier empresa, para marcar los que lleva."""
+        ctx(request, "all")
+
+        def run():
+            m = odoo.search_read("account.move", [("id", "=", mid)], ["partner_id", "ref", "amount_untaxed", "amount_total", "company_id", "invoice_date", "state"], company_ids=TODAS)
+            if not m:
+                raise HTTPException(404, "No encuentro la factura en Odoo")
+            m = m[0]
+            if not m.get("partner_id"):
+                raise HTTPException(400, "La factura no tiene proveedor: pulsa «Cuadrar» o ponlo en Odoo")
+            com = odoo.search_read("res.partner", [("id", "=", m["partner_id"][0])], ["commercial_partner_id"], company_ids=TODAS)[0]["commercial_partner_id"][0]
+            ps = odoo.search_read("purchase.order", [("partner_id", "child_of", com), ("state", "in", ["purchase", "done"]), ("invoice_status", "=", "to invoice")],
+                                  ["name", "date_order", "partner_ref", "company_id", "receipt_status", "origin"], company_ids=TODAS, order="date_order desc", limit=60)
+            with con() as c:
+                ya = set()
+                for mk in c.execute("SELECT nota FROM factura_marcas WHERE tipo='pedido'").fetchall():
+                    try:
+                        n = json.loads(mk["nota"] or "{}")
+                        ya.update(n.get("pedido_ids") or [n.get("pedido_id")])
+                    except Exception:
+                        pass
+            ps = [p for p in ps if p["id"] not in ya]
+            pls = odoo.search_read("purchase.order.line", [("order_id", "in", [p["id"] for p in ps]), ("display_type", "=", False)],
+                                   ["order_id", "qty_received", "qty_invoiced", "price_unit", "discount", "product_qty"], company_ids=TODAS) if ps else []
+            imp = {}
+            for l in pls:
+                q = (l["qty_received"] or 0) - (l["qty_invoiced"] or 0)
+                if q > 0:
+                    imp[l["order_id"][0]] = imp.get(l["order_id"][0], 0) + q * l["price_unit"] * (1 - (l.get("discount") or 0) / 100)
+            ref = (m.get("ref") or "").strip().lower()
+            alb = [{"id": p["id"], "pedido": p["name"], "albaran": p.get("partner_ref") or "", "fecha": (p["date_order"] or "")[:10],
+                    "base": round(imp.get(p["id"], 0), 2), "empresa_id": p["company_id"][0], "empresa": EMP_NOMBRE.get(p["company_id"][0], p["company_id"][1]),
+                    "recibido": p.get("receipt_status")} for p in ps if imp.get(p["id"], 0) > 0.004]
+            return {"factura": {"id": mid, "proveedor": m["partner_id"][1], "numero": m.get("ref") or "", "base": m["amount_untaxed"], "total": m["amount_total"],
+                                "fecha": m.get("invoice_date") or "", "empresa_id": m["company_id"][0], "empresa": EMP_NOMBRE.get(m["company_id"][0], m["company_id"][1])},
+                    "albaranes": alb, "empresas": [{"id": k, "nombre": v} for k, v in EMP_NOMBRE.items() if k in (1, 4, 5)]}
+        return guard(run)
+
+    def factura_a_empresa(mid, emp, u):
+        """La factura se factura en otra empresa: se hace el borrador allí (mismo proveedor, nº, fecha y PDF) y se cancela el borrador de antes."""
+        m = odoo.search_read("account.move", [("id", "=", mid), ("state", "=", "draft")], ["partner_id", "ref", "invoice_date", "move_type", "company_id", "message_main_attachment_id"], company_ids=TODAS)
+        if not m:
+            raise HTTPException(400, "La factura ya no está en borrador")
+        m = m[0]
+        if m["company_id"][0] == emp:
+            return mid
+        jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", emp)], ["id"], company_ids=[emp], limit=1)
+        vals = {"move_type": m["move_type"], "journal_id": jr[0]["id"], "partner_id": m["partner_id"][0], "company_id": emp}
+        if m.get("ref"):
+            vals["ref"] = m["ref"]
+        if m.get("invoice_date"):
+            vals["invoice_date"] = m["invoice_date"]
+        nuevo = odoo.call("account.move", "create", [emp], vals_list=[vals], context={"default_move_type": m["move_type"]})
+        nuevo = nuevo[0] if isinstance(nuevo, list) else nuevo
+        with con() as c:
+            d = c.execute("SELECT id, nombre, fichero FROM docs WHERE odoo_model='account.move' AND odoo_id=?", (mid,)).fetchone()
+        if d and d["fichero"] and (carpeta / d["fichero"]).exists():
+            poner_pdf("account.move", nuevo, d["nombre"] or "factura.pdf", (carpeta / d["fichero"]).read_bytes(), [emp])
+        try:
+            odoo.call("account.move", "button_cancel", [m["company_id"][0]], ids=[mid])
+            odoo.call("account.move", "message_post", [m["company_id"][0]], ids=[mid], body=f"Anulada desde el Panel Folder: se factura en otra empresa (borrador nuevo id {nuevo}) — {u}")
+        except Exception:
+            pass
+        with lock, con() as c:
+            c.execute("UPDATE docs SET odoo_id=?, empresa=? WHERE odoo_model='account.move' AND odoo_id=?", (nuevo, emp, mid))
+        return nuevo
+
+    @app.post("/api/compras/facturas/{mid}/cruzar")
+    async def factura_cruzar(mid: int, request: Request):
+        """{pedido_ids, empresa}: la factura se queda en la empresa elegida y se cruza con esos albaranes. Sale del panel."""
+        u, _ = ctx(request, "all")
+        b = await request.json()
+        po_ids = [int(x) for x in b.get("pedido_ids") or [] if x]
+        emp = int(b.get("empresa") or 0)
+        if not po_ids:
+            raise HTTPException(400, "Marca al menos un albarán")
+        if emp not in (1, 4, 5):
+            raise HTTPException(400, "Elige en qué empresa se factura")
+
+        def run():
+            nuevo = factura_a_empresa(mid, emp, u)
+            res = enlazar_factura(nuevo, po_ids, u)
+            with lock, con() as c:
+                for d in c.execute("SELECT id, compra FROM docs WHERE compra IS NOT NULL").fetchall():
+                    try:
+                        if json.loads(d["compra"]).get("pedido_id") in po_ids:
+                            c.execute("UPDATE docs SET factura_id=? WHERE id=?", (nuevo, d["id"]))
+                    except Exception:
+                        pass
+            res["factura_id"] = nuevo
+            res["empresa"] = EMP_NOMBRE.get(emp)
+            return res
+        return guard(run)
+
     @app.get("/api/compras/bandeja")
     def bandeja(request: Request, company: str = "all", dias: int = 45):
-        """Todo lo subido con su lectura y en qué paso está. Se queda como pendiente hasta que se termina:
-        albarán -> cuadrado con su pedido y recibido por almacén; factura -> contabilizada (con la entrada confirmada)."""
-        _, cids = ctx(request, company)
+        """Todo lo subido con su lectura y en qué paso está, de todas las empresas:
+        albarán -> cuadrado con su pedido, entrada hecha y esperando su factura; factura -> cruzada con sus albaranes o marcada como gasto
+        (entonces sale del panel: Mayte la valida desde los borradores de Odoo)."""
+        ctx(request, company)
+        cids = TODAS
+        dias = max(dias, 120)
         desde = time.time() - dias * 86400
         with con() as c:
             ds = [dict(r) for r in c.execute("SELECT * FROM docs WHERE estado != 'descartado' AND subido >= ? AND empresa IN (%s) ORDER BY subido DESC"
@@ -1701,9 +1903,19 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
             # estado de las entradas de los pedidos
             po_ids = [d["compra"]["pedido_id"] for d in ds if d["compra"] and d["compra"].get("pedido_id")]
             pick = {}
+            po_fact = {}
             if po_ids:
                 for pk in odoo.search_read("stock.picking", [("purchase_id", "in", po_ids), ("picking_type_code", "=", "incoming")], ["name", "state", "purchase_id"], company_ids=cids):
                     pick.setdefault(pk["purchase_id"][0], []).append(pk)
+                po_fact = {p["id"]: p["invoice_status"] for p in odoo.search_read("purchase.order", [("id", "in", po_ids)], ["invoice_status"], company_ids=cids)}
+            cruzados = set()   # pedidos cruzados con una factura de otra empresa (lo apunta el panel)
+            for mk in marcas.values():
+                if mk["tipo"] == "pedido":
+                    try:
+                        n = json.loads(mk.get("nota") or "{}")
+                        cruzados.update(n.get("pedido_ids") or [n.get("pedido_id")])
+                    except Exception:
+                        pass
             # facturas en Odoo
             mids = [d["odoo_id"] for d in ds if d["odoo_model"] == "account.move" and d["odoo_id"]]
             FM = ["state", "name", "partner_id", "ref", "amount_total", "amount_untaxed", "invoice_date", "invoice_origin", "move_type"]
@@ -1757,8 +1969,14 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         suyas = d["compra"].get("recepciones") or []   # la entrada de ESTE albarán; lo que quede en otra entrada es lo que no vino
                         suya_hecha = bool(suyas) and all(x["state"] in ("done", "cancel") for x in pk if x["name"] in suyas) and any(x["name"] in suyas for x in pk)
                         if (pk and not abiertas) or suya_hecha or d.get("recepcion"):
-                            e.update(paso="terminado", texto=f"Cuadrado con {d['compra']['pedido']} y recibido por almacén"
-                                     + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
+                            pid_ = d["compra"].get("pedido_id")
+                            facturado = d.get("factura_id") or pid_ in cruzados or po_fact.get(pid_) in ("invoiced", "no")
+                            if facturado:
+                                e.update(paso="terminado", texto=f"Cuadrado con {d['compra']['pedido']}, recibido y cruzado con su factura"
+                                         + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
+                            else:
+                                e.update(paso="sin_factura", texto=f"Entrada hecha ({d['compra']['pedido']}). Esperando la factura del proveedor para cruzarla"
+                                         + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
                         else:
                             e.update(paso="espera", texto=f"Cuadrado con {d['compra']['pedido']}. Falta que almacén reciba la entrada {', '.join(abiertas) or ''} en Recepciones",
                                      acciones=["fichas"])
@@ -1780,20 +1998,15 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         e["pedidos"] = pedidos
                         if marca and marca["tipo"] == "pedido":
                             pn, rec = pedido_de_marca(marca)
-                            if rec:
-                                e.update(paso="ok", texto=f"Cruzada con el pedido {pn} del almacén central y material recibido. En borrador para que Mayte la revise", acciones=["quitar_marca"])
-                            else:
-                                e.update(paso="espera", texto=f"Cruzada con el pedido {pn} del almacén central. Falta que almacén lo reciba", acciones=["recibido", "quitar_marca"])
+                            e.update(paso="terminado", texto=f"Cruzada con {pn}. En borradores de Odoo para que Mayte la valide", acciones=["quitar_marca"])
                         elif marca:
-                            e.update(paso="ok", texto=("Gasto sin entrada de material" if marca["tipo"] == "gasto" else "Material marcado como recibido") + f" ({marca['usuario']}). En borrador para que Mayte la revise",
+                            e.update(paso="terminado", texto=("Gasto, sin material" if marca["tipo"] == "gasto" else "Material marcado como recibido") + f" ({marca['usuario']}). En borradores de Odoo para que Mayte la valide",
                                      acciones=["quitar_marca"])
                         elif not con_po:
-                            e.update(paso="pendiente", texto="Sin pedido de compra: cuádrala desde el PDF (crea el pedido y la entrada para almacén), enlázala con un pedido que ya exista, o márcala como gasto / material recibido",
-                                     acciones=["auto", "cuadrar", "cuadrar_factura", "gasto", "recibido"])
-                        elif any(l["quantity"] > pol.get(l["purchase_line_id"][0], {}).get("qty_received", 0) + 1e-6 for l in con_po):
-                            e.update(paso="espera", texto=f"Cuadrada con {', '.join(pedidos)}. Falta que almacén reciba el material", acciones=["recibido"])
+                            e.update(paso="pendiente", texto="Crúzala con sus albaranes (eliges en qué empresa se factura) o márcala como gasto si no lleva material",
+                                     acciones=["cruzar", "gasto", "cuadrar"])
                         else:
-                            e.update(paso="ok", texto=f"Cuadrada con {', '.join(pedidos)} y material recibido. En borrador para que Mayte la revise y contabilice")
+                            e.update(paso="terminado", texto=f"Cruzada con {', '.join(pedidos)}. En borradores de Odoo para que Mayte la valide")
                         if _num(lec.get("total")) < 0 and m.get("move_type") == "in_invoice":
                             e["texto"] += " · ⚠️ El PDF es un ABONO (importe negativo) pero en Odoo está como factura: hay que pasarla a factura rectificativa"
                         if not m.get("invoice_date") or not m.get("partner_id"):

@@ -72,11 +72,13 @@
     <div class="wa-tabs co-tabs"><button data-t="subir" class="on">⬆ Subir PDF</button><button data-t="rec">📦 Recepciones</button><button data-t="fac">🧾 Facturas</button><button data-t="recu">🔁 Recurrentes del mes</button><button data-t="ban">🏦 Bancos</button></div>
     <div id="co-subir" class="co-pane">
       <div class="co-drops">
-        <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí el PDF o la foto del albarán, o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra para recibir el material, y sale el informe de lo cambiado y lo pendiente</small></label>
-        <label class="drop d-fac"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="factura"><b>Facturas de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Suben a Odoo como borrador, Odoo las lee solo y Mayte da el OK</small></label>
+        <label class="drop d-alb"><input type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png" multiple data-tipo="albaran"><b>Albaranes de proveedor</b><span>Arrastra aquí el PDF o la foto del albarán, o pulsa para elegirlos</span><small>Se cruzan con el pedido de compra y el material entra solo; quedan esperando su factura</small></label>
+        <label class="drop d-fac"><input type="file" accept="application/pdf,.pdf" multiple data-tipo="factura"><b>Facturas de proveedor</b><span>Arrastra aquí los PDF o pulsa para elegirlos</span><small>Se cruzan con sus albaranes (o se marcan como gasto) y pasan a borradores de Odoo para Mayte</small></label>
       </div>
-      <p class="muted co-emp">Se suben a: <b id="co-emp-n"></b> (cámbialo arriba en el selector de empresa)</p>
-      <div class="bj-head"><h3>Bandeja de documentos</h3><span class="muted" id="bj-res"></span></div><div id="co-docs"></div><details id="bj-fin"><summary>Terminados (<span id="bj-nfin">0</span>)</summary><div id="bj-fin-l"></div></details>
+      <p class="muted co-emp">Da igual la empresa: el albarán entra en la empresa de su pedido y la factura se factura en la que elijas al cruzarla.</p>
+      <div class="bj-head"><h3>Por hacer</h3><span class="muted" id="bj-res"></span></div><div id="co-docs"></div>
+      <details id="bj-esp" open><summary>📦 Albaranes recibidos esperando su factura (<span id="bj-nesp">0</span>)</summary><div id="bj-esp-l"></div></details>
+      <details id="bj-fin"><summary>Terminados (<span id="bj-nfin">0</span>)</summary><div id="bj-fin-l"></div></details>
     </div>
     <div id="co-rec" class="co-pane" hidden>
       <div class="co-two"><div><h3>Albaranes subidos sin recibir</h3><div id="co-albs"></div></div>
