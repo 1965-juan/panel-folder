@@ -2563,6 +2563,41 @@ async def admin_odoo_accion(request: Request):
     return guard(run)
 
 
+@app.post("/api/admin/web_catalogo_pdf")
+async def admin_web_catalogo_pdf(request: Request):
+    """Solo admin. Sustituye el contenido del PDF del catálogo de la web (misma ruta y nombre) por uno publicado en una rama de GitHub.
+    Guarda antes una copia del anterior en la carpeta de datos. {rama, archivo, ruta}"""
+    _solo_admin(request)
+    import base64
+    import httpx as _hx
+    b = await request.json()
+    ruta = b.get("ruta") or "/catalogo67/Catalogo_67_FolderCastellon.pdf"
+    if not re.fullmatch(r"/catalogo\d*/[\w\-.]+\.pdf", ruta):
+        raise HTTPException(400, "Ruta no permitida")
+    rama = re.sub(r"[^\w\-]", "", b.get("rama") or "")
+    archivo = re.sub(r"[^\w\-.]", "", b.get("archivo") or "")
+    if not rama or not archivo:
+        raise HTTPException(400, "Falta rama o archivo")
+
+    def run():
+        r = _hx.get(f"https://raw.githubusercontent.com/1965-juan/panel-folder/{rama}/{archivo}", timeout=180, follow_redirects=True)
+        if r.status_code != 200 or not r.content.startswith(b"%PDF") or len(r.content) < 1_000_000:
+            raise HTTPException(400, f"No se ha podido descargar el PDF nuevo ({r.status_code}, {len(r.content)} bytes)")
+        att = odoo.search_read("ir.attachment", [("url", "=", ruta), ("res_field", "=", False)], ["name", "file_size", "public"], [1, 2, 3, 4, 5])
+        if len(att) != 1:
+            raise HTTPException(400, f"Se esperaba 1 archivo en {ruta} y hay {len(att)}")
+        a = att[0]
+        old = odoo.search_read("ir.attachment", [("id", "=", a["id"])], ["datas"], [1, 2, 3, 4, 5])
+        copia = DATA / f"copia_{ruta.strip('/').replace('/', '_')}_{dt.datetime.now():%Y%m%d%H%M}.pdf"
+        if old and old[0].get("datas"):
+            copia.write_bytes(base64.b64decode(old[0]["datas"]))
+        odoo.call("ir.attachment", "write", [1, 2, 3, 4, 5], ids=[a["id"]], vals={"datas": base64.b64encode(r.content).decode(), "mimetype": "application/pdf"})
+        nuevo = odoo.search_read("ir.attachment", [("id", "=", a["id"])], ["name", "url", "file_size", "public", "checksum"], [1, 2, 3, 4, 5])[0]
+        return {"ok": True, "antes": a["file_size"], "ahora": nuevo["file_size"], "nombre": nuevo["name"], "url": nuevo["url"],
+                "publico": nuevo["public"], "copia": copia.name}
+    return guard(run)
+
+
 @app.post("/api/admin/compra_directa")
 async def admin_compra_directa(request: Request):
     """Solo admin. Crea artículos nuevos y un pedido de compra en una empresa concreta (p.ej. INGRAF):
