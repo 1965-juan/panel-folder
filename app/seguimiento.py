@@ -267,35 +267,102 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
             c.executemany("UPDATE hist SET clase='otro', que='automático' WHERE id=?", [(x,) for x in fuera])
         return buenos
 
-    def clasificar_lote(lote):
-        partes = []
-        for i, f in enumerate(lote):
-            adj = ", ".join(json.loads(f["adjuntos"] or "[]"))[:150]
-            partes.append(f"[{i}] De: {f['nombre']} <{f['de']}> · {dt.datetime.fromtimestamp(f['ts']).strftime('%d/%m/%Y')}\nAsunto: {f['asunto']}\n"
-                          + (f"Adjuntos: {adj}\n" if adj else "") + (f["texto"] or "")[:900])
-        body = {"model": modelo, "max_tokens": 4000,
+    INSTR = ('{"r":[{"i":0,"c":"' + "|".join(CLASES) + '","cli":"empresa o persona cliente si se ve","ref":"nº de pedido del cliente (ORD…, nº pedido) o nuestro nº (S0…, N31/…) si aparece",'
+             '"que":"qué quiere el cliente en concreto: artículos, cantidades, plazo (25 palabras como máximo)"}]}.\n'
+             "LEE EL TEXTO ENTERO: el asunto muchas veces no dice nada («Hola», «Consulta», el nombre de la empresa o vacío); lo que cuenta es lo que pide en el cuerpo o en el PDF adjunto. "
+             "pedido = un cliente nos pide material o un trabajo (aunque no use la palabra pedido: «necesitamos», «mandadnos», «nos hace falta», una lista de artículos, un PDF de pedido); "
+             "presupuesto = un cliente nos pide precio, oferta, cuánto costaría o disponibilidad; acepta = un cliente acepta un presupuesto, da el visto bueno a una prueba o dice «adelante»; "
+             "reclamacion = queja o error de un cliente; proveedor = un proveedor nos escribe (facturas, tarifas, ofertas, envíos); admin = bancos, recibos, gestoría, administración; otro = lo demás. "
+             "Clasifica por lo que escribe el remitente antes de [mensaje citado]; si es un reenvío interno (de otra tienda Folder, de pedidos@ o un Fwd:) clasifícalo por lo que pide el cliente del correo reenviado.")
+
+    def llama(content, max_tokens):
+        body = {"model": modelo, "max_tokens": max_tokens,
                 "system": "Clasificas correos que recibe Folder Castellón (papelería, material de oficina, imprenta y regalo publicitario; empresas Distriplus, Logipaper, Ingraf). "
                           "Responde SOLO un JSON.",
-                "messages": [{"role": "user", "content": "\n\n".join(partes) + "\n\n---\nPara cada correo devuelve "
-                              '{"r":[{"i":0,"c":"' + "|".join(CLASES) + '","cli":"empresa o persona cliente si se ve","ref":"nº de pedido del cliente (ORD…, nº pedido) o nuestro nº (S0…, N31/…) si aparece","que":"qué pide en 12 palabras como máximo"}]}.\n'
-                              "pedido = un cliente nos pide material o un trabajo; presupuesto = un cliente nos pide precio u oferta; acepta = un cliente acepta un presupuesto o da el visto bueno a una prueba; "
-                              "reclamacion = queja o error de un cliente; proveedor = un proveedor nos escribe (facturas, tarifas, ofertas, envíos); admin = bancos, recibos, gestoría, administración; otro = lo demás. "
-                              "Clasifica por lo que escribe el remitente antes de [mensaje citado]; si es un reenvío interno (de otra tienda Folder, de pedidos@ o un Fwd:) clasifícalo por lo que pide el cliente del correo reenviado."}]}
+                "messages": [{"role": "user", "content": content}]}
         r = http.post(os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages",
                       headers={"x-api-key": clave_claude(), "anthropic-version": "2023-06-01", "content-type": "application/json"}, json=body)
         if r.status_code != 200:
             raise RuntimeError(f"Claude respondió {r.status_code}: {r.text[:200]}")
         t = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
         m = re.search(r"\{[\s\S]*\}", t)
-        res = json.loads(m.group(0)).get("r", []) if m else []
+        return json.loads(m.group(0)).get("r", []) if m else []
+
+    def cabecera(i, f):
+        adj = ", ".join(json.loads(f["adjuntos"] or "[]"))[:200]
+        return (f"[{i}] De: {f['nombre']} <{f['de']}> · {dt.datetime.fromtimestamp(f['ts']).strftime('%d/%m/%Y')}\nAsunto: {f['asunto'] or '(sin asunto)'}\n"
+                + (f"Adjuntos: {adj}\n" if adj else ""))
+
+    def fila_res(x, f):
+        cl = x.get("c") if x.get("c") in CLASES else "otro"
+        return (cl, (x.get("cli") or "")[:120], (x.get("ref") or "")[:80], (x.get("que") or "")[:300], f["id"])
+
+    def clasificar_pdf(f, pdf):
+        import base64
+        res = llama([{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(pdf).decode()}},
+                     {"type": "text", "text": cabecera(0, f) + (f["texto"] or "")[:2500] + "\n\n---\nEl PDF de arriba va adjunto a este correo. Devuelve " + INSTR}], 800)
+        return [fila_res(x, f) for x in res[:1]]
+
+    def pdfs_de(filas):
+        """Vuelve a abrir los correos (solo los que traen PDF y casi nada de texto) y saca el primer PDF de cada uno."""
+        out, ctas = {}, {c["usuario"]: c for c in leer_cuentas()}
+        grupos = {}
+        for f in filas:
+            try:
+                cta, carpeta, uv, uid = f["id"].rsplit("|", 3)
+            except ValueError:
+                continue
+            grupos.setdefault((cta, carpeta, uv), []).append((int(uid), f))
+        for (cta, carpeta, uv), l in grupos.items():
+            if cta not in ctas:
+                continue
+            c = ctas[cta]
+            try:
+                M = imaplib.IMAP4_SSL(c["servidor"], c["puerto"], timeout=90)
+                M.login(c["usuario"], c["clave"])
+                typ, _ = M.select(f'"{carpeta}"' if " " in carpeta else carpeta, readonly=True)
+                try:
+                    uv_ahora = M.response("UIDVALIDITY")[1][0].decode()
+                except Exception:
+                    uv_ahora = ""
+                if typ != "OK" or uv_ahora != uv:
+                    M.logout()
+                    continue
+                for uid, f in l:
+                    try:
+                        typ, d = M.uid("fetch", str(uid), "(RFC822.SIZE)")
+                        cab = b" ".join((x[0] if isinstance(x, tuple) else x) for x in (d or []) if x)
+                        mt = re.search(rb"RFC822\.SIZE (\d+)", cab)
+                        if not mt or int(mt.group(1)) > 15_000_000:
+                            continue
+                        typ, d = M.uid("fetch", str(uid), "(BODY.PEEK[])")
+                        raw = next((x[1] for x in d if isinstance(x, tuple)), None)
+                        if not raw:
+                            continue
+                        for part in email.message_from_bytes(raw).walk():
+                            fn = (dec(part.get_filename()) or "").lower()
+                            if part.get_content_type() == "application/pdf" or fn.endswith(".pdf"):
+                                datos = part.get_payload(decode=True) or b""
+                                if 0 < len(datos) <= 8_000_000:
+                                    out[f["id"]] = datos
+                                    break
+                    except Exception:
+                        continue
+                M.logout()
+            except Exception:
+                continue
+        return out
+
+    def clasificar_lote(lote):
+        partes = [cabecera(i, f) + (f["texto"] or "")[:2000] for i, f in enumerate(lote)]
+        res = llama("\n\n".join(partes) + "\n\n---\nPara cada correo devuelve " + INSTR, 5000)
         out = []
         for x in res:
             try:
                 f = lote[int(x.get("i"))]
             except Exception:
                 continue
-            cl = x.get("c") if x.get("c") in CLASES else "otro"
-            out.append((cl, (x.get("cli") or "")[:120], (x.get("ref") or "")[:80], (x.get("que") or "")[:200], f["id"]))
+            out.append(fila_res(x, f))
         return out
 
     def clasificar_todo():
@@ -303,10 +370,34 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
             lista = candidatos(c)
         EST["por_clasificar"] = len(lista)
         EST["clasificados"] = 0
-        EST["fase"] = "Clasificando con Claude"
         fallos = 0
-        for i in range(0, len(lista), 20):
-            lote = lista[i:i + 20]
+        # los que traen un PDF y casi no escriben nada: se lee el PDF (el pedido suele venir ahí)
+        con_pdf = [f for f in lista if any(a.lower().endswith(".pdf") for a in json.loads(f["adjuntos"] or "[]"))
+                   and len((f["texto"] or "").split("[mensaje citado]")[0].strip()) < 400]
+        if con_pdf:
+            EST["fase"] = f"Leyendo los PDF adjuntos ({len(con_pdf)})"
+            hechos = set()
+            for i in range(0, len(con_pdf), 25):
+                trozo = con_pdf[i:i + 25]
+                pdfs = pdfs_de(trozo)
+                for f in trozo:
+                    if f["id"] not in pdfs:
+                        continue
+                    try:
+                        res = clasificar_pdf(f, pdfs[f["id"]])
+                    except Exception as e:
+                        EST["error"] = str(e)[:200]
+                        continue
+                    if res:
+                        with lock, con() as c:
+                            c.executemany("UPDATE hist SET clase=?, cli=?, ref=?, que=? WHERE id=?", res)
+                        hechos.add(f["id"])
+                EST["clasificados"] = len(hechos)
+            lista = [f for f in lista if f["id"] not in hechos]
+        EST["fase"] = "Clasificando con Claude"
+        base = EST["clasificados"]
+        for i in range(0, len(lista), 12):
+            lote = lista[i:i + 12]
             try:
                 res = clasificar_lote(lote)
             except Exception as e:
@@ -318,7 +409,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                 continue
             with lock, con() as c:
                 c.executemany("UPDATE hist SET clase=?, cli=?, ref=?, que=? WHERE id=?", res)
-            EST["clasificados"] = i + len(lote)
+            EST["clasificados"] = base + i + len(lote)
 
     def proceso(desde):
         if EST["leyendo"]:
