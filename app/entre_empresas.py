@@ -312,7 +312,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                                    ["name"], company_ids=cids, order="id", limit=5)
             if not tpl:
                 raise HTTPException(400, "No encuentro la plantilla de email de facturas en Odoo")
-            tid = next((t["id"] for t in tpl if "envío" in t["name"].lower() or "sending" in t["name"].lower()), tpl[0]["id"])
+            # la estándar de Odoo («Factura: enviando»), nunca la de autofacturación ni rectificativas
+            std = odoo.search_read("ir.model.data", [("module", "=", "account"), ("name", "=", "email_template_edi_invoice")], ["res_id"], company_ids=cids, limit=1)
+            tid = std[0]["res_id"] if std else next((t["id"] for t in tpl if re.search(r"^factura: (enviando|env[ií]o)", t["name"].lower())), tpl[0]["id"])
             fs = odoo.search_read("account.move", [("id", "in", ids), ("state", "=", "posted")], ["name", "partner_id", "company_id"], company_ids=TODAS)
             ok, mal = [], []
             for f in fs:
