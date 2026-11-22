@@ -1,5 +1,5 @@
 /* ---------- Correo integrado ---------- */
-let MA_E = 'pendientes', MA_L = [], MA_SEL = null, MA_T = null, MA_MK = new Set();
+let MA_E = 'pendientes', MA_L = [], MA_SEL = null, MA_T = null, MA_MK = new Set(), MA_F = '';
 const MA_CLASE = { pedido: ['🛒 Pedido', 'b-ok'], presupuesto: ['📝 Presupuesto', 'b-warn'], factura_proveedor: ['🧾 Factura proveedor', ''], albaran_proveedor: ['📦 Albarán proveedor', ''],
   consulta: ['❓ Consulta', ''], reclamacion: ['⚠️ Reclamación', 'b-bad'], publicidad: ['Publicidad', ''], otro: ['Otro', ''] };
 const MA_URG = { alta: ['Muy urgente', 'b-bad'], media: ['Normal', ''], baja: ['Sin prisa', ''] };
@@ -16,14 +16,16 @@ async function maOpen() {
 }
 function maLista() {
   const q = ($('#ma-q').value || '').toLowerCase();
-  const l = MA_L.filter(m => !q || (m.nombre + m.de + m.asunto + (m.resumen || '')).toLowerCase().includes(q));
+  maChips();
+  const l = MA_L.filter(m => (!q || (m.nombre + m.de + m.asunto + (m.resumen || '')).toLowerCase().includes(q)) && (!MA_F || (MA_F === 'recordar' ? m.estado === 'recordar' : m.clase === MA_F)));
   $('#ma-list').innerHTML = l.length ? l.map(m => { const [ct, cc] = MA_CLASE[m.clase] || ['⏳ Clasificando', 'b-warn']; const [ut, uc] = MA_URG[m.urgencia] || ['', ''];
     const act = MA_E !== 'hechos';
     return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1">${act ? `<input type="checkbox" class="ma-ck" ${MA_MK.has(String(m.id)) ? 'checked' : ''} title="Marcar">` : ''}<b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${act ? '<button class="ma-r" title="Recordar otro día">⏰</button><button class="ma-x" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
-      <div class="ma-i2">${escH(m.asunto || '(sin asunto)')}</div><div class="ma-i3">${m.estado === 'clasificando' ? '<span class="bdg b-warn">⏳ Leyendo</span>' : `<span class="bdg ${cc}">${ct}</span>`}
+      <div class="ma-i2">${escH(m.asunto || '(sin asunto)')}</div><div class="ma-i3">${m.estado === 'clasificando' ? '<span class="bdg b-warn">⏳ Leyendo</span>' : `<span class="bdg ${cc} ma-cl" title="Cambiar el tipo">${ct}</span>`}
       ${ut && m.urgencia !== 'media' ? `<span class="bdg ${uc}">${ut}</span>` : ''}${m.adjuntos.length ? `<span class="bdg">📎 ${m.adjuntos.length}</span>` : ''}${m.pedido ? `<span class="bdg b-ok">${escH(m.pedido)}</span>` : ''}${m.estado === 'recordar' && m.recordar ? `<span class="bdg b-warn">⏰ ${fdate(m.recordar)}</span>` : ''}</div></div>`; }).join('')
     : `<p class="empty">${MA_E === 'pendientes' ? 'No hay correos por hacer. Llegan solos desde n8n.' : 'Nada todavía'}</p>`;
   $('#ma-list').querySelectorAll('.ma-i').forEach(d => d.onclick = () => maVer(d.dataset.id));
+  $('#ma-list').querySelectorAll('.ma-cl').forEach(x => x.onclick = ev => { ev.stopPropagation(); maClase(x.closest('.ma-i').dataset.id, x); });
   $('#ma-list').querySelectorAll('.ma-ck').forEach(x => { x.onclick = ev => ev.stopPropagation(); x.onchange = () => { const id = x.closest('.ma-i').dataset.id; x.checked ? MA_MK.add(id) : MA_MK.delete(id); maBarra(); }; });
   $('#ma-list').querySelectorAll('.ma-r').forEach(x => x.onclick = ev => { ev.stopPropagation(); maRecordar([x.closest('.ma-i').dataset.id], x); });
   maBarra();
@@ -129,4 +131,23 @@ function maRecordar(ids, ancla) {
   const va = async f => { await jpost(`/api/correo/${ids[0]}/estado`, { estado: 'recordar', recordar: f, ids }); ids.forEach(i => MA_MK.delete(i)); p.remove(); maOpen(); };
   p.querySelectorAll('[data-d]').forEach(b => b.onclick = () => va(b.dataset.d));
   p.querySelector('[data-ok]').onclick = () => va(p.querySelector('input').value);
+}
+
+// filtrar por tipo (y por recordatorios) con un clic
+function maChips() {
+  let b = $('#ma-chips');
+  if (!b) { $('#ma-q').insertAdjacentHTML('afterend', '<div id="ma-chips" class="ma-chips"></div>'); b = $('#ma-chips'); }
+  const cuenta = k => MA_L.filter(m => k === 'recordar' ? m.estado === 'recordar' : m.clase === k).length;
+  const ks = ['pedido', 'presupuesto', 'factura_proveedor', 'albaran_proveedor', 'consulta', 'reclamacion', 'otro', 'publicidad'].filter(k => cuenta(k));
+  if (MA_L.some(m => m.estado === 'recordar')) ks.unshift('recordar');
+  b.innerHTML = `<button class="${!MA_F ? 'on' : ''}" data-f="">Todos ${MA_L.length}</button>` + ks.map(k => `<button class="${MA_F === k ? 'on' : ''}" data-f="${k}">${k === 'recordar' ? '⏰ Recordar' : (MA_CLASE[k] || [k])[0]} ${cuenta(k)}</button>`).join('');
+  b.querySelectorAll('button').forEach(x => x.onclick = () => { MA_F = x.dataset.f; maLista(); });
+}
+// cambiar el tipo que ha puesto la IA
+function maClase(id, ancla) {
+  document.querySelectorAll('.ma-pop').forEach(p => p.remove());
+  ancla.insertAdjacentHTML('afterend', `<div class="ma-pop">Es: ${Object.entries(MA_CLASE).map(([k, v]) => `<button class="lnk" data-c="${k}">${v[0]}</button>`).join('')}</div>`);
+  const p = ancla.nextElementSibling; p.onclick = ev => ev.stopPropagation();
+  p.querySelectorAll('[data-c]').forEach(b => b.onclick = async () => { await jpost(`/api/correo/${id}/clase`, { clase: b.dataset.c });
+    const m = MA_L.find(x => String(x.id) === String(id)); if (m) m.clase = b.dataset.c; p.remove(); maLista(); });
 }

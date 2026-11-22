@@ -535,3 +535,5 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .ma-pop{position:absolute;right:6px;top:36px;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;max-width:290px}
 .ma-pop input{padding:4px 6px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}
 .ma-bar{display:flex;gap:6px;align-items:center;background:#f1edf8;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:13px}.ma-bar[hidden]{display:none}
+.ma-chips{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}.ma-chips button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer}
+.ma-chips button.on{background:#4B2A91;color:#fff;border-color:#4B2A91}.ma-cl{cursor:pointer}.ma-i3{position:relative}

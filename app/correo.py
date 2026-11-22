@@ -341,6 +341,18 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
                 c.execute("UPDATE mensajes SET estado=?, usuario=?, recordar=? WHERE id=?", (e, u, rec, i))
         return {"ok": True, "n": len(ids)}
 
+    @app.post("/api/correo/{mid}/clase")
+    async def cambiar_clase(mid: str, request: Request):
+        """{clase}: corregir a mano lo que ha puesto la IA (pedido, presupuesto, factura de proveedor…)."""
+        current_user(request)
+        b = await request.json()
+        cl = b.get("clase")
+        if cl not in ("pedido", "presupuesto", "factura_proveedor", "albaran_proveedor", "consulta", "reclamacion", "publicidad", "otro"):
+            raise HTTPException(400, "Tipo no válido")
+        with lock, con() as c:
+            c.execute("UPDATE mensajes SET clase=? WHERE id=?", (cl, mid))
+        return {"ok": True}
+
     # ---------- preparar pedido ----------
     def buscar_cliente(email, cids):
         ps = odoo.search_read("res.partner", [("email", "=ilike", email)], ["display_name", "commercial_partner_id", "email"], company_ids=cids, limit=5)
