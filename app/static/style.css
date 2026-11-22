@@ -529,3 +529,4 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .sg-xok:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}.sg-i .sg-c{padding-right:34px}
 .ma-i1{align-items:center}.ma-x{margin-left:6px;flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-weight:700;cursor:pointer;line-height:1}
 .ma-x:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}
+.ma-i1 small{margin-left:auto}
