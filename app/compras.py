@@ -1022,7 +1022,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             recibir_albaran(did)
         except Exception as e:
             with lock, con() as c:
-                c.execute("UPDATE docs SET nota=? WHERE id=?", (f"Cuadrado, pero no se pudo dar entrada solo: {getattr(e, 'detail', None) or str(e)[:150]}. Pulsa «Recibir la mercancía ahora»"[:300], did))
+                c.execute("UPDATE docs SET nota=? WHERE id=?", (f"Cuadrado, pero no se pudo dar entrada solo: {getattr(e, 'detail', None) or str(e)[:150]}. Valídala en la pestaña Recepciones"[:300], did))
 
     def auto_cuadrar(did):
         """Al subir un albarán o factura: se cruza solo con compras. Si todo está identificado (o es nuevo con EAN) y la base cuadra,
@@ -2028,7 +2028,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                                 e.update(paso="sin_factura", texto=f"Entrada hecha ({d['compra']['pedido']}). Esperando la factura del proveedor para cruzarla"
                                          + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
                         else:
-                            e.update(paso="espera", texto=f"Cuadrado con {d['compra']['pedido']}. Falta que almacén reciba la entrada {', '.join(abiertas) or ''} en Recepciones",
+                            e.update(paso="espera", texto=f"Cuadrado con {d['compra']['pedido']}. Falta validar la entrada {', '.join(abiertas) or ''} en la pestaña Recepciones",
                                      acciones=["fichas"])
                 else:
                     m = mv.get(d["odoo_id"])

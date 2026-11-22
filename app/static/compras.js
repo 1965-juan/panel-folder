@@ -81,7 +81,6 @@ async function coDocs() {
         · <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">${escH(x.nombre)}</a> <small class="muted">${escH(x.usuario)} · ${hora(x.subido)}</small></div>
       <div class="bj-3">${escH(x.texto || '')}${x.aviso ? `<div class="pc-aviso">⚠️ ${escH(x.aviso)}</div>` : ''}</div>
       <div class="bj-4">${x.aviso && /proveedor/i.test(x.aviso) ? `<button class="ac-go" data-a="prov">＋ Buscar o crear el proveedor del PDF</button>` : ''}${(x.acciones || []).map(a => btn[a] || '').join(' ')}
-        ${x.tipo === 'albaran' && x.compra && (x.compra.recepciones || []).length && !x.recepcion ? '<button class="ac-go" data-a="recibir">📦 Recibir la mercancía ahora</button>' : ''}
         ${x.tipo === 'albaran' && (x.compra || x.recepcion) ? '<button class="lnk" data-a="informe">📄 Informe</button>' : ''}
         ${(x.acciones || []).includes('descartar') ? '' : '<button class="lnk del" data-a="descartar">🗑 Eliminar</button>'}
         ${x.odoo_id ? `<a class="lnk" target="_blank" rel="noopener" href="${ODOO}/odoo/action-account.action_move_in_invoice_type/${x.odoo_id}">Abrir en Odoo</a>` : ''}</div></div>`;
