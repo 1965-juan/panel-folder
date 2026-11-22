@@ -502,3 +502,13 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .sv{display:block;border-radius:8px;padding:8px 10px;text-decoration:none;color:#222;border:1px solid #e5e1ea;font-size:13px}.sv:hover{box-shadow:0 2px 8px rgba(0,0,0,.12)}
 .sv.ok{background:#eaf7ee;border-left:4px solid #1F7A4D}.sv.pa{background:#fff3df;border-left:4px solid #F39200}.sv-h{display:flex;justify-content:space-between;gap:6px}.sv-h span{color:#5B2D82;white-space:nowrap}
 .sv ul{margin:4px 0 0;padding-left:18px}.sv-f{color:#b42318;font-size:12px;margin-top:4px}.sv-o{color:#1F7A4D;font-size:12px;margin-top:4px}
+/* seguimiento */
+.sg-top{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}.sg-top #sg-est{flex:1;min-width:260px}.sg-acc{display:flex;gap:8px}
+.sg-tabs button b{margin-left:4px}.sg-tabs button small{font-weight:500;opacity:.8}.sg-tabs button.on{background:var(--purple)}
+.sg-bar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:6px 0 10px;font-size:13px}.sg-bar input[type=search]{padding:7px 9px;border:1.5px solid #cfc9bd;border-radius:8px;font:inherit;min-width:260px}
+.sg-sel{display:flex;gap:6px;align-items:center}
+.sg-i{display:flex;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}.sg-ck{padding-top:2px}.sg-c{flex:1;min-width:0}
+.sg-1{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sg-1 b{font-size:14.5px}.sg-2{margin-top:4px;font-size:13.5px}.sg-3{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.sg-nota{margin-top:4px;font-size:13px;background:#fff7e6;border-radius:6px;padding:4px 8px}.sg-ayuda{margin:0 0 10px}
+.sg-m{border-left:3px solid #d6cfe6;padding:6px 10px;margin-top:8px;font-size:13px}.sg-m.env{border-left-color:var(--orange);background:#fffaf4}.sg-t{margin-top:4px;max-height:260px;overflow:auto}
+.sg-rec{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}.sg-rec input{padding:5px 7px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}.sg-rec .sg-nt{flex:1;min-width:200px}

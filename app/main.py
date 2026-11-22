@@ -63,7 +63,7 @@ def sin_facturas(u):
     return bool(PERFILES.get(u, {}).get("sin_facturas"))
 
 
-TODOS_MODULOS = ["ventas", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda",
+TODOS_MODULOS = ["ventas", "seguimiento", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda",
                  "pedidos", "articulos", "inventario"]
 
 
@@ -2421,6 +2421,11 @@ _entre.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=sco
 from . import correo as _correo  # noqa: E402
 
 _correo.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard)
+
+# ---------- seguimiento: lo que entra por correo cruzado con Odoo ----------
+from . import seguimiento as _seg  # noqa: E402
+
+_seg.setup(app, data_dir=DATA, odoo=odoo, current_user=current_user, scope=scope, guard=guard, es_admin=es_admin)
 
 # ---------- vencimientos ----------
 from . import vencimientos as _venc  # noqa: E402
