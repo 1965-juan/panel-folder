@@ -60,8 +60,13 @@ async function load() {
     const d = await api(`/api/ventas?company=${company}&q=${encodeURIComponent(q)}`);
     d.carritos = d.carritos || [];
     fill('presupuestos', [...d.carritos, ...d.presupuestos]);
-    fill('presupuestos', d.caducados, '.cards.cad');
-    $('#ncad').textContent = d.caducados.length;
+    d.archivados = d.archivados || [];
+    fill('presupuestos', [...d.caducados, ...d.archivados], '.cards.cad');
+    { const b = document.querySelector('.cards.cad');
+      if (d.caducados.length) b.insertAdjacentHTML('afterbegin', `<h4 class="cad-h">⏰ Caducados (${d.caducados.length}) <small class="muted">pasada su fecha de validez · ábrelos para archivarlos o pasarlos a pedido</small></h4>`);
+      if (d.archivados.length) { const i = d.caducados.length; const h = `<h4 class="cad-h">🗄️ Archivados (${d.archivados.length}) <small class="muted">ábrelos para recuperarlos</small></h4>`;
+        const ref = b.querySelectorAll('.card')[i]; if (ref) ref.insertAdjacentHTML('beforebegin', h); else b.insertAdjacentHTML('beforeend', h); } }
+    if ($('#ncad')) $('#ncad').textContent = d.caducados.length + d.archivados.length;
     fill('pedidos', d.pedidos);
     fill('albaranes', d.albaranes);
     const verFac = Array.isArray(d.facturas);
@@ -281,12 +286,13 @@ function dAcciones(c, d) {
   }
   if (c.model === 'sale.order') {
     const bs = [];
-    if (d.estado === 'draft' || d.estado === 'sent') bs.push(['cancelar', '🗑 Eliminar presupuesto', `¿Eliminar el presupuesto ${c.ref}? (se cancela en Odoo)`]);
+    if (c.estado === 'archivado' || c.archivo) bs.push(['recuperar', '↩ Recuperar: volver a presupuestos', `¿Recuperar ${c.ref} y volver a ponerlo en presupuestos?`]);
+    else if (d.estado === 'draft' || d.estado === 'sent') bs.push(['cancelar', '🗄️ Archivar presupuesto', `¿Archivar el presupuesto ${c.ref}? Se cancela en Odoo y queda en «Caducados y archivados» por si hay que recuperarlo.`]);
     else if (c.estado === 'pedido' && c.entrega !== 'partial') bs.push(['cancelar', '🗑 Cancelar pedido', `¿Cancelar el pedido ${c.ref}? No se ha servido nada.`]);
     if (c.estado === 'pedido' && (d.albaranes || []).some(a => !['done', 'cancel'].includes(a.estado)))
       bs.unshift(['servir', '🚚 Servido: validar albarán y pasar a Albaranes', `¿Dar por servido TODO lo pendiente de ${c.ref}? Se valida el albarán en Odoo con las cantidades del pedido (descuenta stock) y pasa a Albaranes para facturar.`]);
     if (c.estado === 'pedido' && c.entrega === 'partial') bs.push(['cerrar_resto', '✂️ Dar por terminado (cancelar lo que falta)', `¿Cancelar lo que falta por servir de ${c.ref}? Lo ya servido pasará a pendiente de facturar.`]);
-    bs.push(['ocultar', '🙈 Archivar del panel', `¿Quitar ${c.ref} del panel? En Odoo no se toca nada.`]);
+    if (c.estado !== 'archivado' && !c.archivo) bs.push(['ocultar', '🙈 Quitar solo del panel', `¿Quitar ${c.ref} del panel? En Odoo no se toca nada.`]);
     h += `<div class="d-del">${bs.map(x => `<button class="btn" data-ac="${x[0]}" data-q="${escH(x[2])}">${x[1]}</button>`).join('')}</div>`;
   }
   A.innerHTML = h;
@@ -432,7 +438,12 @@ setInterval(() => waBadge(), 60 * 1000);
 $('#close').onclick = () => $('#drawer').hidden = true;
 $('#drawer').onclick = e => { if (e.target.id === 'drawer') $('#drawer').hidden = true; };
 $('#reload').onclick = () => route();
-$('#tgcad').onclick = () => { const b = document.querySelector('.cards.cad'); b.hidden = !b.hidden; };
+$('#tgcad').onclick = () => {   // cambia la columna de presupuestos entre los vigentes y los caducados + archivados
+  const col = document.querySelector('.col[data-k="presupuestos"]'), b = col.querySelector('.cards.cad'), v = col.querySelector('.cards:not(.cad)');
+  b.hidden = !b.hidden; v.hidden = !b.hidden;
+  $('#tgcad').innerHTML = b.hidden ? `Ver caducados y archivados (<span id="ncad">${b.querySelectorAll('.card').length}</span>)` : '← Volver a los vigentes';
+  col.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 400); };
 $('#company').onchange = e => { company = e.target.value; try { localStorage.setItem('pf_company', company); } catch (x) {} route(); };
 

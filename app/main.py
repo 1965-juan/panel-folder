@@ -1006,7 +1006,18 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
         for oid_, t in list(ocul.items()):   # si se tocó en Odoo después de ocultarlo, vuelve a salir (el panel es espejo de Odoo)
             if t and wd.get(oid_, "") > t:
                 _mostrar_venta(oid_); ocul.pop(oid_)
-        out = {k: [c for c in v if c["cid"] in cids and not (c.get("model") == "sale.order" and c["id"] in ocul)] for k, v in out.items()}
+        # archivados: presupuestos cancelados en Odoo (últimos 12 meses) y los quitados del panel a mano
+        arch = [c for c in presu + caduc if c["id"] in ocul]
+        for c in arch:
+            c["archivo"] = "panel"
+        try:
+            desde_a = (dt.date.today() - dt.timedelta(days=365)).isoformat()
+            for r in odoo.search_read("sale.order", cd + cli + [("state", "=", "cancel"), ("date_order", ">=", desde_a)], SO_FIELDS, cids, limit=200, order="date_order desc"):
+                c = so_card(r, "archivado"); c["archivo"] = "odoo"; arch.append(c)
+        except Exception:
+            pass
+        out["archivados"] = arch
+        out = {k: [c for c in v if c["cid"] in cids and not (k != "archivados" and c.get("model") == "sale.order" and c["id"] in ocul)] for k, v in out.items()}
         if sin_facturas(u):
             out.pop("facturas", None)   # almacén y compras no ven facturas
             out.pop("borradores", None)
@@ -1675,7 +1686,7 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
     except Exception:
         b = {}
     acc = b.get("accion")
-    if acc not in ("cancelar", "cerrar_resto", "ocultar", "servir", "facturar"):
+    if acc not in ("cancelar", "cerrar_resto", "ocultar", "servir", "facturar", "recuperar"):
         raise HTTPException(400, "Acción no válida")
 
     def run():
@@ -1688,11 +1699,16 @@ async def api_venta_accion(request: Request, oid: int, company: str = "all"):
         if acc == "ocultar":
             _ocultar_venta(oid)
             return {"ok": True, "mensaje": f"{so['name']} ya no sale en el panel (en Odoo sigue igual)"}
+        if acc == "recuperar":   # sacar de archivados: vuelve a presupuesto
+            _mostrar_venta(oid)
+            if so["state"] == "cancel":
+                odoo.call("sale.order", "action_draft", [c], ids=[oid])
+            return {"ok": True, "mensaje": f"{so['name']} vuelve a estar en presupuestos"}
         if acc == "cancelar":
             if so["state"] == "sale" and so.get("delivery_status") in ("partial", "full"):
                 raise HTTPException(400, "Este pedido ya tiene material servido: usa «Dar por terminado» para cancelar solo lo que falta")
             odoo.call("sale.order", "action_cancel", [c], ids=[oid], context={"disable_cancel_warning": True})
-            return {"ok": True, "mensaje": f"{so['name']} cancelado en Odoo (se puede recuperar desde Odoo si hiciera falta)"}
+            return {"ok": True, "mensaje": f"{so['name']} archivado (cancelado en Odoo). Lo tienes en «Caducados y archivados» por si hay que recuperarlo"}
         if acc == "facturar":
             # factura lo servido con la serie (diario) y fecha elegidas, la valida y, si se pide, la envía por email al cliente
             if sin_facturas(u):
