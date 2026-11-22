@@ -61,7 +61,7 @@ function sgLista() {
         <div class="sg-2"><b>${escH(i.asunto || '(sin asunto)')}</b>${i.que ? ` — ${escH(i.que)}` : ''} <small class="muted">${escH(i.nombre && i.nombre !== i.de ? i.nombre + ' · ' : '')}${escH(i.de)}</small></div>
         ${m && m.nota ? `<div class="sg-nota">📝 ${escH(m.nota)}</div>` : ''}
         <div class="sg-3"><button class="lnk" data-a="ver">✉️ Ver correo</button><button class="lnk" data-a="resp">↩️ Responder</button>
-          <button class="lnk" data-a="pres">📝 Presupuestar</button><button class="lnk" data-a="rec">⏰ Recordar</button>
+          <button class="lnk" data-a="pres">📝 Crear presupuesto o pedido</button><button class="lnk" data-a="rec">⏰ Recordar</button>
           ${SG_T === 'X' ? '<button class="lnk" data-a="abierto">↩ Sacar de archivados</button>' : '<button class="lnk del" data-a="archivado">🗄️ Archivar</button>'}</div>
         <div class="sg-x"></div></div></div>`; }).join('');
   box.querySelectorAll('.sg-i').forEach(d => {
