@@ -40,6 +40,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
           adjuntos TEXT, clase TEXT, urgencia TEXT, resumen TEXT, que_hacer TEXT, estado TEXT, datos TEXT, partner_id INTEGER, pedido TEXT, recibido REAL, usuario TEXT);
         CREATE INDEX IF NOT EXISTS ix_msgid ON mensajes(msgid);
         """)
+        try:
+            c.execute("ALTER TABLE mensajes ADD COLUMN recordar TEXT")
+        except sqlite3.OperationalError:
+            pass
         return c
 
     def clave():
@@ -280,10 +284,17 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
     @app.get("/api/correo")
     def lista(request: Request, estado: str = "pendientes"):
         current_user(request)
-        q = "SELECT id, cuenta, de, nombre, asunto, fecha, clase, urgencia, resumen, que_hacer, estado, pedido, recibido, adjuntos FROM mensajes"
-        q += " WHERE estado IN ('nuevo','clasificando')" if estado == "pendientes" else " WHERE estado NOT IN ('nuevo','clasificando')"
+        q = "SELECT id, cuenta, de, nombre, asunto, fecha, clase, urgencia, resumen, que_hacer, estado, pedido, recibido, adjuntos, recordar FROM mensajes"
+        hoy = time.strftime("%Y-%m-%d")
+        args = []
+        if estado == "pendientes":   # por hacer + los recordatorios que ya tocan
+            q += " WHERE estado IN ('nuevo','clasificando') OR (estado='recordar' AND recordar<=?)"; args = [hoy]
+        elif estado == "recordar":
+            q += " WHERE estado='recordar'"
+        else:
+            q += " WHERE estado NOT IN ('nuevo','clasificando','recordar')"
         with con() as c:
-            rs = [dict(r) for r in c.execute(q + " ORDER BY recibido DESC LIMIT 300").fetchall()]
+            rs = [dict(r) for r in c.execute(q + " ORDER BY recibido DESC LIMIT 300", args).fetchall()]
         orden = {"alta": 0, "media": 1, "baja": 2}
         for r in rs:
             r["adjuntos"] = [{"nombre": a["nombre"], "i": i, "doc": bool(a.get("doc_id"))} for i, a in enumerate(json.loads(r["adjuntos"] or "[]"))]
@@ -319,11 +330,16 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         u = current_user(request)
         b = await request.json()
         e = b.get("estado")
-        if e not in ("nuevo", "hecho", "descartado"):
+        if e not in ("nuevo", "hecho", "descartado", "recordar"):
             raise HTTPException(400)
+        rec = (b.get("recordar") or "")[:10] if e == "recordar" else None
+        if e == "recordar" and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", rec or ""):
+            raise HTTPException(400, "Fecha no válida")
+        ids = b.get("ids") or [mid]
         with lock, con() as c:
-            c.execute("UPDATE mensajes SET estado=?, usuario=? WHERE id=?", (e, u, mid))
-        return {"ok": True}
+            for i in ids:
+                c.execute("UPDATE mensajes SET estado=?, usuario=?, recordar=? WHERE id=?", (e, u, rec, i))
+        return {"ok": True, "n": len(ids)}
 
     # ---------- preparar pedido ----------
     def buscar_cliente(email, cids):

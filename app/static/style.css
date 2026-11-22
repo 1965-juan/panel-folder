@@ -530,3 +530,8 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .ma-i1{align-items:center}.ma-x{margin-left:6px;flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-weight:700;cursor:pointer;line-height:1}
 .ma-x:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}
 .ma-i1 small{margin-left:auto}
+.ma-ck{flex:none;margin:0 2px 0 0}.ma-r{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #f0d9b5;background:#fff;cursor:pointer;line-height:1;font-size:12px}
+.ma-r:hover{background:#fff3df}.ma-i{position:relative}
+.ma-pop{position:absolute;right:6px;top:36px;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;max-width:290px}
+.ma-pop input{padding:4px 6px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}
+.ma-bar{display:flex;gap:6px;align-items:center;background:#f1edf8;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:13px}.ma-bar[hidden]{display:none}

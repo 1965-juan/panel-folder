@@ -1,5 +1,5 @@
 /* ---------- Correo integrado ---------- */
-let MA_E = 'pendientes', MA_L = [], MA_SEL = null, MA_T = null;
+let MA_E = 'pendientes', MA_L = [], MA_SEL = null, MA_T = null, MA_MK = new Set();
 const MA_CLASE = { pedido: ['🛒 Pedido', 'b-ok'], presupuesto: ['📝 Presupuesto', 'b-warn'], factura_proveedor: ['🧾 Factura proveedor', ''], albaran_proveedor: ['📦 Albarán proveedor', ''],
   consulta: ['❓ Consulta', ''], reclamacion: ['⚠️ Reclamación', 'b-bad'], publicidad: ['Publicidad', ''], otro: ['Otro', ''] };
 const MA_URG = { alta: ['Muy urgente', 'b-bad'], media: ['Normal', ''], baja: ['Sin prisa', ''] };
@@ -18,11 +18,15 @@ function maLista() {
   const q = ($('#ma-q').value || '').toLowerCase();
   const l = MA_L.filter(m => !q || (m.nombre + m.de + m.asunto + (m.resumen || '')).toLowerCase().includes(q));
   $('#ma-list').innerHTML = l.length ? l.map(m => { const [ct, cc] = MA_CLASE[m.clase] || ['⏳ Clasificando', 'b-warn']; const [ut, uc] = MA_URG[m.urgencia] || ['', ''];
-    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1"><b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${MA_E === 'pendientes' ? '<button class="ma-x" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
+    const act = MA_E !== 'hechos';
+    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1">${act ? `<input type="checkbox" class="ma-ck" ${MA_MK.has(String(m.id)) ? 'checked' : ''} title="Marcar">` : ''}<b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${act ? '<button class="ma-r" title="Recordar otro día">⏰</button><button class="ma-x" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
       <div class="ma-i2">${escH(m.asunto || '(sin asunto)')}</div><div class="ma-i3">${m.estado === 'clasificando' ? '<span class="bdg b-warn">⏳ Leyendo</span>' : `<span class="bdg ${cc}">${ct}</span>`}
-      ${ut && m.urgencia !== 'media' ? `<span class="bdg ${uc}">${ut}</span>` : ''}${m.adjuntos.length ? `<span class="bdg">📎 ${m.adjuntos.length}</span>` : ''}${m.pedido ? `<span class="bdg b-ok">${escH(m.pedido)}</span>` : ''}</div></div>`; }).join('')
+      ${ut && m.urgencia !== 'media' ? `<span class="bdg ${uc}">${ut}</span>` : ''}${m.adjuntos.length ? `<span class="bdg">📎 ${m.adjuntos.length}</span>` : ''}${m.pedido ? `<span class="bdg b-ok">${escH(m.pedido)}</span>` : ''}${m.estado === 'recordar' && m.recordar ? `<span class="bdg b-warn">⏰ ${fdate(m.recordar)}</span>` : ''}</div></div>`; }).join('')
     : `<p class="empty">${MA_E === 'pendientes' ? 'No hay correos por hacer. Llegan solos desde n8n.' : 'Nada todavía'}</p>`;
   $('#ma-list').querySelectorAll('.ma-i').forEach(d => d.onclick = () => maVer(d.dataset.id));
+  $('#ma-list').querySelectorAll('.ma-ck').forEach(x => { x.onclick = ev => ev.stopPropagation(); x.onchange = () => { const id = x.closest('.ma-i').dataset.id; x.checked ? MA_MK.add(id) : MA_MK.delete(id); maBarra(); }; });
+  $('#ma-list').querySelectorAll('.ma-r').forEach(x => x.onclick = ev => { ev.stopPropagation(); maRecordar([x.closest('.ma-i').dataset.id], x); });
+  maBarra();
   $('#ma-list').querySelectorAll('.ma-x').forEach(x => x.onclick = async ev => {   // hecho sin abrirlo
     ev.stopPropagation(); const d = x.closest('.ma-i'), id = d.dataset.id;
     d.style.opacity = .3; d.style.pointerEvents = 'none';
@@ -101,4 +105,28 @@ function maPintaPedido(m, d) {
     };
   };
   pinta();
+}
+
+// marcar varios: hecho o recordar de golpe
+function maBarra() {
+  let b = $('#ma-bar');
+  if (!b) { $('#ma-list').insertAdjacentHTML('beforebegin', '<div id="ma-bar" class="ma-bar" hidden></div>'); b = $('#ma-bar'); }
+  const n = [...MA_MK].filter(id => MA_L.some(m => String(m.id) === id)).length;
+  b.hidden = !n || MA_E === 'hechos';
+  b.innerHTML = `<b>${n}</b> marcados: <button class="lnk" id="ma-bh">✓ Hecho</button><button class="lnk" id="ma-br">⏰ Recordar</button><button class="lnk" id="ma-bn">quitar marcas</button>`;
+  if (!n) return;
+  const ids = () => [...MA_MK].filter(id => MA_L.some(m => String(m.id) === id));
+  $('#ma-bh').onclick = async () => { const l = ids(); await jpost(`/api/correo/${l[0]}/estado`, { estado: 'hecho', ids: l }); MA_MK.clear(); maOpen(); };
+  $('#ma-br').onclick = ev => maRecordar(ids(), ev.target);
+  $('#ma-bn').onclick = () => { MA_MK.clear(); maLista(); };
+}
+function maRecordar(ids, ancla) {
+  document.querySelectorAll('.ma-pop').forEach(p => p.remove());
+  const dia = n => { const d = new Date(Date.now() + n * 864e5); return d.toISOString().slice(0, 10); };
+  ancla.insertAdjacentHTML('afterend', `<div class="ma-pop">Recordar ${ids.length > 1 ? ids.length + ' correos' : ''}: ${[[1, 'mañana'], [3, '3 días'], [7, '1 semana'], [15, '15 días']].map(([n, t]) => `<button class="lnk" data-d="${dia(n)}">${t}</button>`).join('')}
+    <input type="date" value="${dia(2)}"><button class="ac-go" data-ok>OK</button></div>`);
+  const p = ancla.nextElementSibling; p.onclick = ev => ev.stopPropagation();
+  const va = async f => { await jpost(`/api/correo/${ids[0]}/estado`, { estado: 'recordar', recordar: f, ids }); ids.forEach(i => MA_MK.delete(i)); p.remove(); maOpen(); };
+  p.querySelectorAll('[data-d]').forEach(b => b.onclick = () => va(b.dataset.d));
+  p.querySelector('[data-ok]').onclick = () => va(p.querySelector('input').value);
 }
