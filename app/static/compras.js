@@ -68,7 +68,7 @@ async function coDocs() {
     const [pt, pc] = BJ_PASO[x.paso] || [x.paso, ''];
     const tipo = x.tipo === 'albaran' ? '📦 Albarán' : '🧾 Factura';
     const btn = { cruzar: `<button class="ac-go" data-a="cruzar">🔗 Cruzar con sus albaranes</button>`, validar: `<button class="lnk" data-a="validar">✓ Validar sin cruzar</button>`,
-      ocultar: `<button class="lnk" data-a="ocultar">🧹 Quitar de la lista</button>`,
+      ocultar: `<button class="lnk" data-a="ocultar">🧹 Quitar de la lista</button>`, proveedor: `<button class="ac-go" data-a="proveedor">🔎 Poner el proveedor a mano</button>`,
       cuadrar: x.tipo === 'factura' ? `<button class="lnk" data-a="cuadrar">⇄ Sin albarán: crear el pedido desde el PDF</button>` : `<button class="ac-go" data-a="cuadrar">⇄ Cuadrar con pedido</button>`, cuadrar_factura: `<button class="lnk" data-a="cuadrar_factura">🔗 Enlazar con pedido existente</button>`,
       gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
       ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
@@ -95,6 +95,7 @@ async function coDocs() {
     try {
       if (a === 'cuadrar') return coPasar(x.id);
       if (a === 'cruzar') return coCruzar(x);
+      if (a === 'proveedor') return coProvMano(x, b.closest('.bj-card'));
       if (a === 'validar') { if (!confirm('¿Validar esta factura sin cruzarla con albaranes? Sale del panel y queda en los borradores de Odoo para Mayte.')) return; await jpost(`/api/compras/facturas/${x.odoo_id}/marcar`, { tipo: 'validada' }); return coDocs(); }
       if (a === 'ocultar') { if (!confirm('¿Quitar este albarán de la lista de espera de factura? (no toca Odoo)')) return; await jpost('/api/compras/pedidos/ocultar', { pedido_ids: [x.compra.pedido_id] }); return coDocs(); }
       if (a === 'auto') { b.disabled = true; b.textContent = 'Buscando y cuadrando…'; await jpost(`/api/compras/docs/${x.id}/auto`, {}); setTimeout(coDocs, 1500); return; }
@@ -774,4 +775,35 @@ async function coCorte() {
   const f = prompt('Lo atrasado deja de salir para cruzar: albaranes y pedidos de compra ANTERIORES a esta fecha (AAAA-MM-DD). No toca nada en Odoo. Déjalo vacío para quitar el corte.', c.fecha || new Date().toISOString().slice(0, 10));
   if (f === null) return;
   try { await jpost('/api/compras/corte', { fecha: f.trim() }); coDocs(); } catch (e) { alertBox(e.message); }
+}
+
+/* --- factura que no se ha leído: proveedor, empresa, nº y fecha a mano --- */
+function coProvMano(x, card) {
+  let box = card.querySelector('.bj-prov');
+  if (box) { box.remove(); return; }
+  card.insertAdjacentHTML('beforeend', `<div class="bj-prov pc-prov"><input class="bp-q" placeholder="Buscar proveedor por nombre o CIF" value="${escH(x.proveedor || '')}"><div class="bp-l"></div>
+    <div class="bp-sel muted">Ningún proveedor elegido</div>
+    <label>Empresa <select class="bp-e"><option value="1">DISTRIPLUS</option><option value="4">LOGIPAPER</option><option value="5">INGRAF</option></select></label>
+    <label>Nº factura <input class="bp-n" value="${escH(x.numero || '')}"></label><label>Fecha <input class="bp-f" type="date" value="${escH(x.fecha || '')}"></label>
+    <button class="ac-go bp-go" disabled>Guardar</button> <a target="_blank" rel="noopener" href="/api/compras/pdf/${x.id}">ver el PDF</a></div>`);
+  box = card.querySelector('.bj-prov');
+  if (x.empresa) box.querySelector('.bp-e').value = String(x.empresa);
+  if (x.odoo_id) box.querySelector('.bp-e').closest('label').hidden = true;   // ya está en Odoo: sigue en su empresa (se cambia al cruzar)
+  let elegido = null, t;
+  const q = box.querySelector('.bp-q');
+  const busca = async () => {
+    if (q.value.trim().length < 2) return;
+    const r = await api(`/api/compras/proveedores?q=${encodeURIComponent(q.value.trim())}`);
+    box.querySelector('.bp-l').innerHTML = r.length ? r.map(p => `<a href="#" class="pc-opt" data-id="${p.id}">${escH(p.display_name)} <small>${escH(p.vat || '')}</small></a>`).join('') : '<small class="muted">Ninguno. Prueba con el CIF o parte del nombre.</small>';
+    box.querySelectorAll('.bp-l a').forEach(a => a.onclick = ev => { ev.preventDefault(); elegido = r.find(p => p.id == a.dataset.id);
+      box.querySelector('.bp-sel').innerHTML = `Proveedor: <b>${escH(elegido.display_name)}</b>`; box.querySelector('.bp-l').innerHTML = ''; box.querySelector('.bp-go').disabled = false; });
+  };
+  q.oninput = () => { clearTimeout(t); t = setTimeout(busca, 300); }; q.focus(); busca();
+  box.querySelector('.bp-go').onclick = async () => {
+    const bt = box.querySelector('.bp-go'); bt.disabled = true; bt.textContent = 'Guardando…';
+    try { const r = await jpost(`/api/compras/docs/${x.id}/poner_proveedor`, { partner_id: elegido.id, empresa: +box.querySelector('.bp-e').value,
+        numero: box.querySelector('.bp-n').value, fecha: box.querySelector('.bp-f').value });
+      alertBox(`✓ Factura de ${r.proveedor} en ${r.empresa}. Ahora ya la puedes cruzar con sus albaranes o validarla.`); coDocs();
+    } catch (e) { alertBox(e.message); bt.disabled = false; bt.textContent = 'Guardar'; }
+  };
 }

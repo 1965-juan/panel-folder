@@ -2007,7 +2007,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 elif lec.get("error") and not d["odoo_id"]:
                     clave_mal = "401" in lec["error"] or "x-api-key" in lec["error"] or "clave" in lec["error"].lower()
                     e.update(paso="error", texto=("No se ha podido leer: la clave de Claude del panel no vale. Cámbiala en Ajustes → Clave de Claude y se leerá sola"
-                                                  if clave_mal else "No he podido leer el PDF: " + lec["error"][:150]), acciones=["releer", "descartar"])
+                                                  if clave_mal else "No he podido leer el PDF: " + lec["error"][:150] + (". Pon el proveedor a mano" if d["tipo"] == "factura" else "")),
+                             acciones=(["proveedor"] if d["tipo"] == "factura" else []) + ["releer", "descartar"])
                 elif d["tipo"] == "albaran":
                     if not d["compra"]:
                         e.update(paso="pendiente", texto="Falta cuadrarlo con su pedido de compra", acciones=["auto", "cuadrar", "descartar"])
@@ -2034,7 +2035,10 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                     if not m and d["odoo_id"]:  # puede ser de una empresa que no está en el filtro: se mira en todas
                         otra = odoo.search_read("account.move", [("id", "=", d["odoo_id"])], FM, company_ids=TODAS)
                         m = otra[0] if otra else None
-                    if not m or m["state"] == "cancel":
+                    if not m and not d["odoo_id"]:
+                        e.update(paso="pendiente", texto=f"No la he podido pasar a Odoo ({'el PDF parece ' + lec['tipo'] if lec.get('tipo') and lec.get('tipo') != 'factura' else 'sin datos suficientes'}): pon el proveedor a mano y se crea el borrador",
+                                 acciones=["proveedor", "releer", "descartar"])
+                    elif not m or m["state"] == "cancel":
                         e.update(paso="error", texto="La factura ya no está en Odoo (borrada o cancelada)", acciones=["descartar"])
                     elif m["state"] == "posted":
                         e.update(paso="terminado", texto=f"Contabilizada {m['name']}" + (f" · pedido {m['invoice_origin']}" if m.get("invoice_origin") else ""))
@@ -2061,6 +2065,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                             e["texto"] += " · ⚠️ El PDF es un ABONO (importe negativo) pero en Odoo está como factura: hay que pasarla a factura rectificativa"
                         if not m.get("invoice_date") or not m.get("partner_id"):
                             e["texto"] += " · en Odoo falta " + ", ".join(x for x, v in (("proveedor", m.get("partner_id")), ("fecha", m.get("invoice_date"))) if not v)
+                            if not m.get("partner_id") and "proveedor" not in e["acciones"]:
+                                e["acciones"] = ["proveedor"] + [a for a in e["acciones"] if a != "cruzar"]
                     if m:
                         e["odoo_total"] = m["amount_total"]
                         e["proveedor"] = e["proveedor"] or (m.get("partner_id") or [0, ""])[1]
@@ -2181,6 +2187,62 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
             else:
                 c.execute("INSERT OR REPLACE INTO recurrentes_marcas VALUES (?,?,?)", (rid, b["mes"], b.get("nota") or ""))
         return {"ok": True}
+
+    @app.post("/api/compras/docs/{did}/poner_proveedor")
+    async def poner_proveedor(did: str, request: Request):
+        """Factura que no se ha leído bien: se elige el proveedor a mano (y empresa, nº y fecha). Si no estaba en Odoo, se crea el borrador con su PDF."""
+        u, _ = ctx(request, "all")
+        b = await request.json()
+        pid = int(b.get("partner_id") or 0)
+        if not pid:
+            raise HTTPException(400, "Elige el proveedor")
+        r = _doc(did)
+        numero = (b.get("numero") or "").strip()
+        fecha = (b.get("fecha") or "").strip()
+        if fecha and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", fecha):
+            raise HTTPException(400, "Fecha no válida")
+
+        def run():
+            prov = odoo.search_read("res.partner", [("id", "=", pid)], ["name"], company_ids=TODAS)[0]["name"]
+            mid = r["odoo_id"] if r["odoo_model"] == "account.move" else None
+            m = odoo.search_read("account.move", [("id", "=", mid)], ["state", "ref", "invoice_date", "company_id"], company_ids=TODAS) if mid else []
+            if m and m[0]["state"] == "draft":
+                v = {"partner_id": pid}
+                if numero:
+                    v["ref"] = numero
+                if fecha:
+                    v["invoice_date"] = fecha
+                odoo.call("account.move", "write", [m[0]["company_id"][0]], ids=[mid], vals=v)
+                emp = m[0]["company_id"][0]
+            else:
+                emp = int(b.get("empresa") or 1)
+                if emp not in (1, 4, 5):
+                    raise HTTPException(400, "Elige la empresa")
+                jr = odoo.search_read("account.journal", [("type", "=", "purchase"), ("company_id", "=", emp)], ["id"], company_ids=[emp], limit=1)
+                vals = {"move_type": "in_invoice", "journal_id": jr[0]["id"], "partner_id": pid}
+                if numero:
+                    vals["ref"] = numero
+                if fecha:
+                    vals["invoice_date"] = fecha
+                mid = odoo.call("account.move", "create", [emp], vals_list=[vals], context={"default_move_type": "in_invoice"})
+                mid = mid[0] if isinstance(mid, list) else mid
+                poner_pdf("account.move", mid, r["nombre"] or "factura.pdf", (carpeta / r["fichero"]).read_bytes(), [emp])
+            try:
+                lec = json.loads(r["lectura"] or "{}")
+            except Exception:
+                lec = {}
+            if lec.get("error"):
+                lec = {}
+            lec.update({"tipo": "factura", "proveedor": prov})
+            if numero:
+                lec["numero"] = numero
+            if fecha:
+                lec["fecha"] = fecha
+            with lock, con() as c:
+                c.execute("UPDATE docs SET tipo='factura', estado='en_odoo', odoo_model='account.move', odoo_id=?, empresa=?, lectura=?, nota=NULL WHERE id=?",
+                          (mid, emp, json.dumps(lec, ensure_ascii=False), did))
+            return {"ok": True, "factura_id": mid, "proveedor": prov, "empresa": EMP_NOMBRE.get(emp)}
+        return guard(run)
 
     @app.get("/api/compras/proveedores")
     def proveedores(request: Request, q: str = "", company: str = "all"):

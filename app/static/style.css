@@ -521,3 +521,6 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .sg-resp{display:flex;flex-direction:column;gap:7px;margin-top:8px;background:#faf8f4;border-radius:10px;padding:10px}.sg-resp label{display:flex;flex-direction:column;font-size:12.5px;gap:3px;flex:1}
 .sg-resp input,.sg-resp textarea,.sg-resp select,.sg-bar select{padding:7px 9px;border:1.5px solid #cfc9bd;border-radius:8px;font:inherit}.sg-rf{display:flex;gap:8px;flex-wrap:wrap}
 .pe-sg{background:#fff7e6;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13.5px}
+.bj-prov{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;background:#faf8f4;border-radius:8px;padding:8px}.bj-prov .bp-q{min-width:260px;flex:1}
+.bj-prov input,.bj-prov select{padding:6px 8px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}.bj-prov .bp-l{flex-basis:100%;display:flex;flex-direction:column}.bj-prov .bp-sel{flex-basis:100%}
+.bj-tool{margin:6px 0}
