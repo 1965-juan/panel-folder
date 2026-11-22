@@ -11,7 +11,7 @@ async function sgBadge() {
 async function sgOpen(recalcular) {
   clearTimeout(SG_TM);
   try { SG = await api('/api/seg' + (recalcular ? '?recalcular=1' : '')); } catch (e) { $('#sg-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
-  if (!sgOpen.ya) { sgOpen.ya = true; if (!sgDe(SG_T).length) { const t = SG_TABS.find(([k]) => sgDe(k).length); if (t) SG_T = t[0]; } }
+  if (!sgOpen.ya && SG.items.length) { sgOpen.ya = true; if (!sgDe(SG_T).length) { const t = SG_TABS.find(([k]) => sgDe(k).length); if (t) SG_T = t[0]; } }
   sgEstado(); sgTabs(); sgLista(); sgBadge();
   if ((SG.calculando || SG.lectura.leyendo) && !$('#v-sg').hidden) SG_TM = setTimeout(() => sgOpen(), 6000);
 }
