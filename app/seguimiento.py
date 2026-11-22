@@ -28,8 +28,7 @@ GENERICOS = {"gmail.com", "hotmail.com", "hotmail.es", "outlook.com", "outlook.e
              "telefonica.net", "gva.es", "folder.es", "me.com", "ymail.com", "terra.es", "ono.com", "googlemail.com", "dipcas.es"}
 CLASES = ["pedido", "presupuesto", "acepta", "reclamacion", "proveedor", "admin", "otro"]
 PIDE = {"pedido", "presupuesto", "acepta"}
-TIPOS = {"A": "Piden precio y no hay presupuesto", "C": "Piden material y no hay pedido", "B": "Presupuesto enviado sin respuesta",
-         "D": "Pedido sin servir", "E": "Servido sin facturar"}
+TIPOS = {"A": "Piden precio y no hay presupuesto", "C": "Piden material y no hay pedido"}
 CORTE = re.compile(r"^\s*(>|-{2,}\s*(mensaje original|original message|forwarded message|mensaje reenviado)|(de|from|enviado el|sent)\s*:.*|el .{5,80} escribi[oó]:|on .{5,80} wrote:)",
                    re.I | re.M)
 
@@ -532,7 +531,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                 for e in re.findall(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+", f["texto"] or "")[:6]:
                     if dominio(e) not in PROPIOS:
                         correos.add(e.lower())
-        por_mail, por_dom = {}, {}
+        por_mail, por_dom, com_nombre, contacto = {}, {}, {}, {}
         doms = sorted({dominio(e) for e in correos if dominio(e) not in GENERICOS and dominio(e) not in PROPIOS})
         lista = sorted(correos)
         dominio_q = []
@@ -541,6 +540,9 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
             for p in odoo.search_read("res.partner", dominio_q, ["email", "commercial_partner_id", "name"], EMPRESAS):
                 for e in re.findall(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+", (p.get("email") or "").lower()):
                     por_mail.setdefault(e, set()).add(p["commercial_partner_id"][0])
+                    com_nombre[p["commercial_partner_id"][0]] = p["commercial_partner_id"][1]
+                    if e not in contacto:
+                        contacto[e] = p["id"]
         for i in range(0, len(doms), 100):
             q = ["|"] * (len(doms[i:i + 100]) - 1) + [("email", "=ilike", f"%@{d}") for d in doms[i:i + 100]]
             if not doms[i:i + 100]:
@@ -605,58 +607,55 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                 cand += [s for s in por_ref.get(r, []) if s["id"] not in usados]
             if not cand:
                 for cm in coms:
-                    cand += [s for s in por_com.get(cm, []) if p0["ts"] - 3 * 86400 <= s["ts"] <= p0["ts"] + 45 * 86400 and s["id"] not in usados]
+                    cand += [s for s in por_com.get(cm, []) if p0["ts"] - 86400 <= s["ts"] <= p0["ts"] + 20 * 86400 and s["id"] not in usados]
             cand.sort(key=lambda s: (abs(s["ts"] - p0["ts"]), s["ts"]))
-            s = cand[0] if cand else None
-            ult = max(f["ts"] for f in g)
-            contestado = any(f["enviado"] and f["ts"] > p0["ts"] for f in g)
-            base = {"hilo": hk, "fecha": dt.datetime.fromtimestamp(p0["ts"]).strftime("%Y-%m-%d"), "asunto": p0["asunto"], "que": p0["que"] or "",
-                    "de": p0["de"], "nombre": p0["nombre"], "cuenta": p0["cuenta"], "clase": p0["clase"], "n": len(g), "contestado": contestado,
-                    "ultimo": dt.datetime.fromtimestamp(ult).strftime("%Y-%m-%d"), "cli": p0["cli"] or "",
-                    "cliente": nombres.get(next(iter(coms))) if len(coms) == 1 and next(iter(coms)) in nombres else (p0["cli"] or p0["nombre"]),
-                    "dias": int((ahora - p0["ts"]) // 86400)}
-            if s:
-                usados.add(s["id"])
-                t = tipo_so(s, ult)
-                if not t:
-                    continue
-                items.append({**base, "tipo": t, "clave": f"so:{s['id']}", "so": so_info(s), "cliente": s["partner_id"][1] if s.get("partner_id") else base["cliente"]})
-            else:
-                if any(f["clase"] == "pedido" or f["clase"] == "acepta" for f in pide):
-                    t = "C"
-                else:
-                    t = "A"
-                items.append({**base, "tipo": t, "clave": f"h:{hk}", "so": None})
-        # lo de Odoo que no ha salido por correo
-        for s in sos:
-            if s["id"] in usados or s["ts"] < t0:
-                continue
-            t = tipo_so(s, dt.datetime.fromisoformat((s.get("write_date") or s["date_order"]).replace(" ", "T")).timestamp())
-            if not t:
-                continue
-            items.append({"tipo": t, "clave": f"so:{s['id']}", "so": so_info(s), "hilo": None, "fecha": s["date_order"][:10], "asunto": "", "que": "",
-                          "de": "", "nombre": "", "cuenta": "", "clase": "", "n": 0, "contestado": False, "ultimo": "", "cli": "",
-                          "cliente": s["partner_id"][1] if s.get("partner_id") else "", "dias": int((ahora - s["ts"]) // 86400), "sin_correo": True})
+            if cand:
+                usados.add(cand[0]["id"])
+                continue          # ya tiene presupuesto o pedido en Odoo: se sigue desde Ventas
+            ult = g[-1]
+            ext_ts = max((f["ts"] for f in g if not f["enviado"] and f["de"] not in mias), default=p0["ts"])
+            nuestro = [f for f in g if f["enviado"] or f["de"] in mias]
+            contestado = bool(nuestro) and nuestro[-1]["ts"] > ext_ts
+            cliente = None
+            for e in [p0["de"]] + sorted(mails):
+                if e in por_mail and len(por_mail[e]) == 1:
+                    cm = next(iter(por_mail[e]))
+                    cliente = {"id": cm, "nombre": com_nombre.get(cm) or nombres.get(cm) or "", "contacto": contacto.get(e)}
+                    break
+            if not cliente and len(coms) == 1:
+                cm = next(iter(coms))
+                cliente = {"id": cm, "nombre": com_nombre.get(cm) or nombres.get(cm) or "", "contacto": None}
+            items.append({"tipo": "C" if any(f["clase"] in ("pedido", "acepta") for f in pide) else "A", "clave": f"h:{p0['id']}", "mid": p0["id"],
+                          "ultimo_id": ult["id"], "fecha": dt.datetime.fromtimestamp(p0["ts"]).strftime("%Y-%m-%d"), "asunto": p0["asunto"],
+                          "que": p0["que"] or "", "de": p0["de"], "nombre": p0["nombre"], "cuenta": p0["cuenta"], "clase": p0["clase"], "n": len(g),
+                          "contestado": contestado, "ext_ts": ext_ts, "ultimo": dt.datetime.fromtimestamp(ult["ts"]).strftime("%Y-%m-%d"),
+                          "cli": p0["cli"] or "", "ficha": cliente, "cliente": (cliente or {}).get("nombre") or p0["cli"] or p0["nombre"] or p0["de"],
+                          "dias": int((ahora - p0["ts"]) // 86400), "ref": p0["ref"] or ""})
         return {"items": items, "calculado": ahora, "desde": desde, "correos": len(filas)}
 
     def con_marcas(items):
         with con() as c:
             marcas = {r["clave"]: dict(r) for r in c.execute("SELECT * FROM marcas")}
         hoy = dt.date.today().isoformat()
-        vivos, avisos = [], []
+        vivos, avisos, archivados = [], [], []
         for it in items:
             m = marcas.get(it["clave"])
             if m:
                 it = {**it, "marca": m}
-                if m["estado"] in ("hecho", "descartado"):
-                    continue
+                if m["estado"] in ("hecho", "descartado", "archivado"):
+                    if it.get("ext_ts", 0) > (m.get("cuando") or 0) + 60:
+                        it["reabierto"] = True       # el cliente ha vuelto a escribir después de archivarlo
+                        it["marca"] = None
+                    else:
+                        archivados.append(it)
+                        continue
                 if m["estado"] == "recordar" and m.get("recordar"):
                     if m["recordar"] > hoy:
                         it["dormido"] = True
                     else:
                         avisos.append(it)
             vivos.append(it)
-        return vivos, avisos
+        return vivos, avisos, archivados
 
     # ---------------- API ----------------
     def solo_admin(request):
@@ -673,10 +672,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                 threading.Thread(target=calcular, daemon=True).start()
                 time.sleep(0.3)
         d = CACHE["datos"] or {"items": [], "calculado": 0, "desde": ajuste("desde") or "", "correos": 0}
-        vivos, avisos = con_marcas(d["items"])
+        vivos, avisos, archivados = con_marcas(d["items"])
         with con() as c:
             n = c.execute("SELECT COUNT(*) n, SUM(clase IS NULL AND enviado=0 AND lista=0) sin FROM hist").fetchone()
-        return {"items": vivos, "avisos": avisos, "calculado": d["calculado"], "calculando": CACHE["calculando"], "error": CACHE["error"],
+        return {"items": vivos, "avisos": avisos, "archivados": archivados[-300:], "calculado": d["calculado"], "calculando": CACHE["calculando"], "error": CACHE["error"],
                 "desde": ajuste("desde") or "", "correos": n["n"] or 0, "sin_clasificar": n["sin"] or 0, "cuentas": [c["usuario"] for c in leer_cuentas()],
                 "lectura": {k: EST[k] for k in ("leyendo", "fase", "cuentas", "clasificados", "por_clasificar", "error", "inicio", "fin")}, "tipos": TIPOS}
 
@@ -685,8 +684,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
         u = current_user(request)
         if not es_admin(u) or not CACHE["datos"]:
             return {"n": 0}
-        vivos, avisos = con_marcas(CACHE["datos"]["items"])
-        nuevos = sum(1 for it in vivos if it["tipo"] in ("A", "C") and not it.get("marca") and not it.get("contestado"))
+        vivos, avisos, _ = con_marcas(CACHE["datos"]["items"])
+        nuevos = sum(1 for it in vivos if not it.get("marca") and not it.get("contestado"))
         return {"n": len(avisos) + nuevos, "avisos": len(avisos), "nuevos": nuevos}
 
     @app.post("/api/seg/leer")
@@ -708,7 +707,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
         b = await request.json()
         claves = b.get("claves") or [b.get("clave")]
         est = b.get("estado")
-        if est not in ("hecho", "descartado", "recordar", "abierto"):
+        if est not in ("hecho", "descartado", "archivado", "recordar", "abierto"):
             raise HTTPException(400, "Estado no válido")
         with lock, con() as c:
             for k in claves:
@@ -720,17 +719,168 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                     c.execute("INSERT OR REPLACE INTO marcas VALUES (?,?,?,?,?,?)", (k, est, (b.get("recordar") or "")[:10], (b.get("nota") or "")[:500], u, time.time()))
         return {"ok": True, "n": len(claves)}
 
-    @app.get("/api/seg/hilo/{hk}")
-    def seg_hilo(hk: str, request: Request):
-        solo_admin(request)
+    def hilo_de(mid):
         with con() as c:
-            filas = c.execute("SELECT id,cuenta,enviado,msgid,inreply,refs,de,nombre,para,asunto,ts,clase,que,texto,adjuntos FROM hist WHERE ts>=?",
+            filas = c.execute("SELECT id,cuenta,carpeta,enviado,msgid,inreply,refs,de,nombre,para,asunto,ts,clase,que,texto,adjuntos FROM hist WHERE ts>=?",
                               (dt.datetime.fromisoformat(ajuste("desde") or "2026-01-01").timestamp() - 20 * 86400,)).fetchall()
         H = hilos(filas)
-        g = sorted([f for f in filas if H.get(f["id"]) == hk], key=lambda f: f["ts"])
-        return [{"enviado": bool(f["enviado"]), "de": f["de"], "nombre": f["nombre"], "para": f["para"], "asunto": f["asunto"],
-                 "fecha": dt.datetime.fromtimestamp(f["ts"]).strftime("%d/%m/%Y %H:%M"), "clase": f["clase"], "que": f["que"],
-                 "texto": (f["texto"] or "")[:3000], "adjuntos": json.loads(f["adjuntos"] or "[]"), "cuenta": f["cuenta"]} for f in g]
+        hk = H.get(mid)
+        return sorted([f for f in filas if hk and H.get(f["id"]) == hk], key=lambda f: f["ts"])
+
+    @app.get("/api/seg/hilo")
+    def seg_hilo(mid: str, request: Request):
+        solo_admin(request)
+        vistos, out = set(), []
+        for f in hilo_de(mid):
+            if f["msgid"] and f["msgid"] in vistos:
+                continue          # el mismo correo leído en dos carpetas
+            vistos.add(f["msgid"])
+            t = f["texto"] or ""
+            nuevo, _, citado = t.partition("[mensaje citado]")
+            out.append({"id": f["id"], "enviado": bool(f["enviado"]), "de": f["de"], "nombre": f["nombre"], "para": f["para"], "asunto": f["asunto"],
+                        "fecha": dt.datetime.fromtimestamp(f["ts"]).strftime("%d/%m/%Y %H:%M"), "clase": f["clase"], "que": f["que"],
+                        "texto": nuevo.strip(), "citado": citado.strip()[:3000], "adjuntos": json.loads(f["adjuntos"] or "[]"), "cuenta": f["cuenta"]})
+        return out
+
+    def abrir_imap(cuenta):
+        c = next((x for x in leer_cuentas() if x["usuario"] == cuenta), None)
+        if not c:
+            raise HTTPException(400, f"La cuenta {cuenta} ya no está en el panel")
+        M = imaplib.IMAP4_SSL(c["servidor"], c["puerto"], timeout=60)
+        M.login(c["usuario"], c["clave"])
+        return M, c
+
+    def mensaje_entero(mid):
+        cta, carpeta, uv, uid = mid.rsplit("|", 3)
+        M, _ = abrir_imap(cta)
+        try:
+            M.select(f'"{carpeta}"' if " " in carpeta else carpeta, readonly=True)
+            typ, d = M.uid("fetch", uid, "(BODY.PEEK[])")
+            raw = next((x[1] for x in d or [] if isinstance(x, tuple)), None)
+        finally:
+            try:
+                M.logout()
+            except Exception:
+                pass
+        if not raw:
+            raise HTTPException(404, "No encuentro ese correo en el servidor (¿lo han movido o borrado?)")
+        return email.message_from_bytes(raw)
+
+    @app.get("/api/seg/adjunto")
+    def seg_adjunto(mid: str, i: int, request: Request):
+        solo_admin(request)
+        from fastapi.responses import Response as _R
+        from urllib.parse import quote
+        msg = mensaje_entero(mid)
+        n = 0
+        for part in msg.walk():
+            if part.is_multipart():
+                continue
+            fn = part.get_filename()
+            if fn or part.get_content_disposition() == "attachment":
+                if n == i:
+                    nombre = dec(fn) or "adjunto"
+                    return _R(part.get_payload(decode=True) or b"", media_type=part.get_content_type() or "application/octet-stream",
+                              headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(nombre)}"})
+                n += 1
+        raise HTTPException(404, "No está ese adjunto")
+
+    def smtp_de(c):
+        k = ajuste("smtp:" + c["usuario"])
+        if k:
+            h, p = k.rsplit(":", 1)
+            return [(h, int(p))]
+        dom, imap_h = dominio(c["usuario"]), c["servidor"]
+        if "ionos" in imap_h:
+            hs = ["smtp.ionos.es"]
+        elif "securemail.pro" in imap_h:
+            hs = ["smtp.securemail.pro"]
+        else:
+            hs = [f"smtp.{dom}", f"mail.{dom}", imap_h]
+        return [(h, p) for h in hs for p in (465, 587)]
+
+    def enviar_smtp(c, msg):
+        import smtplib
+        import ssl
+        err = []
+        for h, p in smtp_de(c):
+            try:
+                if p == 465:
+                    S = smtplib.SMTP_SSL(h, p, timeout=40, context=ssl.create_default_context())
+                else:
+                    S = smtplib.SMTP(h, p, timeout=40)
+                    S.starttls(context=ssl.create_default_context())
+                S.login(c["usuario"], c["clave"])
+                S.send_message(msg)
+                S.quit()
+                ajuste("smtp:" + c["usuario"], f"{h}:{p}")
+                return h
+            except Exception as e:
+                err.append(f"{h}:{p} {str(e)[:60]}")
+        raise HTTPException(400, "No se ha podido enviar: " + " · ".join(err))
+
+    @app.post("/api/seg/responder")
+    async def seg_responder(request: Request):
+        """Responde desde la misma cuenta en la que entró el correo, en el mismo hilo, y deja copia en Enviados (se ve en Spark)."""
+        solo_admin(request)
+        from email.message import EmailMessage
+        from email.utils import formatdate, make_msgid, formataddr
+        form = await request.form()
+        mid = form.get("mid") or ""
+        para = (form.get("para") or "").strip()
+        if not para or not re.fullmatch(r"\s*[\w.+\-]+@[\w\-]+\.[\w.\-]+(\s*,\s*[\w.+\-]+@[\w\-]+\.[\w.\-]+)*\s*", para):
+            raise HTTPException(400, "Revisa el correo del destinatario")
+        cc = (form.get("cc") or "").strip()
+        with con() as c:
+            o = c.execute("SELECT * FROM hist WHERE id=?", (mid,)).fetchone()
+        if not o:
+            raise HTTPException(404, "No encuentro el correo original")
+        cuenta = form.get("cuenta") or o["cuenta"]
+        cta = next((x for x in leer_cuentas() if x["usuario"] == cuenta), None)
+        if not cta:
+            raise HTTPException(400, "Esa cuenta ya no está en el panel")
+        msg = EmailMessage()
+        msg["From"] = formataddr((form.get("nombre_de") or "Folder Castellón", cta["usuario"]))
+        msg["To"] = para
+        if cc:
+            msg["Cc"] = cc
+        msg["Subject"] = (form.get("asunto") or "").strip() or ("Re: " + (o["asunto"] or ""))
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=dominio(cta["usuario"]))
+        if o["msgid"]:
+            msg["In-Reply-To"] = o["msgid"]
+            msg["References"] = ((o["refs"] or "") + " " + o["msgid"]).strip()[-900:]
+        texto = (form.get("texto") or "").rstrip()
+        citado = (o["texto"] or "").split("[mensaje citado]")[0].strip()
+        cuando = dt.datetime.fromtimestamp(o["ts"]).strftime("%d/%m/%Y %H:%M")
+        msg.set_content(texto + f"\n\n\nEl {cuando}, {o['nombre'] or o['de']} <{o['de']}> escribió:\n" + "\n".join("> " + l for l in citado.splitlines()))
+        adj = []
+        for f in form.getlist("adjuntos"):
+            if hasattr(f, "read"):
+                datos = await f.read()
+                if datos:
+                    tipo = (f.content_type or "application/octet-stream").split("/", 1)
+                    msg.add_attachment(datos, maintype=tipo[0], subtype=tipo[1] if len(tipo) > 1 else "octet-stream", filename=f.filename)
+                    adj.append(f.filename)
+        servidor = enviar_smtp(cta, msg)
+        # copia en Enviados de esa cuenta
+        guardado = False
+        try:
+            M, _ = abrir_imap(cta["usuario"])
+            env = next((cp for cp, e in carpetas_de(M) if e), None)
+            if env:
+                M.append(f'"{env}"' if " " in env else env, "(\\Seen)", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
+                guardado = True
+            M.logout()
+        except Exception:
+            pass
+        with lock, con() as c:
+            c.execute("INSERT OR IGNORE INTO hist (id,cuenta,carpeta,enviado,msgid,inreply,refs,de,nombre,para,asunto,ts,texto,adjuntos,lista,clase) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (f"panel|{msg['Message-ID']}", cta["usuario"], "Enviados (panel)", 1, msg["Message-ID"], o["msgid"] or "", msg.get("References", ""),
+                       cta["usuario"], "Nosotros", para, msg["Subject"], time.time(), texto[:4000], json.dumps(adj, ensure_ascii=False), 0, "otro"))
+        threading.Thread(target=calcular, daemon=True).start()
+        return {"ok": True, "servidor": servidor, "enviados": guardado, "adjuntos": adj}
 
     # ---------------- cuentas de correo desde el panel (sin tocar el NAS) ----------------
     def mx_de(dom):

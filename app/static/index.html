@@ -11,7 +11,7 @@
   <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
   <nav>
     <a class="on" href="#ventas" data-v="ventas" data-m="ventas">Ventas</a>
-    <a href="#seguimiento" data-v="seguimiento" data-m="seguimiento" hidden>Seguimiento <span class="nb" id="nb-sg" hidden></span></a>
+    <a href="#seguimiento" data-v="seguimiento" data-m="seguimiento" hidden>Correo sin atender <span class="nb" id="nb-sg" hidden></span></a>
     <a href="#web" data-v="web" data-m="web">Web <span class="nb" id="nb-web" hidden></span></a>
     <a href="#whatsapp" data-v="whatsapp" data-m="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
     <a href="#pedidos" data-v="pedidos" data-m="pedidos">Nuevo pedido</a>
@@ -160,6 +160,7 @@
     <div class="pe-grid">
       <div class="pe-box">
         <h3>1 · Cliente</h3>
+        <div id="pe-sg" class="pe-sg" hidden></div>
         <label class="pe-l" id="pe-emp-l" hidden>Empresa que vende <select id="pe-emp"></select></label>
         <div class="pe-bus"><input id="pe-cq" type="search" placeholder="Buscar cliente por nombre, NIF, email…" autocomplete="off"><div id="pe-csug" class="pe-sug"></div></div>
         <div id="pe-cli" class="pe-cli muted">Ningún cliente elegido</div>
@@ -305,9 +306,11 @@
       <datalist id="sg-dl"></datalist>
       <p class="muted">La contraseña la escribes tú aquí; el panel prueba a entrar y, si entra, la guarda en el NAS. No se vuelve a enseñar en ningún sitio.</p></div>
     <div class="wa-tabs sg-tabs" id="sg-tabs"></div>
-    <div class="sg-bar"><input id="sg-q" type="search" placeholder="Buscar cliente, asunto, pedido…"><label><input type="checkbox" id="sg-cont"> ocultar los ya contestados por correo</label>
-      <label><input type="checkbox" id="sg-dorm"> ver los que tienen recordatorio más adelante</label>
-      <span class="sg-sel" id="sg-sel" hidden><b id="sg-seln">0</b> marcados: <button class="lnk" data-bulk="hecho">✓ Hecho</button><button class="lnk del" data-bulk="descartado">Descartar</button></span></div>
+    <div class="sg-bar"><input id="sg-q" type="search" placeholder="Buscar cliente, asunto, correo…">
+      <select id="sg-ftipo"><option value="">Precio y material</option><option value="A">💬 Solo piden precio</option><option value="C">🛒 Solo piden material</option></select>
+      <select id="sg-fcta"></select>
+      <label><input type="checkbox" id="sg-dorm"> ver también los que tienen recordatorio más adelante</label>
+      <span class="sg-sel" id="sg-sel" hidden><b id="sg-seln">0</b> marcados: <button class="lnk del" data-bulk="archivado">🗄️ Archivar</button></span></div>
     <div id="sg-l"></div>
   </section>
 

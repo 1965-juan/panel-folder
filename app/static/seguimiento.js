@@ -1,9 +1,11 @@
-/* ---------- Seguimiento: correo cruzado con Odoo ---------- */
-let SG = null, SG_T = 'A', SG_TM = null;
-const SG_TABS = [['R', '🔔 Recordatorios'], ['A', '💬 Piden precio, sin presupuesto'], ['C', '🛒 Piden material, sin pedido'], ['B', '📝 Presupuesto sin respuesta'], ['D', '📦 Pedido sin servir'], ['E', '🧾 Servido sin facturar']];
-const SG_EST = { draft: 'Presupuesto', sent: 'Presupuesto enviado', sale: 'Pedido', cancel: 'Cancelado' };
+/* ---------- Correo sin atender: lo que piden los clientes y no tiene presupuesto ni pedido en Odoo ---------- */
+let SG = null, SG_T = 'P', SG_TM = null, SG_TIPO = '', SG_CTA = '';
+const SG_TABS = [['P', '📥 Sin atender'], ['R', '🔔 Recordatorios'], ['K', '💬 Contestados, sin presupuesto'], ['X', '🗄️ Archivados']];
 const sgF = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
 const sgHoy = (d = 0) => { const x = new Date(Date.now() + d * 864e5); return x.toISOString().slice(0, 10); };
+const SG_COL = ['#4B2A91', '#F57925', '#1f7a4d', '#2563a8', '#a8326e', '#7a5b1f', '#3f6b6b'];
+const sgCol = c => SG_COL[Math.abs([...(c || '')].reduce((a, ch) => a * 31 + ch.charCodeAt(0) | 0, 7)) % SG_COL.length];
+const sgCta = c => (c || '').replace(/\.(es|com)$/, '');
 
 async function sgBadge() {
   try { const r = await api('/api/seg/aviso'); const nb = $('#nb-sg'); if (nb) { nb.textContent = r.n; nb.hidden = !r.n; } } catch (e) { }
@@ -11,58 +13,60 @@ async function sgBadge() {
 async function sgOpen(recalcular) {
   clearTimeout(SG_TM);
   try { SG = await api('/api/seg' + (recalcular ? '?recalcular=1' : '')); } catch (e) { $('#sg-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
-  if (!sgOpen.ya && SG.items.length) { sgOpen.ya = true; if (!sgDe(SG_T).length) { const t = SG_TABS.find(([k]) => sgDe(k).length); if (t) SG_T = t[0]; } }
-  sgEstado(); sgTabs(); sgLista(); sgBadge();
+  sgEstado(); sgFiltros(); sgTabs(); sgLista(); sgBadge();
   if (!SG.cuentas.length && $('#sg-ctas').hidden) { $('#sg-ctas').hidden = false; sgCuentas(); }
   if ((SG.calculando || SG.lectura.leyendo) && !$('#v-sg').hidden) SG_TM = setTimeout(() => sgOpen(), 6000);
 }
 function sgEstado() {
   const L = SG.lectura, e = $('#sg-est');
   let h = '';
-  if (!SG.cuentas.length) h = `<p class="pc-aviso">Para cruzar el correo añade las cuentas aquí abajo, en «Cuentas de correo». Mientras tanto aquí sale lo que dice Odoo: presupuestos sin respuesta, pedidos sin servir y servido sin facturar.</p>`;
-  else h = `<b>${SG.correos.toLocaleString('es-ES')}</b> correos leídos de ${SG.cuentas.length} cuentas${SG.desde ? ' desde el ' + fdate(SG.desde) : ''}`;
+  if (!SG.cuentas.length) h = `<p class="pc-aviso">Añade las cuentas de correo aquí abajo, en «Cuentas de correo».</p>`;
+  else if (!SG.correos && !L.leyendo) h = `<p class="pc-aviso">Las cuentas están puestas. Pulsa <b>📥 Leer el correo desde…</b> para cargar el correo desde enero.</p>`;
+  else h = `<b>${SG.correos.toLocaleString('es-ES')}</b> correos leídos de ${SG.cuentas.length} cuentas${SG.desde ? ' desde el ' + fdate(SG.desde) : ''}. Aquí solo sale lo que un cliente pide y no tiene todavía presupuesto ni pedido en Odoo; lo que ya está presupuestado se sigue desde Ventas.`;
   if (L.leyendo) {
     const c = Object.entries(L.cuentas).map(([k, v]) => v.error ? `🔴 ${escH(k)}: ${escH(v.error)}` : `${escH(k)} ${v.leidos}/${v.total}`).join(' · ');
-    h += ` · <span class="bdg b-warn">⏳ ${escH(L.fase)}${L.por_clasificar && L.fase.startsWith('Clasif') ? ` ${L.clasificados}/${L.por_clasificar}` : ''}</span><br><small>${c}</small>`;
-  } else if (L.error) h += ` · <span class="bdg b-bad">${escH(L.error)}</span>`;
-  if (SG.calculando) h += ' · <span class="bdg b-warn">⏳ cruzando con Odoo…</span>';
-  else if (SG.calculado) h += ` · calculado a las ${new Date(SG.calculado * 1000).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
-  if (SG.error) h += ` · <span class="bdg b-bad">${escH(SG.error)}</span>`;
+    h += ` <span class="bdg b-warn">⏳ ${escH(L.fase)}${L.por_clasificar && /Clasif|PDF/.test(L.fase) ? ` ${L.clasificados}/${L.por_clasificar}` : ''}</span><br><small>${c}</small>`;
+  } else if (L.error) h += ` <span class="bdg b-bad">${escH(L.error)}</span>`;
+  if (SG.calculando) h += ' <span class="bdg b-warn">⏳ cruzando con Odoo…</span>';
+  if (SG.error) h += ` <span class="bdg b-bad">${escH(SG.error)}</span>`;
   e.innerHTML = h;
   $('#sg-leer').hidden = !SG.cuentas.length;
 }
+function sgFiltros() {
+  const cs = [...new Set(SG.items.concat(SG.archivados || []).map(i => i.cuenta).filter(Boolean))].sort();
+  $('#sg-fcta').innerHTML = '<option value="">Todas las cuentas</option>' + cs.map(c => `<option ${c === SG_CTA ? 'selected' : ''} value="${escH(c)}">${escH(c)}</option>`).join('');
+}
 function sgDe(t) {
   const dorm = $('#sg-dorm').checked;
-  if (t === 'R') return SG.avisos;
-  return SG.items.filter(i => i.tipo === t && (dorm || !i.dormido));
+  let l = t === 'R' ? SG.avisos : t === 'X' ? (SG.archivados || []) : SG.items.filter(i => (t === 'K' ? i.contestado : !i.contestado) && (dorm || !(i.marca && i.marca.estado === 'recordar')));
+  return l.filter(i => (!SG_TIPO || i.tipo === SG_TIPO) && (!SG_CTA || i.cuenta === SG_CTA));
 }
 function sgTabs() {
-  $('#sg-tabs').innerHTML = SG_TABS.map(([k, n]) => { const l = sgDe(k); const imp = ['B', 'D', 'E'].includes(k) ? l.reduce((a, i) => a + (i.so ? i.so.base : 0), 0) : 0;
-    return `<button data-t="${k}" class="${k === SG_T ? 'on' : ''}">${n} <b>${l.length}</b>${imp ? ` <small>${eur(imp)}</small>` : ''}</button>`; }).join('');
+  $('#sg-tabs').innerHTML = SG_TABS.map(([k, n]) => `<button data-t="${k}" class="${k === SG_T ? 'on' : ''}">${n} <b>${sgDe(k).length}</b></button>`).join('');
   $('#sg-tabs').querySelectorAll('button').forEach(b => b.onclick = () => { SG_T = b.dataset.t; sgTabs(); sgLista(); });
 }
 function sgLista() {
-  const q = ($('#sg-q').value || '').toLowerCase(), oc = $('#sg-cont').checked;
-  let l = sgDe(SG_T).filter(i => (!q || [i.cliente, i.asunto, i.que, i.de, i.nombre, i.so && i.so.ref, i.so && i.so.su_ref].join(' ').toLowerCase().includes(q)) && !(oc && i.contestado));
-  l = l.slice().sort((a, b) => (a.contestado - b.contestado) || (b.fecha > a.fecha ? 1 : -1));
+  const q = ($('#sg-q').value || '').toLowerCase();
+  let l = sgDe(SG_T).filter(i => !q || [i.cliente, i.asunto, i.que, i.de, i.nombre, i.cuenta].join(' ').toLowerCase().includes(q));
+  l = l.slice().sort((a, b) => (b.reabierto ? 1 : 0) - (a.reabierto ? 1 : 0) || (b.fecha > a.fecha ? 1 : b.fecha < a.fecha ? -1 : 0));
   const box = $('#sg-l');
-  if (!l.length) { box.innerHTML = `<p class="empty">${SG.calculando ? 'Calculando…' : 'Nada aquí 👍'}</p>`; sgSel(); return; }
-  box.innerHTML = `<p class="muted sg-ayuda">${SG_T === 'R' ? 'Lo que dejaste para hoy o días anteriores.' : escH(SG.tipos[SG_T] || '')}. Marca <b>Hecho</b> lo resuelto, <b>Descartar</b> lo que no va a salir y <b>Recordar</b> para que vuelva a aparecer un día.</p>`
-    + l.map(i => { const s = i.so; const m = i.marca;
-      return `<div class="sg-i" data-k="${escH(i.clave)}"><label class="sg-ck"><input type="checkbox" data-k="${escH(i.clave)}"></label>
-        <div class="sg-c"><div class="sg-1"><b>${escH(i.cliente || i.nombre || i.de)}</b><span class="muted">${sgF(i.fecha)} · hace ${i.dias} d</span>
-          ${s ? `<a href="#" class="bdg b-prov sg-so">${escH(s.ref)} · ${escH(SG_EST[s.estado] || s.estado)}${s.estado === 'sale' && s.entrega === 'partial' ? ' (servido en parte)' : ''}</a> <span class="bdg">${escH(s.empresa)}</span> <b>${eur(s.base)}</b>` : ''}
-          ${i.contestado ? '<span class="bdg b-ok">contestado por correo</span>' : (i.hilo ? '<span class="bdg b-warn">sin contestar</span>' : '')}
-          ${i.sin_correo ? '<span class="bdg">solo en Odoo</span>' : ''}${m && m.estado === 'recordar' ? `<span class="bdg b-warn">⏰ ${fdate(m.recordar)}</span>` : ''}</div>
-          ${i.asunto || i.que ? `<div class="sg-2">${i.asunto ? `<b>${escH(i.asunto)}</b>` : ''}${i.que ? ` — ${escH(i.que)}` : ''}${i.cuenta ? ` <small class="muted">(${escH(i.cuenta.split('@')[0])} @${escH(i.cuenta.split('@')[1] || '')})</small>` : ''}</div>` : ''}
-          ${m && m.nota ? `<div class="sg-nota">📝 ${escH(m.nota)}</div>` : ''}
-          <div class="sg-3">${i.hilo ? `<button class="lnk" data-a="ver">✉️ Ver correo (${i.n})</button>` : ''}<button class="lnk" data-a="hecho">✓ Hecho</button>
-            <button class="lnk" data-a="rec">⏰ Recordar</button><button class="lnk del" data-a="descartado">Descartar</button>${m ? '<button class="lnk" data-a="abierto">quitar marca</button>' : ''}</div>
-          <div class="sg-x"></div></div></div>`; }).join('');
+  if (!l.length) { box.innerHTML = `<p class="empty">${SG.calculando ? 'Calculando…' : SG_T === 'P' ? 'Nada sin atender 👍' : 'Nada aquí'}</p>`; sgSel(); return; }
+  box.innerHTML = l.map(i => { const m = i.marca;
+    return `<div class="sg-i" data-k="${escH(i.clave)}"><label class="sg-ck"><input type="checkbox" data-k="${escH(i.clave)}"></label>
+      <div class="sg-c"><div class="sg-1"><span class="sg-cta-b" style="background:${sgCol(i.cuenta)}" title="Entró en esta cuenta">📥 ${escH(sgCta(i.cuenta))}</span>
+        <b>${escH(i.cliente)}</b>${i.ficha ? '' : ' <span class="bdg">sin ficha en Odoo</span>'}
+        <span class="bdg ${i.tipo === 'C' ? 'b-prov' : 'b-warn'}">${i.tipo === 'C' ? '🛒 pide material' : '💬 pide precio'}</span>
+        ${i.reabierto ? '<span class="bdg b-bad">el cliente ha vuelto a escribir</span>' : ''}
+        <span class="muted">${sgF(i.fecha)} · hace ${i.dias} d${i.n > 1 ? ` · ${i.n} correos` : ''}</span>${m && m.estado === 'recordar' ? `<span class="bdg b-warn">⏰ ${fdate(m.recordar)}</span>` : ''}</div>
+        <div class="sg-2"><b>${escH(i.asunto || '(sin asunto)')}</b>${i.que ? ` — ${escH(i.que)}` : ''} <small class="muted">${escH(i.nombre && i.nombre !== i.de ? i.nombre + ' · ' : '')}${escH(i.de)}</small></div>
+        ${m && m.nota ? `<div class="sg-nota">📝 ${escH(m.nota)}</div>` : ''}
+        <div class="sg-3"><button class="lnk" data-a="ver">✉️ Ver correo</button><button class="lnk" data-a="resp">↩️ Responder</button>
+          <button class="lnk" data-a="pres">📝 Presupuestar</button><button class="lnk" data-a="rec">⏰ Recordar</button>
+          ${SG_T === 'X' ? '<button class="lnk" data-a="abierto">↩ Sacar de archivados</button>' : '<button class="lnk del" data-a="archivado">🗄️ Archivar</button>'}</div>
+        <div class="sg-x"></div></div></div>`; }).join('');
   box.querySelectorAll('.sg-i').forEach(d => {
     const it = l.find(x => x.clave === d.dataset.k);
     d.querySelectorAll('[data-a]').forEach(b => b.onclick = () => sgAccion(it, b.dataset.a, d));
-    const so = d.querySelector('.sg-so'); if (so) so.onclick = e => { e.preventDefault(); const s = it.so; openDetail({ id: s.id, model: 'sale.order', ref: s.ref, cliente: s.cliente, empresa: s.empresa, fecha: s.fecha, total: s.total, cid: s.cid, estado: s.estado === 'sale' ? 'pedido' : 'presupuesto', su_ref: s.su_ref }); };
     d.querySelector('input[type=checkbox]').onchange = sgSel;
   });
   sgSel();
@@ -72,18 +76,65 @@ async function sgMarca(claves, estado, extra = {}) {
   await jpost('/api/seg/marca', { claves, estado, ...extra });
   SG = await api('/api/seg'); sgTabs(); sgLista(); sgBadge();
 }
+async function sgVer(it, x) {
+  x.innerHTML = '<p class="muted">Cargando…</p>';
+  try { const L = await api('/api/seg/hilo?mid=' + encodeURIComponent(it.mid));
+    x.innerHTML = L.map(m => `<div class="sg-m ${m.enviado ? 'env' : ''}"><div class="muted"><b>${m.enviado ? '➡️ Nosotros' : escH(m.nombre || m.de)}</b> ${m.enviado ? '' : `&lt;${escH(m.de)}&gt;`} · ${escH(m.fecha)} · en ${escH(m.cuenta)}</div>
+      <div><b>${escH(m.asunto || '(sin asunto)')}</b></div><div class="sg-t">${escH(m.texto || '').replace(/\n/g, '<br>') || '<i class="muted">(sin texto)</i>'}</div>
+      ${m.adjuntos.length ? `<div class="sg-adj">${m.adjuntos.map((a, k) => `<a target="_blank" rel="noopener" href="/api/seg/adjunto?mid=${encodeURIComponent(m.id)}&i=${k}">📎 ${escH(a)}</a>`).join('')}</div>` : ''}
+      ${m.citado ? `<details><summary class="muted">ver el mensaje citado</summary><div class="sg-t muted">${escH(m.citado).replace(/\n/g, '<br>')}</div></details>` : ''}</div>`).join('') || '<p class="muted">No se encuentra el correo</p>';
+  } catch (e) { x.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
+}
+const SG_RAP = [['Recibido', 'Hola,\n\nRecibido, gracias. Te preparamos el presupuesto y te lo enviamos en breve.'],
+  ['Faltan datos', 'Hola,\n\nPara poder pasarte el presupuesto necesitamos que nos indiques:\n- Cantidades\n- Medidas / formato\n- Plazo de entrega\n\nGracias.'],
+  ['Te paso precio', 'Hola,\n\nTe adjuntamos el presupuesto que nos pediste. Cualquier duda nos dices.'],
+  ['¿Seguimos?', 'Hola,\n\n¿Pudiste ver lo que nos comentabas? Quedamos pendientes para ponerlo en marcha.']];
+function sgFirma() { try { return localStorage.getItem('pf_firma') || ''; } catch (_) { return ''; } }
+function sgResp(it, x) {
+  const firma = sgFirma() || 'Un saludo,\nJuan\nFolder Castellón\nWhatsApp 673 10 96 93 · www.foldercastellon.com';
+  const asunto = /^\s*re\s*:/i.test(it.asunto || '') ? it.asunto : 'Re: ' + (it.asunto || '');
+  x.innerHTML = `<form class="sg-resp"><div class="sg-rf"><label>Desde <select name="cuenta">${SG.cuentas.map(c => `<option ${c === it.cuenta ? 'selected' : ''}>${escH(c)}</option>`).join('')}</select></label>
+      <label>Para <input name="para" value="${escH(it.de)}"></label><label>CC <input name="cc" placeholder="opcional"></label></div>
+    <label>Asunto <input name="asunto" value="${escH(asunto)}"></label>
+    <div class="ma-chips">${SG_RAP.map((r, k) => `<button type="button" class="lnk" data-r="${k}">${escH(r[0])}</button>`).join('')}</div>
+    <textarea name="texto" rows="7" placeholder="Escribe la respuesta…"></textarea>
+    <label>Firma <textarea name="firma" rows="3">${escH(firma)}</textarea></label>
+    <label>Adjuntar <input type="file" name="adjuntos" multiple></label>
+    <div><button class="ac-go">Enviar</button> <small class="muted">Sale desde la cuenta elegida, en el mismo hilo, y queda en Enviados (lo verás en Spark). Debajo va citado el correo del cliente.</small></div>
+    <div class="sg-rr"></div></form>`;
+  const f = x.querySelector('form');
+  f.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { f.texto.value = SG_RAP[+b.dataset.r][1]; f.texto.focus(); });
+  f.onsubmit = async e => {
+    e.preventDefault();
+    if (!f.texto.value.trim()) return alertBox('Escribe la respuesta');
+    if (!confirm(`¿Enviar la respuesta a ${f.para.value} desde ${f.cuenta.value}?`)) return;
+    try { localStorage.setItem('pf_firma', f.firma.value); } catch (_) { }
+    const fd = new FormData(f); fd.set('texto', f.texto.value.trim() + '\n\n' + f.firma.value.trim()); fd.delete('firma'); fd.set('mid', it.ultimo_id || it.mid);
+    const bt = f.querySelector('.ac-go'); bt.disabled = true; f.querySelector('.sg-rr').textContent = '⏳ Enviando…';
+    try {
+      const r = await fetch('/api/seg/responder', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || ('Error ' + r.status));
+      f.querySelector('.sg-rr').innerHTML = `<span class="ok-t">✅ Enviado${j.enviados ? ' (copia en Enviados)' : ''}${j.adjuntos.length ? ' con ' + j.adjuntos.length + ' adjunto(s)' : ''}</span>`;
+      setTimeout(() => sgOpen(), 2500);
+    } catch (er) { f.querySelector('.sg-rr').innerHTML = `<span class="err-t">❌ ${escH(er.message)}</span>`; bt.disabled = false; }
+  };
+}
+function sgPres(it) {
+  if ((PE.lin.length || PE.cli) && !confirm('En «Nuevo pedido» hay otro pedido a medias. ¿Lo cambio por este cliente?')) return;
+  PE = { cli: null, lin: [], emp: PE.emp, ref: it.ref || '', nota: '', sg: { clave: it.clave, cliente: it.cliente, que: it.que, asunto: it.asunto, de: it.de } };
+  if (it.ficha) PE.cli = { id: it.ficha.contacto || it.ficha.id, nombre: it.ficha.nombre, email: it.de };
+  peGuarda();
+  location.hash = '#pedidos';
+  if (!it.ficha) setTimeout(() => { const q = $('#pe-cq'); if (q) { q.value = (it.cli || it.nombre || it.de.split('@')[1] || '').slice(0, 40); q.dispatchEvent(new Event('input')); q.focus(); } }, 400);
+}
 async function sgAccion(it, a, d) {
   const x = d.querySelector('.sg-x');
-  if (a === 'ver') {
-    if (x.innerHTML) { x.innerHTML = ''; return; }
-    x.innerHTML = '<p class="muted">Cargando…</p>';
-    try { const L = await api('/api/seg/hilo/' + encodeURIComponent(it.hilo));
-      x.innerHTML = L.map(m => `<div class="sg-m ${m.enviado ? 'env' : ''}"><div class="muted"><b>${m.enviado ? '➡️ Nosotros' : escH(m.nombre || m.de)}</b> · ${escH(m.fecha)}${m.clase ? ` · ${escH(m.clase)}` : ''}${m.adjuntos.length ? ` · 📎 ${m.adjuntos.map(escH).join(', ')}` : ''}</div>
-        <div><b>${escH(m.asunto)}</b></div><div class="sg-t">${escH((m.texto || '').split('[mensaje citado]')[0]).replace(/\n/g, '<br>')}</div></div>`).join('') || '<p class="muted">No se encuentra el correo</p>';
-    } catch (e) { x.innerHTML = `<p class="err">${escH(e.message)}</p>`; }
-    return;
-  }
+  if (a === 'ver') { if (x.dataset.v === 'ver' && x.innerHTML) { x.innerHTML = ''; x.dataset.v = ''; return; } x.dataset.v = 'ver'; return sgVer(it, x); }
+  if (a === 'resp') { if (x.dataset.v === 'resp' && x.innerHTML) { x.innerHTML = ''; x.dataset.v = ''; return; } x.dataset.v = 'resp'; return sgResp(it, x); }
+  if (a === 'pres') return sgPres(it);
   if (a === 'rec') {
+    x.dataset.v = 'rec';
     x.innerHTML = `<div class="sg-rec"><label>Recordar el <input type="date" value="${sgHoy(3)}"></label>${[1, 3, 7, 15].map(n => `<button class="lnk" data-n="${n}">+${n} d</button>`).join('')}
       <input class="sg-nt" placeholder="Nota (qué falta, a quién llamar…)" value="${escH((it.marca && it.marca.nota) || '')}"><button class="ac-go">Guardar</button></div>`;
     const di = x.querySelector('input[type=date]');
@@ -94,13 +145,14 @@ async function sgAccion(it, a, d) {
   try { await sgMarca([it.clave], a); } catch (e) { alertBox(e.message); }
 }
 $('#sg-q').oninput = () => sgLista();
-$('#sg-cont').onchange = () => sgLista();
+$('#sg-ftipo').onchange = e => { SG_TIPO = e.target.value; sgTabs(); sgLista(); };
+$('#sg-fcta').onchange = e => { SG_CTA = e.target.value; sgTabs(); sgLista(); };
 $('#sg-dorm').onchange = () => { sgTabs(); sgLista(); };
 $('#sg-rec').onclick = () => sgOpen(true);
 document.querySelectorAll('#sg-sel [data-bulk]').forEach(b => b.onclick = async () => {
   const ks = [...$('#sg-l').querySelectorAll('.sg-ck input:checked')].map(c => c.dataset.k);
   if (!ks.length) return;
-  if (!confirm(`¿Marcar ${ks.length} como «${b.dataset.bulk}»?`)) return;
+  if (!confirm(`¿Archivar ${ks.length} correos?`)) return;
   try { await sgMarca(ks, b.dataset.bulk); } catch (e) { alertBox(e.message); }
 });
 $('#sg-leer').onclick = async () => {

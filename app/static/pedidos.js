@@ -83,6 +83,7 @@ function pePinta() {
     tb.appendChild(tr);
   });
   $('#pe-vacio').hidden = !!PE.lin.length;
+  const sgb = $('#pe-sg'); if (sgb) { sgb.hidden = !PE.sg; if (PE.sg) { sgb.innerHTML = `📥 Presupuesto para el correo de <b>${escH(PE.sg.cliente || PE.sg.de)}</b>: «${escH(PE.sg.asunto || '')}»${PE.sg.que ? ' — ' + escH(PE.sg.que) : ''} <a href="#" class="lnk" id="pe-sgx">quitar</a>`; $('#pe-sgx').onclick = e => { e.preventDefault(); PE.sg = null; peGuarda(); pePinta(); }; } }
   $('#pe-avi').disabled = !(PE.cli && PE.cli.email);
   $('#pe-avi-e').textContent = PE.cli ? (PE.cli.email ? `(${PE.cli.email})` : '(el cliente no tiene email)') : '';
   const n = document.querySelector('.side nav a[data-v="pedidos"]');
@@ -138,6 +139,7 @@ async function peCrea(confirmar) {
     $('#pe-res').innerHTML = `<div class="pe-ok"><b>✅ ${r.estado === 'sale' ? 'Pedido' : 'Presupuesto'} ${escH(r.nombre)} creado</b>${r.avisado ? ' · 📧 confirmación enviada al cliente' : ''}${r.aviso ? ' · ⚠️ ' + escH(r.aviso) : ''} · ${escH(PE.cli.nombre)} · ${eur(r.base)} + IVA = <b>${eur(r.total)}</b>
       <table class="pe-t">${r.lineas.map(l => `<tr><td>${escH(l.articulo)}</td><td>${+l.cantidad}</td><td>${eur(l.precio)}${l.dto ? ` −${l.dto}%` : ''}</td><td>${eur(l.subtotal)}</td></tr>`).join('')}</table>
       <a class="btn" target="_blank" rel="noopener" href="${r.odoo}">Abrir en Odoo ↗</a> <a class="btn" href="#ventas">Ver en Ventas</a></div>`;
+    if (PE.sg) { try { await jpost('/api/seg/marca', { claves: [PE.sg.clave], estado: 'hecho', nota: `${r.estado === 'sale' ? 'Pedido' : 'Presupuesto'} ${r.nombre}` }); } catch (_) { } }
     PE = { cli: null, lin: [], emp: PE.emp }; peGuarda(); $('#pe-ref').value = ''; $('#pe-nota').value = ''; $('#pe-nent').value = ''; $('#pe-hbox').hidden = true; pePinta(); peDirs();
   } catch (e) { alertBox(e.message); }
   bs.forEach(b => b.disabled = false);
