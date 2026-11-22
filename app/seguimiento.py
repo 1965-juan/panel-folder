@@ -515,7 +515,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
         t0 = dt.datetime.fromisoformat(desde).timestamp()
         mias = propias()
         with con() as c:
-            filas = c.execute("SELECT id,cuenta,enviado,msgid,inreply,refs,de,nombre,para,asunto,ts,clase,cli,ref,que,texto FROM hist WHERE ts>=?",
+            filas = c.execute("SELECT id,cuenta,enviado,msgid,inreply,refs,de,nombre,para,asunto,ts,clase,cli,ref,que,texto,adjuntos FROM hist WHERE ts>=?",
                               (t0 - 20 * 86400,)).fetchall()
             marcas = {r["clave"]: dict(r) for r in c.execute("SELECT * FROM marcas")}
         H = hilos(filas) if filas else {}
@@ -645,7 +645,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                           "que": p0["que"] or "", "de": p0["de"], "nombre": p0["nombre"], "cuenta": p0["cuenta"], "clase": p0["clase"], "n": len(g),
                           "contestado": contestado, "ext_ts": ext_ts, "ultimo": dt.datetime.fromtimestamp(ult["ts"]).strftime("%Y-%m-%d"),
                           "cli": p0["cli"] or "", "ficha": cliente, "cliente": (cliente or {}).get("nombre") or p0["cli"] or p0["nombre"] or p0["de"],
-                          "dias": int((ahora - p0["ts"]) // 86400), "ref": p0["ref"] or ""})
+                          "dias": int((ahora - p0["ts"]) // 86400), "ref": p0["ref"] or "",
+                          "pdfs": [{"mid": f["id"], "nombre": a} for f in g if not f["enviado"] for a in json.loads(f["adjuntos"] or "[]") if a.lower().endswith(".pdf")][:6]})
         return {"items": items, "calculado": ahora, "desde": desde, "correos": len(filas)}
 
     def con_marcas(items):
@@ -799,6 +800,36 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                               headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(nombre)}"})
                 n += 1
         raise HTTPException(404, "No está ese adjunto")
+
+    @app.post("/api/seg/a_compras")
+    async def seg_a_compras(request: Request):
+        """{clave, mid, nombre?}: los PDF del correo pasan a la bandeja de Compras como factura (se leen y se crea el borrador) y el correo queda hecho."""
+        u = solo_admin(request)
+        b = await request.json()
+        alta = getattr(app.state, "compras_alta", None)
+        if not alta:
+            raise HTTPException(400, "El módulo de Compras no está disponible")
+        mids = b.get("mids") or [b.get("mid")]
+        hechos = []
+        for mid in [m for m in mids if m]:
+            msg = mensaje_entero(mid)
+            for part in msg.walk():
+                if part.is_multipart():
+                    continue
+                fn = dec(part.get_filename()) or ""
+                if part.get_content_type() == "application/pdf" or fn.lower().endswith(".pdf"):
+                    if b.get("nombre") and fn != b["nombre"]:
+                        continue
+                    datos = part.get_payload(decode=True) or b""
+                    if datos.startswith(b"%PDF"):
+                        alta(fn or "factura.pdf", datos, "factura", 1, u)
+                        hechos.append(fn or "factura.pdf")
+        if not hechos:
+            raise HTTPException(400, "El correo no trae ningún PDF")
+        if b.get("clave"):
+            with lock, con() as c:
+                c.execute("INSERT OR REPLACE INTO marcas VALUES (?,?,?,?,?,?)", (b["clave"], "hecho", "", "Factura pasada a Compras: " + ", ".join(hechos)[:400], u, time.time()))
+        return {"ok": True, "pdfs": hechos}
 
     def smtp_de(c):
         k = ajuste("smtp:" + c["usuario"])

@@ -525,3 +525,5 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .bj-prov input,.bj-prov select{padding:6px 8px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}.bj-prov .bp-l{flex-basis:100%;display:flex;flex-direction:column}.bj-prov .bp-sel{flex-basis:100%}
 .bj-tool{margin:6px 0}
 .cad-h{margin:6px 0 2px;font-size:13.5px}
+.sg-i{position:relative}.sg-xok{position:absolute;top:6px;right:8px;width:30px;height:30px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-size:15px;font-weight:700;cursor:pointer;line-height:1}
+.sg-xok:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}.sg-i .sg-c{padding-right:34px}

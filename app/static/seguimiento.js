@@ -53,7 +53,7 @@ function sgLista() {
   if (!l.length) { box.innerHTML = `<p class="empty">${SG.calculando ? 'Calculando…' : SG_T === 'P' ? 'Nada sin atender 👍' : 'Nada aquí'}</p>`; sgSel(); return; }
   box.innerHTML = l.map(i => { const m = i.marca;
     return `<div class="sg-i" data-k="${escH(i.clave)}"><label class="sg-ck"><input type="checkbox" data-k="${escH(i.clave)}"></label>
-      <div class="sg-c"><div class="sg-1"><span class="sg-cta-b" style="background:${sgCol(i.cuenta)}" title="Entró en esta cuenta">📥 ${escH(sgCta(i.cuenta))}</span>
+      <button class="sg-xok" data-a="rapido" title="Hecho: quitar de la lista">✕</button><div class="sg-c"><div class="sg-1"><span class="sg-cta-b" style="background:${sgCol(i.cuenta)}" title="Entró en esta cuenta">📥 ${escH(sgCta(i.cuenta))}</span>
         <b>${escH(i.cliente)}</b>${i.ficha ? '' : ' <span class="bdg">sin ficha en Odoo</span>'}
         <span class="bdg ${i.tipo === 'C' ? 'b-prov' : 'b-warn'}">${i.tipo === 'C' ? '🛒 pide material' : '💬 pide precio'}</span>
         ${i.reabierto ? '<span class="bdg b-bad">el cliente ha vuelto a escribir</span>' : ''}
@@ -61,7 +61,7 @@ function sgLista() {
         <div class="sg-2"><b>${escH(i.asunto || '(sin asunto)')}</b>${i.que ? ` — ${escH(i.que)}` : ''} <small class="muted">${escH(i.nombre && i.nombre !== i.de ? i.nombre + ' · ' : '')}${escH(i.de)}</small></div>
         ${m && m.nota ? `<div class="sg-nota">📝 ${escH(m.nota)}</div>` : ''}
         <div class="sg-3"><button class="lnk" data-a="ver">✉️ Ver correo</button><button class="lnk" data-a="resp">↩️ Responder</button>
-          <button class="lnk" data-a="pres">📝 Crear presupuesto o pedido</button><button class="lnk" data-a="rec">⏰ Recordar</button>
+          <button class="lnk" data-a="pres">📝 Crear presupuesto o pedido</button>${(i.pdfs || []).length ? `<button class="lnk" data-a="compras" title="${escH(i.pdfs.map(p => p.nombre).join(', '))}">🧾 Factura a Compras (${i.pdfs.length} PDF)</button>` : ''}<button class="lnk" data-a="rec">⏰ Recordar</button>
           ${SG_T === 'X' ? '<button class="lnk" data-a="abierto">↩ Sacar de archivados</button>' : '<button class="lnk del" data-a="archivado">🗄️ Archivar</button>'}</div>
         <div class="sg-x"></div></div></div>`; }).join('');
   box.querySelectorAll('.sg-i').forEach(d => {
@@ -133,6 +133,21 @@ async function sgAccion(it, a, d) {
   if (a === 'ver') { if (x.dataset.v === 'ver' && x.innerHTML) { x.innerHTML = ''; x.dataset.v = ''; return; } x.dataset.v = 'ver'; return sgVer(it, x); }
   if (a === 'resp') { if (x.dataset.v === 'resp' && x.innerHTML) { x.innerHTML = ''; x.dataset.v = ''; return; } x.dataset.v = 'resp'; return sgResp(it, x); }
   if (a === 'pres') return sgPres(it);
+  if (a === 'rapido') {   // hecho sin abrir: se quita al momento y se guarda por detrás
+    d.style.opacity = .3; d.style.pointerEvents = 'none';
+    try { await jpost('/api/seg/marca', { claves: [it.clave], estado: 'hecho' }); d.remove(); SG.items = SG.items.filter(x => x.clave !== it.clave); SG.avisos = SG.avisos.filter(x => x.clave !== it.clave); sgTabs(); sgBadge(); }
+    catch (e) { d.style.opacity = 1; d.style.pointerEvents = ''; alertBox(e.message); }
+    return;
+  }
+  if (a === 'compras') {
+    if (!confirm(`¿Pasar ${it.pdfs.length > 1 ? 'los ' + it.pdfs.length + ' PDF' : 'el PDF ' + it.pdfs[0].nombre} a Compras como factura de proveedor? El correo queda como hecho.`)) return;
+    d.style.opacity = .3;
+    try { const r = await jpost('/api/seg/a_compras', { clave: it.clave, mids: [...new Set(it.pdfs.map(p => p.mid))] });
+      d.remove(); SG.items = SG.items.filter(x => x.clave !== it.clave); sgTabs(); sgBadge();
+      alertBox(`✓ ${r.pdfs.length} PDF en Compras: se están leyendo y saldrán en su bandeja.`);
+    } catch (e) { d.style.opacity = 1; alertBox(e.message); }
+    return;
+  }
   if (a === 'rec') {
     x.dataset.v = 'rec';
     x.innerHTML = `<div class="sg-rec"><label>Recordar el <input type="date" value="${sgHoy(3)}"></label>${[1, 3, 7, 15].map(n => `<button class="lnk" data-n="${n}">+${n} d</button>`).join('')}
