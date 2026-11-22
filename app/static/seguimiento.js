@@ -155,6 +155,14 @@ document.querySelectorAll('#sg-sel [data-bulk]').forEach(b => b.onclick = async 
   if (!confirm(`¿Archivar ${ks.length} correos?`)) return;
   try { await sgMarca(ks, b.dataset.bulk); } catch (e) { alertBox(e.message); }
 });
+async function sgArchAntes() {
+  const f = prompt('Archivar de golpe todo lo de esta lista ANTERIOR a la fecha (AAAA-MM-DD). Si un cliente vuelve a escribir sobre algo archivado, vuelve a salir.', sgHoy(-30));
+  if (!f || !/^\d{4}-\d{2}-\d{2}$/.test(f.trim())) return;
+  const ks = sgDe(SG_T).filter(i => i.fecha < f.trim()).map(i => i.clave);
+  if (!ks.length) return alertBox('No hay nada anterior a esa fecha en esta lista');
+  if (!confirm(`¿Archivar ${ks.length} correos anteriores al ${fdate(f.trim())}?`)) return;
+  try { await sgMarca(ks, 'archivado'); } catch (e) { alertBox(e.message); }
+}
 $('#sg-leer').onclick = async () => {
   const d = prompt('¿Desde qué fecha leo el correo? (AAAA-MM-DD). Lee entrada y enviados de todas las cuentas; la primera vez tarda un rato.', SG.desde || '2026-01-01');
   if (!d) return;
