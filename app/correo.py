@@ -98,7 +98,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         clase = d.get("clase") if d.get("clase") in CLASES else "otro"
         nota = d.get("que_hacer") or ""
         # facturas / albaranes de proveedor en PDF -> Bandeja de Compras
-        if clase in ("factura_proveedor", "albaran_proveedor") and getattr(app.state, "compras_alta", None):
+        # ahora se pasan a mano con el botón 🧾 de la lista (así se decide qué entra en Compras)
+        if False and clase in ("factura_proveedor", "albaran_proveedor") and getattr(app.state, "compras_alta", None):
             pasados = 0
             for a in adj:
                 if a.get("doc_id") or not a["nombre"].lower().endswith(".pdf"):
@@ -340,6 +341,34 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
             for i in ids:
                 c.execute("UPDATE mensajes SET estado=?, usuario=?, recordar=? WHERE id=?", (e, u, rec, i))
         return {"ok": True, "n": len(ids)}
+
+    @app.post("/api/correo/{mid}/a_compras")
+    async def a_compras(mid: str, request: Request):
+        """Los PDF del correo (factura o albarán de proveedor) pasan a la Bandeja de Compras y el correo queda hecho."""
+        u = current_user(request)
+        alta = getattr(app.state, "compras_alta", None)
+        if not alta:
+            raise HTTPException(400, "El módulo de Compras no está disponible")
+        with con() as c:
+            r = c.execute("SELECT clase, adjuntos FROM mensajes WHERE id=?", (mid,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        adj = json.loads(r["adjuntos"] or "[]")
+        tipo = "albaran" if r["clase"] == "albaran_proveedor" else "factura"
+        pasados, ya = [], 0
+        for a in adj:
+            if not (a.get("nombre") or "").lower().endswith(".pdf"):
+                continue
+            if a.get("doc_id"):
+                ya += 1
+                continue
+            a["doc_id"] = alta(a["nombre"], (carpeta / a["fichero"]).read_bytes(), tipo, DISTRI, u)
+            pasados.append(a["nombre"])
+        if not pasados and not ya:
+            raise HTTPException(400, "Este correo no trae ningún PDF")
+        with lock, con() as c:
+            c.execute("UPDATE mensajes SET adjuntos=?, estado='hecho', usuario=? WHERE id=?", (json.dumps(adj, ensure_ascii=False), u, mid))
+        return {"ok": True, "pasados": pasados, "ya": ya, "tipo": tipo}
 
     @app.post("/api/correo/{mid}/clase")
     async def cambiar_clase(mid: str, request: Request):

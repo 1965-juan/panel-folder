@@ -20,16 +20,23 @@ function maLista() {
   const l = MA_L.filter(m => (!q || (m.nombre + m.de + m.asunto + (m.resumen || '')).toLowerCase().includes(q)) && (!MA_F || (MA_F === 'recordar' ? m.estado === 'recordar' : m.clase === MA_F)));
   $('#ma-list').innerHTML = l.length ? l.map(m => { const [ct, cc] = MA_CLASE[m.clase] || ['⏳ Clasificando', 'b-warn']; const [ut, uc] = MA_URG[m.urgencia] || ['', ''];
     const act = MA_E !== 'hechos';
-    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1">${act ? `<input type="checkbox" class="ma-ck" ${MA_MK.has(String(m.id)) ? 'checked' : ''} title="Marcar">` : ''}<b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${act ? '<button class="ma-r" title="Recordar otro día">⏰</button><button class="ma-x" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
+    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1">${act ? `<input type="checkbox" class="ma-ck" ${MA_MK.has(String(m.id)) ? 'checked' : ''} title="Marcar">` : ''}<b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${act ? (m.adjuntos.some(a => /\.pdf$/i.test(a.nombre)) && ['factura_proveedor', 'albaran_proveedor'].includes(m.clase) ? '<button class="ma-bc" title="Pasar el PDF a Compras y dar por hecho">🧾</button>' : '') + '<button class="ma-brec" title="Recordar otro día">⏰</button><button class="ma-bx" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
       <div class="ma-i2">${escH(m.asunto || '(sin asunto)')}</div><div class="ma-i3">${m.estado === 'clasificando' ? '<span class="bdg b-warn">⏳ Leyendo</span>' : `<span class="bdg ${cc} ma-cl" title="Cambiar el tipo">${ct}</span>`}
       ${ut && m.urgencia !== 'media' ? `<span class="bdg ${uc}">${ut}</span>` : ''}${m.adjuntos.length ? `<span class="bdg">📎 ${m.adjuntos.length}</span>` : ''}${m.pedido ? `<span class="bdg b-ok">${escH(m.pedido)}</span>` : ''}${m.estado === 'recordar' && m.recordar ? `<span class="bdg b-warn">⏰ ${fdate(m.recordar)}</span>` : ''}</div></div>`; }).join('')
     : `<p class="empty">${MA_E === 'pendientes' ? 'No hay correos por hacer. Llegan solos desde n8n.' : 'Nada todavía'}</p>`;
   $('#ma-list').querySelectorAll('.ma-i').forEach(d => d.onclick = () => maVer(d.dataset.id));
   $('#ma-list').querySelectorAll('.ma-cl').forEach(x => x.onclick = ev => { ev.stopPropagation(); maClase(x.closest('.ma-i').dataset.id, x); });
   $('#ma-list').querySelectorAll('.ma-ck').forEach(x => { x.onclick = ev => ev.stopPropagation(); x.onchange = () => { const id = x.closest('.ma-i').dataset.id; x.checked ? MA_MK.add(id) : MA_MK.delete(id); maBarra(); }; });
-  $('#ma-list').querySelectorAll('.ma-r').forEach(x => x.onclick = ev => { ev.stopPropagation(); maRecordar([x.closest('.ma-i').dataset.id], x); });
+  $('#ma-list').querySelectorAll('.ma-brec').forEach(x => x.onclick = ev => { ev.stopPropagation(); maRecordar([x.closest('.ma-i').dataset.id], x); });
   maBarra();
-  $('#ma-list').querySelectorAll('.ma-x').forEach(x => x.onclick = async ev => {   // hecho sin abrirlo
+  $('#ma-list').querySelectorAll('.ma-bc').forEach(x => x.onclick = async ev => {   // factura/albarán de proveedor -> Compras
+    ev.stopPropagation(); const d = x.closest('.ma-i'), id = d.dataset.id;
+    d.style.opacity = .3; d.style.pointerEvents = 'none';
+    try { const r = await jpost(`/api/correo/${id}/a_compras`, {}); MA_L = MA_L.filter(m => String(m.id) !== String(id)); d.remove();
+      if (!r.pasados.length) alertBox('Ese PDF ya estaba en Compras: el correo queda como hecho'); }
+    catch (e) { d.style.opacity = 1; d.style.pointerEvents = ''; alertBox(e.message); }
+  });
+  $('#ma-list').querySelectorAll('.ma-bx').forEach(x => x.onclick = async ev => {   // hecho sin abrirlo
     ev.stopPropagation(); const d = x.closest('.ma-i'), id = d.dataset.id;
     d.style.opacity = .3; d.style.pointerEvents = 'none';
     try { await jpost(`/api/correo/${id}/estado`, { estado: 'hecho' }); MA_L = MA_L.filter(m => String(m.id) !== String(id)); d.remove();

@@ -527,15 +527,15 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .cad-h{margin:6px 0 2px;font-size:13.5px}
 .sg-i{position:relative}.sg-xok{position:absolute;top:6px;right:8px;width:30px;height:30px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-size:15px;font-weight:700;cursor:pointer;line-height:1}
 .sg-xok:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}.sg-i .sg-c{padding-right:34px}
-.ma-i1{align-items:center}.ma-x{margin-left:6px;flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-weight:700;cursor:pointer;line-height:1}
-.ma-x:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}
+.ma-i1{align-items:center}.ma-bx{margin-left:6px;flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #d6cfe6;background:#fff;color:#4B2A91;font-weight:700;cursor:pointer;line-height:1}
+.ma-bx:hover{background:#4B2A91;color:#fff;border-color:#4B2A91}
 .ma-i1 small{margin-left:auto}
-.ma-ck{flex:none;margin:0 2px 0 0}.ma-r{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #f0d9b5;background:#fff;cursor:pointer;line-height:1;font-size:12px}
-.ma-r:hover{background:#fff3df}.ma-i{position:relative}
+.ma-ck{flex:none;margin:0 2px 0 0}.ma-brec,.ma-bc{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #f0d9b5;background:#fff;cursor:pointer;line-height:1;font-size:12px}
+.ma-brec:hover,.ma-bc:hover{background:#fff3df}.ma-i{position:relative}
 .ma-pop{position:absolute;right:6px;top:36px;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;max-width:290px}
 .ma-pop input{padding:4px 6px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}
 .ma-bar{display:flex;gap:6px;align-items:center;background:#f1edf8;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:13px}.ma-bar[hidden]{display:none}
 .ma-chips{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}.ma-chips button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer}
 .ma-chips button.on{background:#4B2A91;color:#fff;border-color:#4B2A91}.ma-cl{cursor:pointer}.ma-i3{position:relative}
-.ma-i1 b{flex:1 1 auto;min-width:60px}.ma-i1 small{margin-left:0;flex:none}.ma-i1 .ma-r,.ma-i1 .ma-x{width:22px;height:22px;font-size:11px}
+.ma-i1 b{flex:1 1 auto;min-width:60px}.ma-i1 small{margin-left:0;flex:none}.ma-i1 .ma-brec,.ma-i1 .ma-bx,.ma-i1 .ma-bc{width:22px;height:22px;font-size:11px;padding:0}
 .ma-i1 .ma-ck{width:16px!important;min-width:0;padding:0;margin:0 4px 0 0;flex:none}
