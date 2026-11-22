@@ -394,21 +394,36 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
                 EST["clasificados"] = len(hechos)
             lista = [f for f in lista if f["id"] not in hechos]
         EST["fase"] = "Clasificando con Claude"
-        base = EST["clasificados"]
-        for i in range(0, len(lista), 12):
-            lote = lista[i:i + 12]
+        from concurrent.futures import ThreadPoolExecutor
+        lotes = [lista[i:i + 12] for i in range(0, len(lista), 12)]
+        malos = [0]
+
+        def uno(lote):
+            for intento in range(3):
+                try:
+                    res = clasificar_lote(lote)
+                    with lock, con() as c:
+                        c.executemany("UPDATE hist SET clase=?, cli=?, ref=?, que=? WHERE id=?", res)
+                    EST["clasificados"] += len(lote)
+                    return
+                except Exception as e:
+                    EST["error"] = str(e)[:200]
+                    if "credit balance" in str(e):
+                        malos[0] = 99
+                        return
+                    time.sleep(8 * (intento + 1))
+            malos[0] += 1
+
+        # de 4 en 4 a la vez, y cada 40 lotes se recalcula la lista para que vayan saliendo
+        for i in range(0, len(lotes), 40):
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                list(ex.map(uno, lotes[i:i + 40]))
+            if malos[0] > 20:
+                raise RuntimeError(EST["error"] or "Demasiados fallos al clasificar")
             try:
-                res = clasificar_lote(lote)
-            except Exception as e:
-                fallos += 1
-                EST["error"] = str(e)[:200]
-                if fallos > 5:
-                    raise
-                time.sleep(10)
-                continue
-            with lock, con() as c:
-                c.executemany("UPDATE hist SET clase=?, cli=?, ref=?, que=? WHERE id=?", res)
-            EST["clasificados"] = base + i + len(lote)
+                calcular()
+            except Exception:
+                pass
 
     def proceso(desde):
         if EST["leyendo"]:
