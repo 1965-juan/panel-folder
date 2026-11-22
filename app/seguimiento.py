@@ -731,3 +731,86 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
         return [{"enviado": bool(f["enviado"]), "de": f["de"], "nombre": f["nombre"], "para": f["para"], "asunto": f["asunto"],
                  "fecha": dt.datetime.fromtimestamp(f["ts"]).strftime("%d/%m/%Y %H:%M"), "clase": f["clase"], "que": f["que"],
                  "texto": (f["texto"] or "")[:3000], "adjuntos": json.loads(f["adjuntos"] or "[]"), "cuenta": f["cuenta"]} for f in g]
+
+    # ---------------- cuentas de correo desde el panel (sin tocar el NAS) ----------------
+    def mx_de(dom):
+        try:
+            r = httpx.get("https://dns.google/resolve", params={"name": dom, "type": "MX"}, timeout=10).json()
+            return " ".join(a.get("data", "") for a in r.get("Answer", [])).lower()
+        except Exception:
+            return ""
+
+    def servidores_para(correo):
+        dom = dominio(correo)
+        mx = mx_de(dom)
+        if "ionos" in mx or "1and1" in mx or "kundenserver" in mx:
+            return ["imap.ionos.es"], "IONOS"
+        if "securemail.pro" in mx or "nominalia" in mx:
+            return ["imap.securemail.pro", "pop.securemail.pro"], "Nominalia"
+        if "google" in mx:
+            return ["imap.gmail.com"], "Google"
+        if "outlook" in mx or "office365" in mx:
+            return ["outlook.office365.com"], "Microsoft"
+        return [f"imap.{dom}", f"mail.{dom}"], mx.split()[-1].rstrip(".") if mx else "desconocido"
+
+    def probar(correo, clave, servidor):
+        M = imaplib.IMAP4_SSL(servidor, 993, timeout=25)
+        try:
+            M.login(correo, clave)
+            typ, d = M.select("INBOX", readonly=True)
+            return int((d or [b"0"])[0] or 0)
+        finally:
+            try:
+                M.logout()
+            except Exception:
+                pass
+
+    def escribir_cuenta(correo, clave, servidor, quitar=False):
+        lineas = cuentas_f.read_text(encoding="utf-8", errors="ignore").splitlines() if cuentas_f.exists() else [
+            "# Cuentas de correo que lee el Panel Folder (una por línea). Formato:", "# correo;contraseña;servidor IMAP"]
+        lineas = [l for l in lineas if not (l.strip() and not l.strip().startswith("#") and l.split(";")[0].strip().lower() == correo)]
+        if not quitar:
+            lineas.append(f"{correo};{clave};{servidor}")
+        cuentas_f.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+        try:
+            os.chmod(cuentas_f, 0o600)
+        except Exception:
+            pass
+
+    @app.get("/api/seg/cuentas")
+    def seg_cuentas(request: Request):
+        solo_admin(request)
+        return [{"correo": c["usuario"], "servidor": c["servidor"]} for c in leer_cuentas()]
+
+    @app.post("/api/seg/cuentas")
+    async def seg_cuenta_nueva(request: Request):
+        """Juan escribe la contraseña en el panel; se prueba contra el servidor y se guarda en correo_cuentas.txt del NAS. Nunca se devuelve."""
+        solo_admin(request)
+        b = await request.json()
+        correo = (b.get("correo") or "").strip().lower()
+        clave = b.get("clave") or ""
+        if not re.fullmatch(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+", correo) or not clave or ";" in clave or "\n" in clave:
+            raise HTTPException(400, "Revisa el correo y la contraseña (la contraseña no puede llevar punto y coma)")
+        lista = [b["servidor"].strip()] if (b.get("servidor") or "").strip() else servidores_para(correo)[0]
+        proveedor = "" if (b.get("servidor") or "").strip() else servidores_para(correo)[1]
+        errores = []
+        for srv in lista:
+            try:
+                n = probar(correo, clave, srv)
+            except imaplib.IMAP4.error as e:
+                errores.append(f"{srv}: la contraseña no entra ({str(e)[:80]})")
+                continue
+            except Exception as e:
+                errores.append(f"{srv}: no responde ({str(e)[:60]})")
+                continue
+            escribir_cuenta(correo, clave, srv)
+            return {"ok": True, "correo": correo, "servidor": srv, "proveedor": proveedor, "bandeja": n}
+        raise HTTPException(400, f"No se ha podido entrar ({proveedor or 'servidor indicado'}). " + " · ".join(errores))
+
+    @app.post("/api/seg/cuentas/quitar")
+    async def seg_cuenta_quitar(request: Request):
+        solo_admin(request)
+        b = await request.json()
+        correo = (b.get("correo") or "").strip().lower()
+        escribir_cuenta(correo, "", "", quitar=True)
+        return {"ok": True}

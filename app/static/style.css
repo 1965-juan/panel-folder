@@ -513,3 +513,6 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .sg-m{border-left:3px solid #d6cfe6;padding:6px 10px;margin-top:8px;font-size:13px}.sg-m.env{border-left-color:var(--orange);background:#fffaf4}.sg-t{margin-top:4px;max-height:260px;overflow:auto}
 .sg-rec{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}.sg-rec input{padding:5px 7px;border:1.5px solid #cfc9bd;border-radius:7px;font:inherit}.sg-rec .sg-nt{flex:1;min-width:200px}
 .sg-sel[hidden]{display:none}
+.sg-ctas{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}.sg-ctas h3{margin:0 0 8px}
+.sg-ctas form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}.sg-ctas input{padding:7px 9px;border:1.5px solid #cfc9bd;border-radius:8px;font:inherit;min-width:220px}
+.sg-cta{padding:4px 0}.ok-t{color:#145c37;font-weight:600}

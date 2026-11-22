@@ -296,7 +296,14 @@
   </section>
 
   <section id="v-sg" hidden>
-    <div class="sg-top"><div id="sg-est" class="muted"></div><div class="sg-acc"><button class="lnk" id="sg-rec">↻ Recalcular</button><button class="ac-go" id="sg-leer">📥 Leer el correo desde…</button></div></div>
+    <div class="sg-top"><div id="sg-est" class="muted"></div><div class="sg-acc"><button class="lnk" id="sg-cbtn">✉️ Cuentas de correo</button><button class="lnk" id="sg-rec">↻ Recalcular</button><button class="ac-go" id="sg-leer">📥 Leer el correo desde…</button></div></div>
+    <div id="sg-ctas" class="sg-ctas" hidden><h3>✉️ Cuentas de correo que lee el panel</h3><div id="sg-cl"></div>
+      <form id="sg-cf" autocomplete="off"><input id="sg-cm" type="email" list="sg-dl" placeholder="correo, p. ej. info@…" required>
+        <input id="sg-cp" type="password" autocomplete="new-password" placeholder="contraseña de ese correo" required>
+        <details><summary class="muted">servidor (solo si falla)</summary><input id="sg-cs" placeholder="lo busca solo; ej. imap.ionos.es"></details>
+        <button class="ac-go">Probar y guardar</button><span id="sg-cr" class="muted"></span></form>
+      <datalist id="sg-dl"></datalist>
+      <p class="muted">La contraseña la escribes tú aquí; el panel prueba a entrar y, si entra, la guarda en el NAS. No se vuelve a enseñar en ningún sitio.</p></div>
     <div class="wa-tabs sg-tabs" id="sg-tabs"></div>
     <div class="sg-bar"><input id="sg-q" type="search" placeholder="Buscar cliente, asunto, pedido…"><label><input type="checkbox" id="sg-cont"> ocultar los ya contestados por correo</label>
       <label><input type="checkbox" id="sg-dorm"> ver los que tienen recordatorio más adelante</label>

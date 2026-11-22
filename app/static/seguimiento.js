@@ -13,12 +13,13 @@ async function sgOpen(recalcular) {
   try { SG = await api('/api/seg' + (recalcular ? '?recalcular=1' : '')); } catch (e) { $('#sg-l').innerHTML = `<p class="err">${escH(e.message)}</p>`; return; }
   if (!sgOpen.ya && SG.items.length) { sgOpen.ya = true; if (!sgDe(SG_T).length) { const t = SG_TABS.find(([k]) => sgDe(k).length); if (t) SG_T = t[0]; } }
   sgEstado(); sgTabs(); sgLista(); sgBadge();
+  if (!SG.cuentas.length && $('#sg-ctas').hidden) { $('#sg-ctas').hidden = false; sgCuentas(); }
   if ((SG.calculando || SG.lectura.leyendo) && !$('#v-sg').hidden) SG_TM = setTimeout(() => sgOpen(), 6000);
 }
 function sgEstado() {
   const L = SG.lectura, e = $('#sg-est');
   let h = '';
-  if (!SG.cuentas.length) h = `<p class="pc-aviso">Para cruzar el correo hay que poner las cuentas en el archivo <b>correo_cuentas.txt</b> de la carpeta de datos del panel en el NAS (una por línea: <code>correo;contraseña;servidor IMAP</code>). Mientras tanto aquí sale lo que dice Odoo: presupuestos sin respuesta, pedidos sin servir y servido sin facturar.</p>`;
+  if (!SG.cuentas.length) h = `<p class="pc-aviso">Para cruzar el correo añade las cuentas aquí abajo, en «Cuentas de correo». Mientras tanto aquí sale lo que dice Odoo: presupuestos sin respuesta, pedidos sin servir y servido sin facturar.</p>`;
   else h = `<b>${SG.correos.toLocaleString('es-ES')}</b> correos leídos de ${SG.cuentas.length} cuentas${SG.desde ? ' desde el ' + fdate(SG.desde) : ''}`;
   if (L.leyendo) {
     const c = Object.entries(L.cuentas).map(([k, v]) => v.error ? `🔴 ${escH(k)}: ${escH(v.error)}` : `${escH(k)} ${v.leidos}/${v.total}`).join(' · ');
@@ -106,4 +107,24 @@ $('#sg-leer').onclick = async () => {
   const d = prompt('¿Desde qué fecha leo el correo? (AAAA-MM-DD). Lee entrada y enviados de todas las cuentas; la primera vez tarda un rato.', SG.desde || '2026-01-01');
   if (!d) return;
   try { await jpost('/api/seg/leer', { desde: d }); sgOpen(); } catch (e) { alertBox(e.message); }
+};
+/* cuentas de correo */
+const SG_SPARK = ['foldercastellon.es', 'regalosfolder.es', 'distripluslevante.es', 'foldercs.es'].map(d => 'info' + String.fromCharCode(64) + d);
+async function sgCuentas() {
+  const L = await api('/api/seg/cuentas').catch(() => []);
+  $('#sg-cl').innerHTML = L.length ? L.map(c => `<div class="sg-cta">🟢 <b>${escH(c.correo)}</b> <span class="muted">${escH(c.servidor)}</span> <button class="lnk del" data-q="${escH(c.correo)}">quitar</button></div>`).join('')
+    : '<p class="muted">Todavía no hay ninguna. Añádelas una a una:</p>';
+  const faltan = SG_SPARK.filter(x => !L.some(c => c.correo === x));
+  $('#sg-dl').innerHTML = faltan.map(x => `<option value="${x}">`).join('');
+  if (faltan.length && !$('#sg-cm').value) $('#sg-cm').value = faltan[0];
+  $('#sg-cl').querySelectorAll('[data-q]').forEach(b => b.onclick = async () => { if (!confirm('¿Dejar de leer ' + b.dataset.q + '?')) return; await jpost('/api/seg/cuentas/quitar', { correo: b.dataset.q }); sgCuentas(); });
+  return L;
+}
+$('#sg-cbtn').onclick = () => { const p = $('#sg-ctas'); p.hidden = !p.hidden; if (!p.hidden) sgCuentas(); };
+$('#sg-cf').onsubmit = async e => {
+  e.preventDefault(); const r = $('#sg-cr'); r.textContent = '⏳ Probando…'; r.className = 'muted';
+  try { const x = await jpost('/api/seg/cuentas', { correo: $('#sg-cm').value, clave: $('#sg-cp').value, servidor: $('#sg-cs').value });
+    r.textContent = `✅ ${x.correo} conectada (${x.proveedor || x.servidor}, ${x.bandeja} correos en la bandeja)`; r.className = 'ok-t';
+    $('#sg-cp').value = ''; $('#sg-cm').value = ''; $('#sg-cs').value = ''; await sgCuentas(); sgOpen(); }
+  catch (er) { r.textContent = '❌ ' + er.message; r.className = 'err-t'; $('#sg-cp').value = ''; }
 };
