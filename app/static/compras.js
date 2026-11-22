@@ -67,7 +67,8 @@ async function coDocs() {
   const card = x => {
     const [pt, pc] = BJ_PASO[x.paso] || [x.paso, ''];
     const tipo = x.tipo === 'albaran' ? '📦 Albarán' : '🧾 Factura';
-    const btn = { cruzar: `<button class="ac-go" data-a="cruzar">🔗 Cruzar con sus albaranes</button>`,
+    const btn = { cruzar: `<button class="ac-go" data-a="cruzar">🔗 Cruzar con sus albaranes</button>`, validar: `<button class="lnk" data-a="validar">✓ Validar sin cruzar</button>`,
+      ocultar: `<button class="lnk" data-a="ocultar">🧹 Quitar de la lista</button>`,
       cuadrar: x.tipo === 'factura' ? `<button class="lnk" data-a="cuadrar">⇄ Sin albarán: crear el pedido desde el PDF</button>` : `<button class="ac-go" data-a="cuadrar">⇄ Cuadrar con pedido</button>`, cuadrar_factura: `<button class="lnk" data-a="cuadrar_factura">🔗 Enlazar con pedido existente</button>`,
       gasto: `<button class="lnk" data-a="gasto">🧾 Es un gasto (sin entrada)</button>`, recibido: `<button class="lnk" data-a="recibido">📦 Material recibido</button>`,
       ok: `<button class="ac-go" data-a="ok">✓ OK, contabilizar</button>`, quitar_marca: `<button class="lnk" data-a="quitar_marca">quitar marca</button>`,
@@ -87,12 +88,15 @@ async function coDocs() {
   };
   $('#co-docs').innerHTML = pend.length ? pend.map(card).join('') : '<p class="empty">No hay nada pendiente. Arrastra arriba los PDF de albaranes o facturas.</p>';
   $('#bj-nfin').textContent = fin.length; $('#bj-fin-l').innerHTML = fin.map(card).join('');
+  api('/api/compras/corte').then(c => { const t = $('#bj-corte-t'); if (t) t.textContent = c.fecha ? `Se ocultan los anteriores al ${coDate(c.fecha)}${c.ocultos ? ' y ' + c.ocultos + ' quitados a mano' : ''}` : (c.ocultos ? c.ocultos + ' quitados a mano' : ''); }).catch(() => { });
   $('#bj-nesp').textContent = esp.length; $('#bj-esp-l').innerHTML = esp.length ? esp.map(card).join('') : '<p class="empty">Ninguno</p>';
   document.querySelectorAll('.bj-card [data-a]').forEach(b => b.onclick = async () => {
     const x = l.find(y => y.id === b.closest('.bj-card').dataset.id), a = b.dataset.a;
     try {
       if (a === 'cuadrar') return coPasar(x.id);
       if (a === 'cruzar') return coCruzar(x);
+      if (a === 'validar') { if (!confirm('¿Validar esta factura sin cruzarla con albaranes? Sale del panel y queda en los borradores de Odoo para Mayte.')) return; await jpost(`/api/compras/facturas/${x.odoo_id}/marcar`, { tipo: 'validada' }); return coDocs(); }
+      if (a === 'ocultar') { if (!confirm('¿Quitar este albarán de la lista de espera de factura? (no toca Odoo)')) return; await jpost('/api/compras/pedidos/ocultar', { pedido_ids: [x.compra.pedido_id] }); return coDocs(); }
       if (a === 'auto') { b.disabled = true; b.textContent = 'Buscando y cuadrando…'; await jpost(`/api/compras/docs/${x.id}/auto`, {}); setTimeout(coDocs, 1500); return; }
       if (a === 'prov') { if (!confirm(`¿Crear en Odoo el proveedor «${x.proveedor}» con el CIF de la factura?`)) return; const r = await jpost(`/api/compras/docs/${x.id}/proveedor_nuevo`, {}); alertBox(`Proveedor ${r.nombre} listo. Vuelvo a cuadrar el documento…`); setTimeout(coDocs, 8000); return coDocs(); }
       if (a === 'informe') return window.open('/compras/informe/' + x.id, '_blank');
@@ -737,13 +741,17 @@ async function coCruzar(x) {
       <iframe class="co-pdf" src="/api/compras/pdf/${x.id}#view=FitH"></iframe>
       ${A.length ? `<table class="co-t pc-t"><thead><tr><th></th><th>Albarán</th><th>Pedido</th><th>Fecha</th><th>Empresa del pedido</th><th class="num">Sin facturar</th></tr></thead><tbody>
         ${A.map(a => `<tr><td><input type="checkbox" data-id="${a.id}" ${sel.has(a.id) ? 'checked' : ''}></td><td><b>${escH(a.albaran || '—')}</b></td><td>${escH(a.pedido)}</td><td>${coDate(a.fecha)}</td>
-          <td>${escH(a.empresa)}</td><td class="num">${eur(a.base)}</td></tr>`).join('')}</tbody></table>`
+          <td>${escH(a.empresa)}</td><td class="num">${eur(a.base)}</td><td><a href="#" class="lnk" data-oc="${a.id}" title="Ya facturado o atrasado: que no salga más">quitar</a></td></tr>`).join('')}</tbody></table>`
         : '<p class="pc-aviso">Este proveedor no tiene albaranes recibidos sin facturar. Si es un gasto, márcala como gasto; si trae material sin albarán, usa «Sin albarán: crear el pedido desde el PDF».</p>'}
       <p>Marcados: <b>${eur(suma)}</b> · factura: <b>${eur(F.base)}</b> ${sel.size ? (Math.abs(dif) <= 0.05 ? '<span class="ok-t">✓ cuadra</span>' : `<span class="err-t" style="display:inline">diferencia ${eur(dif)}</span>`) : ''}</p>
       ${emps.length > 1 ? '<p class="pc-aviso">Has marcado albaranes de pedidos de varias empresas.</p>' : ''}
       <label class="pe-l">Se factura en <select id="cz-emp">${d.empresas.map(e => `<option value="${e.id}" ${e.id === emp ? 'selected' : ''}>${escH(e.nombre)}</option>`).join('')}</select></label>
       <p class="muted">${emp !== F.empresa_id ? `La factura está ahora en ${escH(F.empresa)}: se hará el borrador en la empresa elegida (con su PDF) y se anulará el de ${escH(F.empresa)}. ` : ''}Al cruzar, la factura sale del panel y queda en los borradores de Odoo para que Mayte la valide.</p>
-      <button class="ac-go" id="cz-go" ${sel.size ? '' : 'disabled'}>🔗 Cruzar ${sel.size} albarán(es)</button> <button class="lnk" id="cz-gasto">🧾 Es un gasto (sin material)</button><div id="cz-res"></div>`;
+      <button class="ac-go" id="cz-go" ${sel.size ? '' : 'disabled'}>🔗 Cruzar ${sel.size} albarán(es)</button> <button class="lnk" id="cz-val">✓ Validar sin cruzar</button> <button class="lnk" id="cz-gasto">🧾 Es un gasto (sin material)</button><div id="cz-res"></div>`;
+    $('#cz-val').onclick = async () => { if (!confirm('¿Validar la factura sin cruzarla? Sale del panel y queda en los borradores de Odoo para Mayte.')) return;
+      await jpost(`/api/compras/facturas/${x.odoo_id}/marcar`, { tipo: 'validada' }); $('#co-drawer').hidden = true; coDocs(); };
+    db.querySelectorAll('[data-oc]').forEach(o => o.onclick = async ev => { ev.preventDefault(); await jpost('/api/compras/pedidos/ocultar', { pedido_ids: [+o.dataset.oc] });
+      const i = A.findIndex(a => a.id === +o.dataset.oc); if (i >= 0) A.splice(i, 1); sel.delete(+o.dataset.oc); pinta(); });
     db.querySelectorAll('input[data-id]').forEach(c => c.onchange = () => { c.checked ? sel.add(+c.dataset.id) : sel.delete(+c.dataset.id); pinta(); });
     $('#cz-emp').onchange = e => { emp = +e.target.value; pinta(); };
     $('#cz-gasto').onclick = async () => { if (!confirm('¿Marcar esta factura como gasto (no lleva material)?')) return;
@@ -759,4 +767,11 @@ async function coCruzar(x) {
     };
   };
   pinta();
+}
+
+async function coCorte() {
+  let c = {}; try { c = await api('/api/compras/corte'); } catch (_) { }
+  const f = prompt('Lo atrasado deja de salir para cruzar: albaranes y pedidos de compra ANTERIORES a esta fecha (AAAA-MM-DD). No toca nada en Odoo. Déjalo vacío para quitar el corte.', c.fecha || new Date().toISOString().slice(0, 10));
+  if (f === null) return;
+  try { await jpost('/api/compras/corte', { fecha: f.trim() }); coDocs(); } catch (e) { alertBox(e.message); }
 }

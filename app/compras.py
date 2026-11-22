@@ -35,6 +35,8 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             partner_id INTEGER, partner_nombre TEXT, concepto TEXT, importe REAL, dia INTEGER, activo INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS recurrentes_marcas (rid INTEGER, mes TEXT, nota TEXT, PRIMARY KEY (rid, mes));
         CREATE TABLE IF NOT EXISTS factura_marcas (move_id INTEGER PRIMARY KEY, tipo TEXT, usuario TEXT, cuando REAL, nota TEXT);
+        CREATE TABLE IF NOT EXISTS ajustes (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS po_ocultos (po_id INTEGER PRIMARY KEY, usuario TEXT, cuando REAL);
         """)
         try:
             c.execute("ALTER TABLE docs ADD COLUMN lectura TEXT")
@@ -1685,7 +1687,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         u, cids = ctx(request, "all")
         b = await request.json()
         tipo = b.get("tipo") or ""
-        if tipo not in ("", "gasto", "recibido"):
+        if tipo not in ("", "gasto", "recibido", "validada"):
             raise HTTPException(400, "Marca no válida")
         with lock, con() as c:
             if tipo:
@@ -1774,6 +1776,50 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
 
     EMP_NOMBRE = {1: "DISTRIPLUS", 4: "LOGIPAPER", 5: "INGRAF", 2: "FERMASA 2025", 3: "FERMASA INMUEBLES"}
 
+    def corte_y_ocultos():
+        with con() as c:
+            r = c.execute("SELECT v FROM ajustes WHERE k='corte_albaranes'").fetchone()
+            oc = {x["po_id"] for x in c.execute("SELECT po_id FROM po_ocultos").fetchall()}
+        return (r["v"] if r else ""), oc
+
+    def corte_ts(f):
+        try:
+            return dt.datetime.fromisoformat(f).timestamp()
+        except Exception:
+            return 0
+
+    @app.post("/api/compras/corte")
+    async def compras_corte(request: Request):
+        """{fecha}: los albaranes/pedidos anteriores a esa fecha dejan de salir para cruzar (lo atrasado). No toca Odoo. Vacío = quitar el corte."""
+        u, _ = ctx(request, "all")
+        b = await request.json()
+        f = (b.get("fecha") or "")[:10]
+        if f:
+            dt.date.fromisoformat(f)
+        with lock, con() as c:
+            c.execute("INSERT OR REPLACE INTO ajustes VALUES ('corte_albaranes', ?)", (f,))
+        return {"ok": True, "fecha": f}
+
+    @app.post("/api/compras/pedidos/ocultar")
+    async def pedidos_ocultar(request: Request):
+        """{pedido_ids, quitar?}: pedidos de compra que ya no se cruzan desde el panel (atrasados, ya facturados por otra vía…). No toca Odoo."""
+        u, _ = ctx(request, "all")
+        b = await request.json()
+        ids = [int(x) for x in b.get("pedido_ids") or [] if x]
+        with lock, con() as c:
+            for i in ids:
+                if b.get("quitar"):
+                    c.execute("DELETE FROM po_ocultos WHERE po_id=?", (i,))
+                else:
+                    c.execute("INSERT OR REPLACE INTO po_ocultos VALUES (?,?,?)", (i, u, time.time()))
+        return {"ok": True, "n": len(ids)}
+
+    @app.get("/api/compras/corte")
+    def compras_corte_ver(request: Request):
+        ctx(request, "all")
+        f, oc = corte_y_ocultos()
+        return {"fecha": f, "ocultos": len(oc)}
+
     @app.get("/api/compras/facturas/{mid}/cruce")
     def factura_cruce(mid: int, request: Request):
         """Albaranes recibidos y sin facturar del proveedor de la factura, en cualquier empresa, para marcar los que lleva."""
@@ -1797,7 +1843,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         ya.update(n.get("pedido_ids") or [n.get("pedido_id")])
                     except Exception:
                         pass
-            ps = [p for p in ps if p["id"] not in ya]
+            corte, ocultos = corte_y_ocultos()
+            ps = [p for p in ps if p["id"] not in ya and p["id"] not in ocultos and (not corte or (p["date_order"] or "")[:10] >= corte)]
             pls = odoo.search_read("purchase.order.line", [("order_id", "in", [p["id"] for p in ps]), ("display_type", "=", False)],
                                    ["order_id", "qty_received", "qty_invoiced", "price_unit", "discount", "product_qty"], company_ids=TODAS) if ps else []
             imp = {}
@@ -1908,7 +1955,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                 for pk in odoo.search_read("stock.picking", [("purchase_id", "in", po_ids), ("picking_type_code", "=", "incoming")], ["name", "state", "purchase_id"], company_ids=cids):
                     pick.setdefault(pk["purchase_id"][0], []).append(pk)
                 po_fact = {p["id"]: p["invoice_status"] for p in odoo.search_read("purchase.order", [("id", "in", po_ids)], ["invoice_status"], company_ids=cids)}
-            cruzados = set()   # pedidos cruzados con una factura de otra empresa (lo apunta el panel)
+            corte, ocultos = corte_y_ocultos()
+            cruzados = set(ocultos)   # pedidos cruzados con una factura de otra empresa (lo apunta el panel) u ocultados a mano
             for mk in marcas.values():
                 if mk["tipo"] == "pedido":
                     try:
@@ -1970,11 +2018,12 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                         suya_hecha = bool(suyas) and all(x["state"] in ("done", "cancel") for x in pk if x["name"] in suyas) and any(x["name"] in suyas for x in pk)
                         if (pk and not abiertas) or suya_hecha or d.get("recepcion"):
                             pid_ = d["compra"].get("pedido_id")
-                            facturado = d.get("factura_id") or pid_ in cruzados or po_fact.get(pid_) in ("invoiced", "no")
+                            facturado = d.get("factura_id") or pid_ in cruzados or po_fact.get(pid_) in ("invoiced", "no") or (corte and d["subido"] < corte_ts(corte))
                             if facturado:
                                 e.update(paso="terminado", texto=f"Cuadrado con {d['compra']['pedido']}, recibido y cruzado con su factura"
                                          + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
                             else:
+                                e["acciones"] = ["ocultar"]
                                 e.update(paso="sin_factura", texto=f"Entrada hecha ({d['compra']['pedido']}). Esperando la factura del proveedor para cruzarla"
                                          + (f" · lo que no vino sigue pendiente en {', '.join(abiertas)}" if abiertas else ""))
                         else:
@@ -2000,11 +2049,12 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                             pn, rec = pedido_de_marca(marca)
                             e.update(paso="terminado", texto=f"Cruzada con {pn}. En borradores de Odoo para que Mayte la valide", acciones=["quitar_marca"])
                         elif marca:
-                            e.update(paso="terminado", texto=("Gasto, sin material" if marca["tipo"] == "gasto" else "Material marcado como recibido") + f" ({marca['usuario']}). En borradores de Odoo para que Mayte la valide",
+                            e.update(paso="terminado", texto={"gasto": "Gasto, sin material", "validada": "Validada sin cruzar con albaranes"}.get(marca["tipo"], "Material marcado como recibido")
+                                     + f" ({marca['usuario']}). En borradores de Odoo para que Mayte la valide",
                                      acciones=["quitar_marca"])
                         elif not con_po:
-                            e.update(paso="pendiente", texto="Crúzala con sus albaranes (eliges en qué empresa se factura) o márcala como gasto si no lleva material",
-                                     acciones=["cruzar", "gasto", "cuadrar"])
+                            e.update(paso="pendiente", texto="Crúzala con sus albaranes (eliges en qué empresa se factura), márcala como gasto si no lleva material o valídala sin cruzar",
+                                     acciones=["cruzar", "gasto", "validar", "cuadrar"])
                         else:
                             e.update(paso="terminado", texto=f"Cruzada con {', '.join(pedidos)}. En borradores de Odoo para que Mayte la valide")
                         if _num(lec.get("total")) < 0 and m.get("move_type") == "in_invoice":
