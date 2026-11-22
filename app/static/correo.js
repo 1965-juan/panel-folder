@@ -18,11 +18,18 @@ function maLista() {
   const q = ($('#ma-q').value || '').toLowerCase();
   const l = MA_L.filter(m => !q || (m.nombre + m.de + m.asunto + (m.resumen || '')).toLowerCase().includes(q));
   $('#ma-list').innerHTML = l.length ? l.map(m => { const [ct, cc] = MA_CLASE[m.clase] || ['⏳ Clasificando', 'b-warn']; const [ut, uc] = MA_URG[m.urgencia] || ['', ''];
-    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1"><b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small></div>
+    return `<div class="ma-i ${m.id === MA_SEL ? 'on' : ''} u-${m.urgencia || ''}" data-id="${m.id}"><div class="ma-i1"><b>${escH(m.nombre || m.de)}</b><small>${hora(m.recibido)}</small>${MA_E === 'pendientes' ? '<button class="ma-x" title="Hecho: quitar de la lista">✕</button>' : ''}</div>
       <div class="ma-i2">${escH(m.asunto || '(sin asunto)')}</div><div class="ma-i3">${m.estado === 'clasificando' ? '<span class="bdg b-warn">⏳ Leyendo</span>' : `<span class="bdg ${cc}">${ct}</span>`}
       ${ut && m.urgencia !== 'media' ? `<span class="bdg ${uc}">${ut}</span>` : ''}${m.adjuntos.length ? `<span class="bdg">📎 ${m.adjuntos.length}</span>` : ''}${m.pedido ? `<span class="bdg b-ok">${escH(m.pedido)}</span>` : ''}</div></div>`; }).join('')
     : `<p class="empty">${MA_E === 'pendientes' ? 'No hay correos por hacer. Llegan solos desde n8n.' : 'Nada todavía'}</p>`;
   $('#ma-list').querySelectorAll('.ma-i').forEach(d => d.onclick = () => maVer(d.dataset.id));
+  $('#ma-list').querySelectorAll('.ma-x').forEach(x => x.onclick = async ev => {   // hecho sin abrirlo
+    ev.stopPropagation(); const d = x.closest('.ma-i'), id = d.dataset.id;
+    d.style.opacity = .3; d.style.pointerEvents = 'none';
+    try { await jpost(`/api/correo/${id}/estado`, { estado: 'hecho' }); MA_L = MA_L.filter(m => String(m.id) !== String(id)); d.remove();
+      if (String(MA_SEL) === String(id)) { MA_SEL = null; $('#ma-c').innerHTML = '<p class="empty">Elige un correo de la lista</p>'; } }
+    catch (e) { d.style.opacity = 1; d.style.pointerEvents = ''; alertBox(e.message); }
+  });
 }
 async function maVer(id) {
   MA_SEL = id; maLista();
