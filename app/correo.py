@@ -288,10 +288,13 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard):
         q = "SELECT id, cuenta, de, nombre, asunto, fecha, clase, urgencia, resumen, que_hacer, estado, pedido, recibido, adjuntos, recordar FROM mensajes"
         hoy = time.strftime("%Y-%m-%d")
         args = []
+        utiles = "('pedido','presupuesto','factura_proveedor','albaran_proveedor')"   # el resto (llamadas IA, cierres, avisos, publicidad…) no sale aquí
         if estado == "pendientes":   # por hacer + los recordatorios que ya tocan
-            q += " WHERE estado IN ('nuevo','clasificando') OR (estado='recordar' AND recordar<=?)"; args = [hoy]
+            q += f" WHERE (estado='clasificando' OR (estado='nuevo' AND clase IN {utiles}) OR (estado='recordar' AND recordar<=?))"; args = [hoy]
         elif estado == "recordar":
             q += " WHERE estado='recordar'"
+        elif estado == "otros":
+            q += f" WHERE estado='nuevo' AND (clase IS NULL OR clase NOT IN {utiles})"
         else:
             q += " WHERE estado NOT IN ('nuevo','clasificando','recordar')"
         with con() as c:
