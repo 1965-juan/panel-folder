@@ -158,9 +158,10 @@ async function inicio() {
   $('#lista').innerHTML = INI.recuentos.length ? INI.recuentos.map(r => `<div class="rc"><div class="t"><b>${escH(r.nombre)}</b>
       <small>${escH(r.ubic_nombre)} · ${r.refs} art. · ${num(r.uds)} uds · ${fecha(r.cuando)}</small></div>
       <span class="bdg ${ESTADO[r.estado][1]}">${ESTADO[r.estado][0]}</span>
-      <button class="big ${r.estado === 'abierto' ? '' : 'pu'}" style="width:auto;margin:0;padding:9px 12px" data-r="${r.id}" data-e="${r.estado}">${r.estado === 'abierto' ? 'Seguir' : 'Ver'}</button></div>`).join('')
+      <button class="big ${r.estado === 'abierto' ? '' : 'pu'}" style="width:auto;margin:0;padding:9px 12px" data-r="${r.id}" data-e="${r.estado}">${r.estado === 'abierto' ? 'Seguir' : 'Ver'}</button>${r.estado === 'abierto' && INI && INI.admin ? `<button class="big pu" style="width:auto;margin:0 0 0 6px;padding:9px 12px" data-v="${r.id}" title="Ver lo contado con su coste, sin tocar el recuento">💶 Ver</button>` : ''}</div>`).join('')
     : '<p class="muted">Todavía no hay recuentos.</p>';
   $('#lista').querySelectorAll('[data-r]').forEach(b => b.onclick = () => b.dataset.e === 'abierto' ? abrir(+b.dataset.r) : revisar(+b.dataset.r));
+  $('#lista').querySelectorAll('[data-v]').forEach(b => b.onclick = () => revisar(+b.dataset.v));
   // inventarios generales
   const IV = INI.inventarios || [];
   $('#ig-lista').innerHTML = IV.length ? IV.map(i => `<div class="rc"><div class="t"><b>${escH(i.nombre)}</b>
@@ -448,6 +449,14 @@ async function revisar(id) {
   const S = d.resumen, res = d.resultado;
   let h = `<div class="kp"><div><b>${S.refs}</b><span class="muted">contados</span></div><div><b>${S.con_dif}</b><span class="muted">con diferencia</span></div><div><b>${eur(S.valor)}</b><span class="muted">valor dif.</span></div></div>`;
   if (res) h += `<div class="card"><b>Resultado en Odoo:</b> ${res.ajustados} ajustados · ${res.sin_cambio} ya cuadraban${res.errores.length ? `<div class="err">${res.errores.map(x => `${escH(x.producto)}: ${escH(x.error)}`).join('<br>')}</div>` : ''}</div>`;
+  if (d.admin) {   // con precio de coste de Odoo (solo el administrador)
+    h += `<div class="kp"><div><b>${eur(S.valor_contado)}</b><span class="muted">contado a coste</span></div><div><b>${eur(S.pvp_contado)}</b><span class="muted">contado a PVP</span></div><div><b>${S.sin_coste}</b><span class="muted">sin coste en Odoo</span></div></div>
+      <div class="card"><h2>💶 Artículos con su coste en Odoo</h2><div style="overflow-x:auto"><table><thead><tr><th>Artículo</th><th class="n">Contado</th><th class="n">Coste</th><th class="n">Total coste</th><th class="n">PVP</th></tr></thead><tbody>
+      ${d.lineas.slice().sort((a, b) => b.valor_contado - a.valor_contado).map(l => `<tr><td>${escH(l.nombre)}${l.ref ? `<br><small class="muted">${escH(l.ref)}</small>` : ''}</td>
+        <td class="n">${num(l.cant)}</td><td class="n ${l.coste ? '' : 'neg'}">${l.coste ? eur(l.coste) : 'sin coste'}</td><td class="n"><b>${eur(l.valor_contado)}</b></td><td class="n">${l.pvp ? eur(l.pvp) : '—'}</td></tr>`).join('')}
+      <tr><td><b>Total</b></td><td class="n"><b>${num(d.lineas.reduce((a, l) => a + l.cant, 0))}</b></td><td></td><td class="n"><b>${eur(S.valor_contado)}</b></td><td class="n">${eur(S.pvp_contado)}</td></tr>
+      </tbody></table></div></div>`;
+  }
   const solo = localStorage.getItem('inv-solodif') !== '0';
   h += `<div class="card"><label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" id="r-sd" style="width:auto" ${solo ? 'checked' : ''}> Solo los que tienen diferencia</label>
     <table><thead><tr><th>Artículo</th><th class="n">Odoo</th><th class="n">Contado</th><th class="n">Dif.</th></tr></thead><tbody>

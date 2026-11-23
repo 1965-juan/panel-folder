@@ -352,7 +352,9 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         def run():
             pids = list({l["product_id"] for l in ls if l["product_id"]})
             st = teorico(U, pids)
-            cost = {p["id"]: p.get("standard_price") or 0 for p in odoo.search_read("product.product", [("id", "in", pids)], ["standard_price"], [U["empresa"]])} if pids else {}
+            prs = odoo.search_read("product.product", [("id", "in", pids)], ["standard_price", "lst_price"], [U["empresa"]]) if pids else []
+            cost = {p["id"]: p.get("standard_price") or 0 for p in prs}
+            pvp = {p["id"]: p.get("lst_price") or 0 for p in prs}
             out, sin = [], []
             for l in sorted(ls, key=lambda x: (x["nombre"] or x["codigo"]).lower()):
                 if not l["product_id"]:
@@ -360,10 +362,14 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
                     continue
                 t = round(sum(x["quantity"] for x in st.get(l["product_id"], [])), 3)
                 d = round(l["cant"] - t, 3)
-                out.append({**l, "teorico": t, "dif": d, "coste": cost.get(l["product_id"], 0), "valor": round(d * cost.get(l["product_id"], 0), 2)})
+                cu = cost.get(l["product_id"], 0)
+                out.append({**l, "teorico": t, "dif": d, "coste": cu, "valor": round(d * cu, 2), "pvp": pvp.get(l["product_id"], 0),
+                            "valor_contado": round(l["cant"] * cu, 2)})
             res = json.loads(r["resultado"]) if r.get("resultado") else None
             return {"recuento": {k: v for k, v in r.items() if k != "resultado"}, "ubic_nombre": U["nombre"], "lineas": out, "sin_articulo": sin,
-                    "resumen": {"refs": len(out), "con_dif": sum(1 for x in out if abs(x["dif"]) > 0.0001), "valor": round(sum(x["valor"] for x in out), 2)},
+                    "resumen": {"refs": len(out), "con_dif": sum(1 for x in out if abs(x["dif"]) > 0.0001), "valor": round(sum(x["valor"] for x in out), 2),
+                                "valor_contado": round(sum(x["valor_contado"] for x in out), 2), "sin_coste": sum(1 for x in out if not x["coste"]),
+                                "pvp_contado": round(sum(x["cant"] * x["pvp"] for x in out), 2)},
                     "resultado": res, "admin": es_admin(u)}
         return guard(run)
 
