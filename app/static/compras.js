@@ -300,6 +300,13 @@ function coRecRender() {
     d.innerHTML = `<div class="c1"><span class="ref"></span><span>${r.dias > 0 ? `<span class="bdg ${r.dias > 7 ? 'b-bad' : 'b-warn'}">${r.dias} días</span>` : `<span class="bdg b-ok">Previsto ${coDate(r.fecha)}</span>`}</span></div>
       <div class="cli"><b></b></div><div class="c3"><span>${escH(r.pedido || r.origen)}${r.pendiente_de ? ' · resto de ' + escH(r.pendiente_de) : ''}</span><span>${r.lineas.length} artículo${r.lineas.length > 1 ? 's' : ''}</span></div>`;
     d.querySelector('.ref').textContent = r.ref; d.querySelector('.cli b').textContent = r.proveedor;
+    d.insertAdjacentHTML('beforeend', '<button class="lnk del co-rdel" title="No va a llegar: cancelar esta entrada en Odoo">🗑 Eliminar</button>');
+    d.querySelector('.co-rdel').onclick = async ev => {
+      ev.stopPropagation();
+      if (!confirm(`¿Eliminar la entrada ${r.ref} de ${r.proveedor} (${r.pedido || r.origen})? Se cancela en Odoo: ya no se espera ese material. El pedido de compra no se borra.`)) return;
+      try { await jpost(`/api/compras/recepciones/${r.id}/cancelar`, {}); CO_RECS = CO_RECS.filter(x => x.id !== r.id); coRecRender(); }
+      catch (e) { alertBox(e.message); }
+    };
     d.onclick = () => coRecibirOpen(r);
     box.appendChild(d);
   });

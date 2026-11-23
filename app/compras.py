@@ -1214,6 +1214,27 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
         return {"ok": True}
 
     # ---------- recepciones (albaranes) ----------
+    @app.post("/api/compras/recepciones/{pid}/cancelar")
+    def recepcion_cancelar(pid: int, request: Request):
+        """La entrada no va a llegar: se cancela en Odoo (solo si no está hecha). El pedido de compra se queda."""
+        u, _ = ctx(request, "all")
+
+        def run():
+            pk = odoo.search_read("stock.picking", [("id", "=", pid), ("picking_type_code", "=", "incoming")], ["name", "state", "company_id", "purchase_id"], company_ids=TODAS)
+            if not pk:
+                raise HTTPException(404, "No encuentro esa entrada")
+            pk = pk[0]
+            if pk["state"] in ("done", "cancel"):
+                raise HTTPException(400, f"{pk['name']} ya está {'recibida' if pk['state'] == 'done' else 'cancelada'}")
+            c1 = [pk["company_id"][0]]
+            odoo.call("stock.picking", "action_cancel", c1, ids=[pid])
+            try:
+                odoo.call("stock.picking", "message_post", c1, ids=[pid], body=f"Cancelada desde el Panel Folder (no va a llegar) — {u}")
+            except Exception:
+                pass
+            return {"ok": True, "ref": pk["name"]}
+        return guard(run)
+
     @app.get("/api/compras/recepciones")
     def recepciones(request: Request, company: str = "all"):
         _, cids = ctx(request, company)

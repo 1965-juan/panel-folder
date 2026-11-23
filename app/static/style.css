@@ -539,3 +539,4 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .ma-chips button.on{background:#4B2A91;color:#fff;border-color:#4B2A91}.ma-cl{cursor:pointer}.ma-i3{position:relative}
 .ma-i1 b{flex:1 1 auto;min-width:60px}.ma-i1 small{margin-left:0;flex:none}.ma-i1 .ma-brec,.ma-i1 .ma-bx,.ma-i1 .ma-bc{width:22px;height:22px;font-size:11px;padding:0}
 .ma-i1 .ma-ck{width:16px!important;min-width:0;padding:0;margin:0 4px 0 0;flex:none}
+.co-rcard{position:relative}.co-rdel{position:absolute;right:8px;bottom:6px;font-size:12px;padding:2px 6px}
