@@ -416,14 +416,15 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin):
 
         # de 4 en 4 a la vez, y cada 40 lotes se recalcula la lista para que vayan saliendo
         for i in range(0, len(lotes), 40):
-            with ThreadPoolExecutor(max_workers=4) as ex:
+            with ThreadPoolExecutor(max_workers=2) as ex:   # de 2 en 2 para no saturar el servidor
                 list(ex.map(uno, lotes[i:i + 40]))
             if malos[0] > 20:
                 raise RuntimeError(EST["error"] or "Demasiados fallos al clasificar")
-            try:
-                calcular()
-            except Exception:
-                pass
+            if i and i % 200 == 0:   # la lista se recalcula cada 200 lotes, no cada 40
+                try:
+                    calcular()
+                except Exception:
+                    pass
 
     def proceso(desde):
         if EST["leyendo"]:

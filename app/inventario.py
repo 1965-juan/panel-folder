@@ -54,29 +54,60 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
     # ---------- caché de códigos de barras (para que cada lectura sea instantánea) ----------
     cache = {"t": 0, "cod": {}, "ref": {}, "cargando": False}
 
-    def cargar_cache(forzar=False):
-        if not forzar and cache["cod"] and time.time() - cache["t"] < 900:
+    clock = threading.Lock()   # solo para la carga de la caché (no bloquea las lecturas ni la base de datos)
+
+    def _cargar():
+        cod, ref, por_id = {}, {}, {}
+        ps = odoo.search_read("product.product", [("active", "=", True), "|", ("barcode", "!=", False), ("default_code", "!=", False)],
+                              ["barcode", "default_code", "display_name"], TODAS, limit=200000)
+        for p in ps:
+            d = {"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "", "ud": 1}
+            por_id[p["id"]] = d
+            if p.get("barcode"):
+                cod[p["barcode"].strip()] = d
+            if p.get("default_code"):
+                ref[p["default_code"].strip().upper()] = d
+        try:   # cajas / paquetes con su propio código (suman las unidades de la caja)
+            for k in odoo.search_read("product.packaging", [("barcode", "!=", False)], ["barcode", "product_id", "qty"], TODAS, limit=50000):
+                if k.get("product_id") and k["barcode"].strip() not in cod:
+                    base = por_id.get(k["product_id"][0]) or {"id": k["product_id"][0], "nombre": k["product_id"][1], "ref": ""}
+                    cod[k["barcode"].strip()] = {**base, "ud": k.get("qty") or 1, "caja": True}
+        except Exception:
+            pass
+        cache.update(t=time.time(), cod=cod, ref=ref)
+
+    def _en_fondo():
+        if not clock.acquire(blocking=False):
             return
-        with lock:
-            if not forzar and cache["cod"] and time.time() - cache["t"] < 900:
+        try:
+            _cargar()
+        except Exception:
+            pass
+        finally:
+            clock.release()
+
+    def cargar_cache(forzar=False):
+        """La lista de códigos se carga UNA vez de Odoo y se refresca cada hora por detrás; cada lectura de la pistola se busca aquí, sin preguntar a Odoo."""
+        if cache["cod"] and not forzar:
+            if time.time() - cache["t"] > 3600:
+                threading.Thread(target=_en_fondo, daemon=True).start()
+            return
+        with clock:
+            if cache["cod"] and not forzar:
                 return
-            cod, ref = {}, {}
-            ps = odoo.search_read("product.product", [("active", "=", True), "|", ("barcode", "!=", False), ("default_code", "!=", False)],
-                                  ["barcode", "default_code", "display_name"], TODAS, limit=200000)
-            for p in ps:
-                d = {"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "", "ud": 1}
-                if p.get("barcode"):
-                    cod[p["barcode"].strip()] = d
-                if p.get("default_code"):
-                    ref[p["default_code"].strip().upper()] = d
-            try:   # cajas / paquetes con su propio código (suman las unidades de la caja)
-                for k in odoo.search_read("product.packaging", [("barcode", "!=", False)], ["barcode", "product_id", "qty"], TODAS, limit=50000):
-                    if k.get("product_id") and k["barcode"].strip() not in cod:
-                        base = next((x for x in cod.values() if x["id"] == k["product_id"][0]), None) or {"id": k["product_id"][0], "nombre": k["product_id"][1], "ref": ""}
-                        cod[k["barcode"].strip()] = {**base, "ud": k.get("qty") or 1, "caja": True}
-            except Exception:
-                pass
-            cache.update(t=time.time(), cod=cod, ref=ref)
+            _cargar()
+
+    def cache_poner(pid, codigo=None):
+        """Tras dar de alta o poner un código: se añade ese artículo a la caché sin recargar todo."""
+        try:
+            p = odoo.search_read("product.product", [("id", "=", pid)], ["barcode", "default_code", "display_name"], TODAS, limit=1)[0]
+            d = {"id": p["id"], "nombre": p["display_name"], "ref": p.get("default_code") or "", "ud": 1}
+            for c_ in {(p.get("barcode") or "").strip(), (codigo or "").strip()} - {""}:
+                cache["cod"][c_] = d
+            if p.get("default_code"):
+                cache["ref"][p["default_code"].strip().upper()] = d
+        except Exception:
+            pass
 
     def lote_loc():
         """La ubicación del lote provisional en Odoo (AC/Lote provisional, al lado de AC/Stock, fuera de él). Se crea la primera vez."""
@@ -151,7 +182,8 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
     def inicio(request: Request):
         u = current_user(request)
         us = puede(u)
-        threading.Thread(target=lambda: guard(cargar_cache), daemon=True).start()   # precarga para que la primera lectura vaya rápida
+        if not cache["cod"]:
+            threading.Thread(target=_en_fondo, daemon=True).start()   # precarga para que la primera lectura vaya rápida
         with con() as c:
             rs = [dict(x) for x in c.execute(f"""SELECT r.*, COUNT(l.id) refs, COALESCE(SUM(l.cant),0) uds FROM recuentos r LEFT JOIN lineas l ON l.rid=r.id
                   WHERE r.ubic IN ({','.join('?' * len(us))}) AND (r.estado!='aplicado' OR r.aplicado > ?) GROUP BY r.id ORDER BY r.id DESC""",
@@ -669,7 +701,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             pp = odoo.search_read("product.product", [("product_tmpl_id", "=", tid)], ["id", "display_name", "default_code"], [1], limit=1)[0]
             with lock, con() as c:
                 c.execute("UPDATE lineas SET product_id=?, nombre=?, ref=? WHERE id=?", (pp["id"], pp["display_name"], pp.get("default_code") or "", lid))
-            cache["t"] = 0
+            cache_poner(pp["id"], x["codigo"])
             sumado = sumar_si_aplicado(x, pp["id"])
             return {"ok": True, "product_id": pp["id"], "nombre": pp["display_name"], "sumado_stock": sumado}
         return guard(run)
@@ -714,7 +746,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             if b.get("poner_ean") and not pr[0].get("barcode") and (x["codigo"] or "").strip() \
                     and not odoo.search_read("product.product", [("barcode", "=", x["codigo"].strip())], ["id"], TODAS, limit=1):
                 odoo.call("product.product", "write", TODAS, ids=[pid], vals={"barcode": x["codigo"].strip()})
-                cache["t"] = 0
+                cache_poner(pid, x["codigo"])
             with lock, con() as c:
                 c.execute("UPDATE lineas SET product_id=?, nombre=?, ref=? WHERE id=?", (pid, pr[0]["display_name"], pr[0].get("default_code") or "", lid))
             return {"ok": True, "sumado_stock": sumar_si_aplicado(x, pid)}
@@ -894,7 +926,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             if p[0].get("barcode"):
                 raise HTTPException(400, f"{p[0]['display_name']} ya tiene código: {p[0]['barcode']}")
             odoo.call("product.product", "write", [1], ids=[pid], vals={"barcode": ean})
-            cache["t"] = 0
+            cache_poner(pid, ean)
             return {"ok": True, "nombre": p[0]["display_name"], "ean": ean}
         return guard(run)
 
