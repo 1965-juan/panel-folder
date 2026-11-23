@@ -1077,6 +1077,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
                 if r["tipo"] == "albaran":
                     recibir_seguro(did)
                 return
+            if r["tipo"] == "factura":
+                # una factura no crea pedidos ni entradas sola: se cruza con sus albaranes, se valida o es un gasto
+                with lock, con() as c:
+                    c.execute("UPDATE docs SET nota=NULL WHERE id=?", (did,))
+                return
             L = info.get("lineas") or []
             if not L:
                 return nota("No he sacado líneas del PDF: pulsa Cuadrar para revisarlo")
@@ -1227,13 +1232,19 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             hoy = dt.date.today()
             docs_po = {}
             with con() as c:
-                for d in c.execute("SELECT id, nombre, compra FROM docs WHERE compra IS NOT NULL").fetchall():
+                for d in c.execute("SELECT id, nombre, compra, tipo FROM docs WHERE compra IS NOT NULL").fetchall():
                     try:
-                        docs_po[json.loads(d["compra"]).get("pedido_id")] = {"id": d["id"], "nombre": d["nombre"]}
+                        cp = json.loads(d["compra"])
+                        docs_po[cp.get("pedido_id")] = {"id": d["id"], "nombre": d["nombre"], "de_factura": d["tipo"] == "factura" and not cp.get("ya_estaba")}
                     except Exception:
                         pass
             out = []
+            propias = ("DISTRIPLUS", "LOGIPAPER", "INGRAF", "FERMASA")
             for p in pk:
+                # solo entradas de proveedor: con pedido de compra, que no sea entre nuestras empresas ni un pedido hecho desde una factura de gasto
+                po_ = (p.get("purchase_id") or [0])[0]
+                if not po_ or any(x in ((p.get("partner_id") or [0, ""])[1] or "").upper() for x in propias) or (docs_po.get(po_) or {}).get("de_factura"):
+                    continue
                 fecha = (p.get("scheduled_date") or "")[:10]
                 dias = (hoy - dt.date.fromisoformat(fecha)).days if fecha else 0
                 out.append({"id": p["id"], "ref": p["name"], "proveedor": (p.get("partner_id") or [0, "—"])[1],
