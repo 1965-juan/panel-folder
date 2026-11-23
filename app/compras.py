@@ -1922,12 +1922,13 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         """Todo lo subido con su lectura y en qué paso está, de todas las empresas:
         albarán -> cuadrado con su pedido, entrada hecha y esperando su factura; factura -> cruzada con sus albaranes o marcada como gasto
         (entonces sale del panel: Mayte la valida desde los borradores de Odoo)."""
-        ctx(request, company)
+        u_, _ = ctx(request, company)
+        solo_alb = getattr(app.state, "sin_facturas", lambda x: False)(u_)   # almacén: solo sus albaranes, nada de facturas
         cids = TODAS
         dias = max(dias, 120)
         desde = time.time() - dias * 86400
         with con() as c:
-            ds = [dict(r) for r in c.execute("SELECT * FROM docs WHERE estado != 'descartado' AND subido >= ? AND empresa IN (%s) ORDER BY subido DESC"
+            ds = [dict(r) for r in c.execute(("SELECT * FROM docs WHERE estado != 'descartado' AND subido >= ? AND empresa IN (%s)" + (" AND tipo='albaran'" if solo_alb else "") + " ORDER BY subido DESC")
                                               % ",".join("?" * len(cids)), [desde] + list(cids)).fetchall()]
             marcas = {r["move_id"]: {"tipo": r["tipo"], "usuario": r["usuario"], "nota": r["nota"]} for r in c.execute("SELECT * FROM factura_marcas").fetchall()}
 
