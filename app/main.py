@@ -64,7 +64,7 @@ def sin_facturas(u):
 
 
 TODOS_MODULOS = ["ventas", "seguimiento", "web", "whatsapp", "presupuestos", "ac", "compras", "facturacion", "correo", "vencimientos", "etiquetas", "tablero", "tienda",
-                 "pedidos", "articulos", "inventario"]
+                 "pedidos", "articulos", "inventario", "dashboard"]
 
 
 def modulos_de(u):
@@ -860,6 +860,11 @@ async def admin_descuento_web(request: Request):
 @app.get("/api/ventas")
 def api_ventas(request: Request, company: str = "all", q: str = ""):
     u = current_user(request)
+    return guard(lambda: ventas_datos(u, company, q))
+
+
+def ventas_datos(u, company="all", q=""):
+    """Lo que enseña el panel de Ventas (también lo usa el Dashboard para sus totales)."""
 
     def run():
         try:
@@ -1029,7 +1034,7 @@ def api_ventas(request: Request, company: str = "all", q: str = ""):
             out = {k: [c for c in v if not any(g in c["cliente"].upper() for g in grupo)] for k, v in out.items()}
         return out
 
-    return guard(run)
+    return run()
 
 
 @app.get("/api/ventas/{oid}")
@@ -2476,6 +2481,12 @@ _ped.setup(app, odoo=odoo, current_user=current_user, scope=scope, guard=guard, 
 from . import inventario as _inv  # noqa: E402
 
 _inv.setup(app, odoo=odoo, current_user=current_user, guard=guard, es_admin=es_admin, data_dir=DATA, nombre_usuario=nombre_usuario)
+
+
+# ---------- dashboard: la situación de las empresas de un vistazo (solo administrador) ----------
+from . import dashboard as _dash  # noqa: E402
+
+_dash.setup(app, odoo=odoo, current_user=current_user, guard=guard, es_admin=es_admin, ventas_datos=ventas_datos)
 
 
 from . import emergencia as _emerg  # noqa: E402

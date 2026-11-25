@@ -11,6 +11,7 @@
   <div class="brand"><span class="brand-sq"></span><span>Panel <b>Folder</b></span></div>
   <nav>
     <a class="on" href="#ventas" data-v="ventas" data-m="ventas">Ventas</a>
+    <a href="#dashboard" data-v="dashboard" data-m="dashboard" hidden>📊 Dashboard</a>
     <a href="#seguimiento" data-v="seguimiento" data-m="seguimiento" hidden>Correo sin atender <span class="nb" id="nb-sg" hidden></span></a>
     <a href="#web" data-v="web" data-m="web">Web <span class="nb" id="nb-web" hidden></span></a>
     <a href="#whatsapp" data-v="whatsapp" data-m="whatsapp">WhatsApp <span class="nb" id="nb-wa" hidden></span></a>
@@ -301,6 +302,7 @@
     </div>
   </section>
 
+  <section id="v-db" hidden><div id="db"></div></section>
   <section id="v-sg" hidden>
     <div class="sg-top"><div id="sg-est" class="muted"></div><div class="sg-acc"><button class="lnk" id="sg-cbtn">✉️ Cuentas de correo</button><button class="lnk" onclick="sgArchAntes()">🗄️ Archivar lo anterior a…</button><button class="lnk" id="sg-rec">↻ Recalcular</button><button class="ac-go" id="sg-leer">📥 Leer el correo desde…</button></div></div>
     <div id="sg-ctas" class="sg-ctas" hidden><h3>✉️ Cuentas de correo que lee el panel</h3><div id="sg-cl"></div>
@@ -364,6 +366,7 @@
 <script src="/static/compras.js"></script>
 <script src="/static/correo.js"></script>
 <script src="/static/seguimiento.js"></script>
+<script src="/static/dashboard.js"></script>
 <script src="/static/vencimientos.js"></script>
 <script src="/static/etiquetas.js"></script>
 <script src="/static/tablero.js"></script>
