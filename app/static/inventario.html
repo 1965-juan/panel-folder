@@ -149,6 +149,24 @@ const ESTADO = { abierto: ['Contando', 'b-ab'], cerrado: ['Pendiente de revisar'
 function vista(v) { ['ini', 'esc', 'rev', 'ean', 'inv', 'lote', 'pend'].forEach(x => $('#v-' + x).hidden = x !== v); window.scrollTo(0, 0); }
 
 /* ---------- lista ---------- */
+/* coste de lo contado en el lote provisional (solo administrador): total arriba y por recuento; se refresca cada 2 minutos */
+let LOTE_T = null;
+async function costeLote() {
+  clearTimeout(LOTE_T);
+  let box = $('#lote-coste');
+  if (!box) { box = document.createElement('div'); box.id = 'lote-coste'; box.className = 'card'; box.style.background = '#f4effa'; $('#lista').closest('.card').before(box); }
+  if (!box.innerHTML) box.innerHTML = '<p class="muted" style="margin:0">Calculando el coste de lo contado…</p>';
+  try {
+    const t = await api('/api/inv/coste_contado?ubic=LOTE');
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">💶 Coste de lo contado · ${escH(t.ubic_nombre)}</h2>
+      <button class="big pu" style="width:auto;margin:0;padding:6px 10px;font-size:14px" id="lc-rf">↻ Actualizar</button></div>
+      <div class="kp" style="margin-top:10px"><div><b>${eur(t.coste)}</b><span class="muted">a precio de coste</span></div><div><b>${eur(t.pvp)}</b><span class="muted">a PVP</span></div><div><b>${num(t.uds)}</b><span class="muted">unidades · ${t.articulos} art.</span></div></div>
+      <p class="muted" style="margin:6px 0 0">${t.sin_identificar ? `<b>${t.sin_identificar} códigos sin identificar</b> (no suman, no tienen coste) · ` : ''}${t.sin_coste ? `<b>${t.sin_coste} artículos sin coste en Odoo</b> · ` : ''}actualizado a las ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p>`;
+    $('#lc-rf').onclick = () => costeLote();
+    document.querySelectorAll('.rc-coste').forEach(e => { const r = t.recuentos[e.dataset.cr]; e.innerHTML = r ? ` · <b>${eur(r.coste)}</b> a coste` : ''; });
+  } catch (e) { box.innerHTML = `<div class="err">No se ha podido calcular el coste: ${escH(e.message)}</div>`; }
+  LOTE_T = setTimeout(() => { if (!$('#v-ini').hidden) costeLote(); }, 120000);
+}
 async function inicio() {
   vista('ini'); history.replaceState(null, '', '/inventario');
   try { INI = await api('/api/inv/inicio'); } catch (e) { $('#lista').innerHTML = `<div class="err">${escH(e.message)}</div>`; return; }
@@ -156,12 +174,13 @@ async function inicio() {
   $('#n-ub').innerHTML = INI.ubicaciones.map(u => `<option value="${u.codigo}">${escH(u.nombre)}</option>`).join('');
   $('#n-ub').disabled = INI.ubicaciones.length < 2;
   $('#lista').innerHTML = INI.recuentos.length ? INI.recuentos.map(r => `<div class="rc"><div class="t"><b>${escH(r.nombre)}</b>
-      <small>${escH(r.ubic_nombre)} · ${r.refs} art. · ${num(r.uds)} uds · ${fecha(r.cuando)}</small></div>
+      <small>${escH(r.ubic_nombre)} · ${r.refs} art. · ${num(r.uds)} uds · ${fecha(r.cuando)}<span class="rc-coste" data-cr="${r.id}"></span></small></div>
       <span class="bdg ${ESTADO[r.estado][1]}">${ESTADO[r.estado][0]}</span>
       <button class="big ${r.estado === 'abierto' ? '' : 'pu'}" style="width:auto;margin:0;padding:9px 12px" data-r="${r.id}" data-e="${r.estado}">${r.estado === 'abierto' ? 'Seguir' : 'Ver'}</button>${r.estado === 'abierto' && INI && INI.admin ? `<button class="big pu" style="width:auto;margin:0 0 0 6px;padding:9px 12px" data-v="${r.id}" title="Ver lo contado con su coste, sin tocar el recuento">💶 Ver</button>` : ''}</div>`).join('')
     : '<p class="muted">Todavía no hay recuentos.</p>';
   $('#lista').querySelectorAll('[data-r]').forEach(b => b.onclick = () => b.dataset.e === 'abierto' ? abrir(+b.dataset.r) : revisar(+b.dataset.r));
   $('#lista').querySelectorAll('[data-v]').forEach(b => b.onclick = () => revisar(+b.dataset.v));
+  if (INI.admin && INI.recuentos.some(r => r.ubic === 'LOTE')) costeLote();
   // inventarios generales
   const IV = INI.inventarios || [];
   $('#ig-lista').innerHTML = IV.length ? IV.map(i => `<div class="rc"><div class="t"><b>${escH(i.nombre)}</b>
@@ -264,6 +283,21 @@ $('#ig-go').onclick = async () => {
 };
 
 /* ---------- inventario general ---------- */
+/* coste de lo contado (solo administrador): se va sumando mientras se cuenta; se refresca solo cada 2 minutos */
+let COSTE_T = null;
+async function costeContado(id) {
+  clearTimeout(COSTE_T);
+  const box = $('#i-coste'); if (!box) return;
+  try {
+    const v = await api(`/api/inv/inventario/${id}/valoracion?ligero=1`), t = v.totales;
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">💶 Coste de lo contado</h2>
+      <button class="big pu" style="width:auto;margin:0;padding:6px 10px;font-size:14px" id="i-crf">↻ Actualizar</button></div>
+      <div class="kp" style="margin-top:10px"><div><b>${eur(t.valor_coste)}</b><span class="muted">a precio de coste</span></div><div><b>${eur(t.valor_pvp)}</b><span class="muted">a PVP</span></div><div><b>${num(t.unidades)}</b><span class="muted">unidades</span></div></div>
+      <p class="muted" style="margin:6px 0 0">${t.lineas} artículos${t.sin_identificar ? ` · <b>${t.sin_identificar} códigos sin identificar</b> (no suman: no tienen coste)` : ''}${t.sin_coste ? ` · <b>${t.sin_coste} sin coste en Odoo</b>` : ''} · actualizado a las ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p>`;
+    $('#i-crf').onclick = () => costeContado(id);
+  } catch (e) { box.innerHTML = `<div class="err">No se ha podido calcular el coste: ${escH(e.message)}</div>`; }
+  COSTE_T = setTimeout(() => { if (!$('#v-inv').hidden && $('#i-coste')) costeContado(id); }, 120000);
+}
 async function verInv(id) {
   vista('inv'); history.replaceState(null, '', `/inventario#i${id}`);
   $('#i-body').innerHTML = '<p class="muted">Sumando zonas y descontando lo vendido desde que se contó… (tarda unos segundos)</p>';
@@ -272,6 +306,7 @@ async function verInv(id) {
   $('#i-tit').innerHTML = `${escH(I.nombre)} <span class="bdg ${I.estado === 'abierto' ? 'b-ab' : 'b-ap'}">${I.estado === 'abierto' ? 'Abierto' : 'Aplicado'}</span>`;
   $('#i-info').textContent = `${d.ubic_nombre} · abierto ${fecha(I.cuando)}${I.aplicado ? ' · aplicado ' + fecha(I.aplicado) : ''}`;
   let h = `<div class="kp"><div><b>${d.zonas.length}</b><span class="muted">zonas</span></div><div><b>${S.refs}</b><span class="muted">artículos</span></div><div><b>${S.con_dif}</b><span class="muted">con diferencia</span></div></div>`;
+  if (d.admin) h += `<div class="card" id="i-coste" style="background:#f4effa"><p class="muted" style="margin:0">Calculando el coste de lo contado…</p></div>`;
   if (d.resultado) h += `<div class="card"><b>Resultado en Odoo:</b> ${d.resultado.ajustados} ajustados · ${d.resultado.sin_cambio} ya cuadraban${d.resultado.errores.length ? `<div class="err">${d.resultado.errores.map(x => `${escH(x.producto)}: ${escH(x.error)}`).join('<br>')}</div>` : ''}</div>`;
   h += `<div class="card"><h2>Zonas contadas</h2>${d.zonas.map(z => `<div class="rc"><div class="t"><b>${escH(z.nombre)}</b><small>${escH(z.usuario)} · ${fecha(z.cuando)}</small></div>
     <span class="bdg ${ESTADO[z.estado][1]}">${ESTADO[z.estado][0]}</span>${z.estado === 'abierto' ? `<button class="big" style="width:auto;margin:0;padding:9px 12px" data-z="${z.id}">Seguir</button>` : ''}</div>`).join('') || '<p class="muted">Todavía ninguna. Empieza una desde «Contar una zona».</p>'}</div>`;
@@ -296,6 +331,7 @@ async function verInv(id) {
     <p class="muted">${S.abiertas ? `Quedan ${S.abiertas} zonas contando: terminadlas antes de aplicar. ` : ''}Hay que aplicarlo con la caja de la tienda cerrada.</p>`;
   h += `<button class="big sec" id="i-vol">← Volver</button>`;
   $('#i-body').innerHTML = h;
+  if (d.admin) costeContado(id);
   $('#i-sd').onchange = () => { try { localStorage.setItem('inv-solodif', $('#i-sd').checked ? '1' : '0'); } catch (e) { } verInv(id); };
   $('#i-vol').onclick = () => inicio();
   $('#i-body').querySelectorAll('[data-z]').forEach(b => b.onclick = () => abrir(+b.dataset.z));

@@ -201,6 +201,48 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         return {"ubicaciones": [{"codigo": k, "nombre": UBIC[k]["nombre"]} for k in us], "recuentos": rs, "inventarios": invs, "admin": es_admin(u),
                 "usuario": nombre_usuario(u)}
 
+    @app.get("/api/inv/coste_contado")
+    def coste_contado(request: Request, ubic: str = "LOTE"):
+        """Solo administrador: lo que se lleva contado en los recuentos de una ubicación (por defecto el lote provisional)
+        valorado a coste y a PVP de Odoo, en total y por recuento. Solo lee el precio de los artículos contados."""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador ve el coste")
+        if ubic not in UBIC:
+            raise HTTPException(400, "Ubicación desconocida")
+        with con() as c:
+            ls = [dict(x) for x in c.execute("""SELECT r.id rid, l.product_id, l.codigo, SUM(l.cant) cant FROM lineas l JOIN recuentos r ON r.id=l.rid
+                  WHERE r.ubic=? AND (r.estado!='aplicado' OR r.aplicado > ?) GROUP BY r.id, COALESCE(l.product_id, 'c'||l.codigo)""",
+                                             (ubic, time.time() - 30 * 86400)).fetchall()]
+
+        def run():
+            pids = list({l["product_id"] for l in ls if l["product_id"]})
+            pr = {}
+            for i in range(0, len(pids), 4000):
+                for p in odoo.search_read("product.product", [("id", "in", pids[i:i + 4000]), ("active", "in", [True, False])],
+                                          ["standard_price", "list_price"], [UBIC[ubic]["empresa"]], limit=4000):
+                    pr[p["id"]] = p
+            por, tot = {}, {"coste": 0.0, "pvp": 0.0, "uds": 0.0, "articulos": set(), "sin_identificar": set(), "sin_coste": set()}
+            for l in ls:
+                p = pr.get(l["product_id"]) or {}
+                co, pv = (p.get("standard_price") or 0) * l["cant"], (p.get("list_price") or 0) * l["cant"]
+                r = por.setdefault(l["rid"], {"coste": 0.0, "pvp": 0.0})
+                r["coste"] += co
+                r["pvp"] += pv
+                tot["coste"] += co
+                tot["pvp"] += pv
+                tot["uds"] += l["cant"] or 0
+                if l["product_id"]:
+                    tot["articulos"].add(l["product_id"])
+                    if not p.get("standard_price"):
+                        tot["sin_coste"].add(l["product_id"])
+                else:
+                    tot["sin_identificar"].add(l["codigo"])
+            return {"ubic_nombre": UBIC[ubic]["nombre"], "coste": round(tot["coste"], 2), "pvp": round(tot["pvp"], 2), "uds": round(tot["uds"], 2),
+                    "articulos": len(tot["articulos"]), "sin_identificar": len(tot["sin_identificar"]), "sin_coste": len(tot["sin_coste"]),
+                    "recuentos": {str(k): {"coste": round(v["coste"], 2), "pvp": round(v["pvp"], 2)} for k, v in por.items()}}
+        return guard(run)
+
     def inv_abierto(ub):
         with con() as c:
             x = c.execute("SELECT * FROM inventarios WHERE ubic=? AND estado='abierto' ORDER BY id DESC LIMIT 1", (ub,)).fetchone()
@@ -567,7 +609,7 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
         return guard(run)
 
     @app.get("/api/inv/inventario/{iid}/valoracion")
-    def inv_valoracion(iid: int, request: Request, formato: str = ""):
+    def inv_valoracion(iid: int, request: Request, formato: str = "", ligero: int = 0):
         """Para hacer una oferta por un lote antes de comprarlo: lo contado con nuestro coste y PVP, lo que tenemos ya en stock
         y lo que hemos vendido de cada artículo en el último año (para ver si nos sirve). No toca nada en Odoo."""
         u = current_user(request)
@@ -581,7 +623,8 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             pr, stock, vend = {}, {}, {}
             if pids:
                 pr = {p["id"]: p for p in odoo.search_read("product.product", [("id", "in", pids), ("active", "in", [True, False])],
-                                                           ["standard_price", "list_price", "default_code", "seller_ids"], TODAS, limit=20000)}
+                                                           ["standard_price", "list_price", "default_code"], TODAS, limit=20000)}
+            if pids and not ligero:   # ligero: solo el coste de lo contado (para ir viéndolo mientras se cuenta), sin stock ni ventas
                 for q in odoo.search_read("stock.quant", [("product_id", "in", pids), ("location_id.usage", "=", "internal")], ["product_id", "quantity", "location_id"], TODAS, limit=50000):
                     if q["location_id"][0] != UBIC["LOTE"].get("loc"):
                         stock[q["product_id"][0]] = stock.get(q["product_id"][0], 0) + q["quantity"]
@@ -603,7 +646,8 @@ def setup(app, *, odoo, current_user, guard, es_admin, data_dir, nombre_usuario)
             out.sort(key=lambda x: (not x["conocido"], -x["valor_coste"]))
             tot = {"lineas": len(out), "unidades": round(sum(x["cant"] for x in out), 2), "valor_coste": round(sum(x["valor_coste"] for x in out), 2),
                    "valor_pvp": round(sum(x["valor_pvp"] for x in out), 2), "sin_identificar": sum(1 for x in out if not x["conocido"]),
-                   "sin_ventas": sum(1 for x in out if x["conocido"] and x["vendido_12m"] <= 0)}
+                   "sin_ventas": sum(1 for x in out if x["conocido"] and x["vendido_12m"] <= 0),
+                   "sin_coste": sum(1 for x in out if x["conocido"] and not x["coste"])}
             return out, tot
         out, tot = guard(run)
         if formato != "csv":
