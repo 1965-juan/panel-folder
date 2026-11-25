@@ -565,3 +565,5 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 .db-nota{font-size:12px;margin:8px 0 0}.db-det summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:8px}
 .db-hueco{border-style:dashed;background:#fbfaf7}.db-hueco b{color:var(--muted)}
 @media (max-width:700px){.db-3{grid-template-columns:1fr}.db-liq>div>b{font-size:30px}}
+.db-pair{border:1px solid #f0edf5;border-radius:10px;padding:6px 10px;margin-bottom:8px}.db-pair.dif{border-color:#f3c88a;background:#fffaf0}
+.db-ph{font-weight:700;font-size:13px;margin-bottom:2px}.db-pair .db-row{border:0;padding:3px 0;font-size:13px}

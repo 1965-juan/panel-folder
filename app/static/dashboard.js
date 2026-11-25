@@ -93,9 +93,16 @@ function dbPinta() {
         ${(T.bancos_otros || []).filter(en).map(x => `<div class="db-row"><span>${escH(nomE(x.empresa))} · ${escH(x.nombre)}</span><b>${eur(x.saldo)}</b></div>`).join('')}</details>` : ''}</section>
 
     <section class="db-c"><h3>🔁 Cuentas entre empresas</h3>
-      ${ec.length ? ec.map(c => { const debe = c.saldo > 0 ? nomE(c.otra) : nomE(c.libro), cobra = c.saldo > 0 ? nomE(c.libro) : nomE(c.otra);
-        return `<div class="db-row"><span><b>${escH(debe)}</b> debe a <b>${escH(cobra)}</b><br><small class="muted">según la contabilidad de ${escH(nomE(c.libro))}</small></span><b>${eur(Math.abs(c.saldo))}</b></div>`; }).join('')
-        : '<p class="empty">Sin saldos entre empresas</p>'}
+      ${(() => { // una fila por pareja de empresas, con lo que dice la contabilidad de cada una (deberían coincidir)
+        const P = new Map();
+        ec.forEach(c => { const a = Math.min(c.libro, c.otra), b = Math.max(c.libro, c.otra), k = a + '-' + b;
+          if (!P.has(k)) P.set(k, { a, b, lib: {} });
+          P.get(k).lib[c.libro] = c.libro === a ? c.saldo : -c.saldo; });   // en positivo: lo que b debe a a
+        const txt = (p, v) => Math.abs(v) < 0.5 ? 'en paz' : `<b>${escH(nomE(v > 0 ? p.b : p.a))}</b> debe <b>${eur(Math.abs(v))}</b> a ${escH(nomE(v > 0 ? p.a : p.b))}`;
+        return [...P.values()].map(p => { const vs = [p.a, p.b].filter(l => l in p.lib), dif = vs.length === 2 && Math.abs(p.lib[p.a] - p.lib[p.b]) > 1;
+          return `<div class="db-pair ${dif ? 'dif' : ''}"><div class="db-ph">${escH(nomE(p.a))} ↔ ${escH(nomE(p.b))}${dif ? ' <span class="bdg b-warn">no cuadran</span>' : ''}</div>
+            ${[p.a, p.b].map(l => `<div class="db-row"><span class="muted">Según ${escH(nomE(l))}</span><span>${l in p.lib ? txt(p, p.lib[l]) : '<span class="muted">sin apuntes</span>'}</span></div>`).join('')}</div>`; }).join('')
+          || '<p class="empty">Sin saldos entre empresas</p>'; })()}
       <h4>Cuentas con socios (551 / 552)</h4>
       ${so.length ? so.map(x => `<div class="db-row"><span>${escH(nomE(x.empresa))} · ${escH(x.cuenta)}</span><b class="${x.saldo < 0 ? 'neg' : ''}">${eur(x.saldo)}</b></div>`).join('') : '<p class="empty">Sin movimientos con socios</p>'}
       <p class="muted db-nota">En las de socios, en positivo lo que el socio debe a la empresa y en negativo lo que la empresa le debe al socio.</p></section>
