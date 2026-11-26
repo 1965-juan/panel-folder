@@ -1400,6 +1400,25 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         servir, servir_pedidos = [], []
         try:
             d = odoo.call_kw("sale.order", "get_panel_data", [], company_ids=cids)
+            # el Panel AC de Odoo a veces sigue dando como pendiente lo ya servido: se corrige con lo que dice Odoo de verdad
+            try:
+                mids = [l["move_id"] for p in d.get("reposicion", []) for l in p.get("lines", []) if l.get("move_id")]
+                hechos = {m["id"] for m in odoo.search_read("stock.move", [("id", "in", mids), ("state", "in", ["done", "cancel"])], ["id"],
+                                                             company_ids=[1, 2, 3, 4, 5], limit=len(mids) + 1)} if mids else set()
+                lids = [l["line_id"] for o in d.get("orders", []) for l in o.get("lines", []) if l.get("line_id")]
+                real = {x["id"]: max(0, (x.get("product_uom_qty") or 0) - (x.get("qty_delivered") or 0))
+                        for x in odoo.search_read("sale.order.line", [("id", "in", lids)], ["product_uom_qty", "qty_delivered"],
+                                                  company_ids=[1, 2, 3, 4, 5], limit=len(lids) + 1)} if lids else {}
+                for p in d.get("reposicion", []):
+                    for l in p.get("lines", []):
+                        if l.get("move_id") in hechos:
+                            l["qty_pending"] = 0
+                for o in d.get("orders", []):
+                    for l in o.get("lines", []):
+                        if l.get("line_id") in real:
+                            l["qty_pending"] = min(l.get("qty_pending") or 0, real[l["line_id"]])
+            except Exception:
+                pass
             locs = [str(x["id"]) for x in d.get("locations", []) if not x.get("read_only")]
             hay = lambda l: sum(max(0, (l.get("stock_by_loc") or {}).get(k, 0) or 0) for k in locs)
 

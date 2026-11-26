@@ -385,7 +385,8 @@ function coRecibirOpen(r) {
       if (res.informe && (res.servir_pedidos || []).length) {   // al volver del Panel AC se actualiza: lo ya servido desaparece
         const upd = async () => { const b = $('#co-sv'); if (!b || document.visibilityState !== 'visible') return;
           try { const sp = await api('/api/compras/servir/' + res.informe); b.innerHTML = sp.length ? coServirHTML(sp) : '<p class="muted">✓ Ya está todo servido.</p>'; } catch (e) { } };
-        document.addEventListener('visibilitychange', upd);
+        document.addEventListener('visibilitychange', upd); window.addEventListener('focus', upd);
+        const iv = setInterval(() => { if (!$('#co-sv')) return clearInterval(iv); upd(); }, 30000);
       }
     } catch (e) { alertBox(e.message); $('#co-ok').disabled = false; $('#co-ok').textContent = '✓ Recibir en Odoo'; }
   };
