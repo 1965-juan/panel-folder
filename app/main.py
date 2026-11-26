@@ -86,6 +86,7 @@ ODOO_URL = os.environ.get("ODOO_URL", "").rstrip("/")
 
 app = FastAPI(title="Panel Folder", docs_url=None, redoc_url=None)
 app.state.sin_facturas = sin_facturas   # Compras: almacén solo ve albaranes
+app.state.modulos_de = modulos_de
 app.add_middleware(SessionMiddleware, secret_key=SECRET_FILE.read_text(), max_age=60 * 60 * 24 * 30, same_site="lax")
 
 # Permisos en el servidor (no solo en la pantalla): aunque a alguien le aparezca un menú que no es suyo,

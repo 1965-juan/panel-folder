@@ -348,7 +348,11 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
     def solo_albaranes(u):
         """Almacén y tiendas: de los documentos subidos solo ven albaranes (nada de facturas de acreedores: leasing, bancos…)."""
-        return not es_admin(u) and getattr(app.state, "sin_facturas", lambda x: True)(u)
+        if es_admin(u) or u == "compras":
+            return False
+        if getattr(app.state, "sin_facturas", lambda x: True)(u):
+            return True
+        return "facturacion" not in getattr(app.state, "modulos_de", lambda x: [])(u)
 
     @app.get("/api/compras/docs")
     def docs(request: Request, tipo: str = "", estado: str = "", company: str = "all"):
