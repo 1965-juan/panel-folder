@@ -346,11 +346,17 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
             leer_en_segundo_plano(did)
         return out
 
+    def solo_albaranes(u):
+        """Almacén y tiendas: de los documentos subidos solo ven albaranes (nada de facturas de acreedores: leasing, bancos…)."""
+        return not es_admin(u) and getattr(app.state, "sin_facturas", lambda x: True)(u)
+
     @app.get("/api/compras/docs")
     def docs(request: Request, tipo: str = "", estado: str = "", company: str = "all"):
-        _, cids = ctx(request, company)
+        u_, cids = ctx(request, company)
         q = "SELECT * FROM docs WHERE empresa IN (%s)" % ",".join("?" * len(cids))
         args = list(cids)
+        if solo_albaranes(u_):
+            q += " AND COALESCE(tipo, '') != 'factura'"
         if tipo:
             q += " AND tipo=?"; args.append(tipo)
         if estado:
@@ -366,10 +372,10 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
     @app.get("/api/compras/pdf/{did}")
     def pdf(did: str, request: Request):
-        current_user(request)
+        u_ = current_user(request)
         with con() as c:
-            r = c.execute("SELECT fichero, nombre FROM docs WHERE id=?", (did,)).fetchone()
-        if not r:
+            r = c.execute("SELECT fichero, nombre, tipo FROM docs WHERE id=?", (did,)).fetchone()
+        if not r or (solo_albaranes(u_) and r["tipo"] == "factura"):
             raise HTTPException(404)
         return FileResponse(carpeta / r["fichero"], media_type=_mime(r["fichero"]), filename=r["nombre"],
                             content_disposition_type="inline")
