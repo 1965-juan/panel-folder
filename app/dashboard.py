@@ -205,6 +205,15 @@ def setup(app, *, odoo, current_user, guard, es_admin, ventas_datos):
             raise HTTPException(403, "Solo el administrador")
         return odoo.estado() if hasattr(odoo, "estado") else {}
 
+    @app.post("/api/odoo_pausa")
+    def odoo_pausa(request: Request, minutos: int = 60):
+        """Solo admin: el panel deja de llamar a Odoo durante N minutos (0 = reanudar)."""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador")
+        odoo.pausa_hasta = time.time() + max(0, minutos) * 60
+        return odoo.estado()
+
     @app.get("/api/dashboard")
     def dashboard(request: Request, refrescar_ya: int = 0):
         u = current_user(request)
