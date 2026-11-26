@@ -567,3 +567,5 @@ body.u-compras #v-ac .stk{pointer-events:none;cursor:default}
 @media (max-width:700px){.db-3{grid-template-columns:1fr}.db-liq>div>b{font-size:30px}}
 .db-pair{border:1px solid #f0edf5;border-radius:10px;padding:6px 10px;margin-bottom:8px}.db-pair.dif{border-color:#f3c88a;background:#fffaf0}
 .db-ph{font-weight:700;font-size:13px;margin-bottom:2px}.db-pair .db-row{border:0;padding:3px 0;font-size:13px}
+/* hasta saber quién es el usuario no se enseña el menú */
+body:not(.yo-ok) .side nav a{visibility:hidden}

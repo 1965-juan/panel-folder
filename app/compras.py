@@ -1610,7 +1610,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
     # ---------- facturas para Mayte ----------
     @app.get("/api/compras/facturas")
     def facturas(request: Request, company: str = "all"):
-        _, cids = ctx(request, company)
+        u_, cids = ctx(request, company)
+        solo_mercaderia = not es_admin(u_)   # almacén y tiendas: solo compras de mercadería (nada de leasing, bancos, suministros…)
 
         def run():
             mv = odoo.search_read("account.move", [("move_type", "in", ["in_invoice", "in_refund"]), ("state", "=", "draft")],
@@ -1619,8 +1620,17 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
                                   company_ids=cids, order="create_date desc", limit=150)
             lids = [l for m in mv for l in m.get("invoice_line_ids", [])]
             ln = odoo.search_read("account.move.line", [("id", "in", lids), ("display_type", "=", "product")],
-                                  ["move_id", "product_id", "name", "quantity", "price_unit", "price_subtotal", "purchase_line_id"],
+                                  ["move_id", "product_id", "name", "quantity", "price_unit", "price_subtotal", "purchase_line_id", "account_id"],
                                   company_ids=cids) if lids else []
+            if solo_mercaderia and mv:
+                # mercadería = alguna línea con pedido de compra, con un artículo físico (no servicio) o a una cuenta de compras (60x)
+                prods = list({l["product_id"][0] for l in ln if l.get("product_id")})
+                fisico = {p["id"] for p in odoo.search_read("product.product", [("id", "in", prods), ("type", "!=", "service")], ["id"],
+                                                            company_ids=cids, limit=len(prods) + 1)} if prods else set()
+                buenas = {l["move_id"][0] for l in ln if l.get("purchase_line_id") or (l.get("product_id") and l["product_id"][0] in fisico)
+                          or str((l.get("account_id") or [0, ""])[1]).startswith("60")}
+                mv = [m for m in mv if m["id"] in buenas]
+                ln = [l for l in ln if l["move_id"][0] in buenas]
             pls = [l["purchase_line_id"][0] for l in ln if l.get("purchase_line_id")]
             pol = {p["id"]: p for p in odoo.search_read("purchase.order.line", [("id", "in", pls)],
                                                         ["order_id", "product_qty", "qty_received", "qty_invoiced", "price_unit"], company_ids=cids)} if pls else {}

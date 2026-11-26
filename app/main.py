@@ -87,6 +87,31 @@ ODOO_URL = os.environ.get("ODOO_URL", "").rstrip("/")
 app = FastAPI(title="Panel Folder", docs_url=None, redoc_url=None)
 app.state.sin_facturas = sin_facturas   # Compras: almacén solo ve albaranes
 app.add_middleware(SessionMiddleware, secret_key=SECRET_FILE.read_text(), max_age=60 * 60 * 24 * 30, same_site="lax")
+
+# Permisos en el servidor (no solo en la pantalla): aunque a alguien le aparezca un menú que no es suyo,
+# los datos de administración y de contabilidad no se le sirven.
+SOLO_ADMIN = ("/api/seg", "/api/dashboard", "/api/odoo_estado", "/api/odoo_pausa", "/api/admin", "/api/actualizar", "/api/diag")
+POR_MODULO = {"/api/bancos": "facturacion", "/api/entre_empresas": "facturacion", "/api/facturar": "facturacion",
+              "/api/vencimientos": "vencimientos", "/api/correo": "correo"}
+
+
+def _permiso_ruta(request: Request):
+    p = request.url.path
+    if p.startswith(SOLO_ADMIN):
+        if not es_admin(current_user(request)):
+            raise HTTPException(403, "No tienes permiso para esto")
+        return
+    for pre, mod in POR_MODULO.items():
+        if p.startswith(pre):
+            u = current_user(request)
+            if not es_admin(u) and mod not in modulos_de(u):
+                raise HTTPException(403, "No tienes permiso para esto")
+            return
+
+
+from fastapi import Depends  # noqa: E402
+
+app.router.dependencies.append(Depends(_permiso_ruta))
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
 
@@ -256,7 +281,15 @@ def yo(request: Request):
     return {"usuario": u, "nombre": nombre_usuario(u), "demo": DEMO, "odoo_url": ODOO_URL, "version": VERSION,
             "puede_actualizar": es_admin(u) and bool(os.environ.get("PANEL_REPO")), "admin": es_admin(u),
             "modulos": modulos_de(u), "viendo_como": u != real, "real": real, "tienda": tienda_de(u),
-            "empresas_ids": [c["id"] for c in allowed_companies(u)]}
+            "empresas_ids": _empresas_ids_seguro(u)}
+
+
+def _empresas_ids_seguro(u):
+    """Si Odoo no contesta, /api/yo tiene que seguir funcionando: si falla, la pantalla enseñaba todos los menús."""
+    try:
+        return [c["id"] for c in allowed_companies(u)]
+    except Exception:
+        return []
 
 
 @app.post("/api/ver_como")

@@ -488,7 +488,13 @@ $('#company').onchange = e => { company = e.target.value; try { localStorage.set
     }
     $('#company').value = company;
     if ($('#company').value !== company) { company = 'all'; $('#company').value = 'all'; }
-  } catch (e) { showErr(e.message); }
+    document.body.classList.add('yo-ok');
+  } catch (e) {
+    // sin saber quién eres no se enseña ningún menú (antes, si fallaba, salían todos)
+    document.querySelectorAll('.side nav a').forEach(a => a.hidden = true);
+    showErr('No se ha podido cargar tu usuario (el panel u Odoo no responden). Recarga la página dentro de un momento.');
+    return;
+  }
   route(); if (MODS.includes('web')) loadWeb(true); if (MODS.includes('whatsapp')) waBadge(); if (MODS.includes('compras')) coBadge(); if (ADMIN && typeof sgBadge === 'function') { sgBadge(); setInterval(sgBadge, 5 * 60 * 1000); }
 })();
 
