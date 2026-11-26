@@ -348,7 +348,7 @@ def setup(app, *, data_dir: Path, odoo, current_user, scope, guard, es_admin, de
 
     def solo_albaranes(u):
         """Almacén y tiendas: de los documentos subidos solo ven albaranes (nada de facturas de acreedores: leasing, bancos…)."""
-        if es_admin(u) or u == "compras":
+        if es_admin(u):
             return False
         if getattr(app.state, "sin_facturas", lambda x: True)(u):
             return True
@@ -1641,6 +1641,8 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
     def facturas(request: Request, company: str = "all"):
         u_, cids = ctx(request, company)
         solo_mercaderia = not es_admin(u_)   # almacén y tiendas: solo compras de mercadería (nada de leasing, bancos, suministros…)
+        if solo_albaranes(u_):   # facturas: solo contabilidad y administrador
+            return []
 
         def run():
             mv = odoo.search_read("account.move", [("move_type", "in", ["in_invoice", "in_refund"]), ("state", "=", "draft")],
@@ -1994,7 +1996,7 @@ th{{background:#f6f1fb}}tr.mal td{{background:#fdecea}}ul{{margin:4px 0;padding-
         albarán -> cuadrado con su pedido, entrada hecha y esperando su factura; factura -> cruzada con sus albaranes o marcada como gasto
         (entonces sale del panel: Mayte la valida desde los borradores de Odoo)."""
         u_, _ = ctx(request, company)
-        solo_alb = getattr(app.state, "sin_facturas", lambda x: False)(u_)   # almacén: solo sus albaranes, nada de facturas
+        solo_alb = solo_albaranes(u_)   # solo contabilidad y administrador ven facturas
         cids = TODAS
         dias = max(dias, 120)
         desde = time.time() - dias * 86400
