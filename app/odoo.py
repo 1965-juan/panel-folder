@@ -1,6 +1,9 @@
 """Cliente mínimo para la API JSON-2 de Odoo 19 (y datos de demostración)."""
 import os
 import datetime as dt
+import threading
+import time
+from collections import Counter, deque
 import httpx
 
 
@@ -19,8 +22,46 @@ class Odoo:
             m = re.findall(r"[0-9a-f]{40}", open(key_file, errors="ignore").read())
             self.key = m[0] if m else ""
         self.client = httpx.Client(timeout=40)
+        # freno: si Odoo contesta 429 (demasiadas peticiones), el panel deja de llamar un rato para no empeorar el bloqueo
+        self.pausa_hasta = 0
+        self.ultimo_429 = 0
+        self.n429 = 0
+        self._lk = threading.Lock()
+        self._ultima = 0.0
+        self.MIN_ENTRE = float(os.environ.get("ODOO_MIN_ENTRE", "0.12"))   # como mucho ~8 peticiones por segundo
+        self.hist = deque(maxlen=5000)   # (hora, "modelo.método") de las últimas peticiones
+
+    def _antes(self, que):
+        ahora = time.time()
+        if ahora < self.pausa_hasta:
+            raise OdooError(f"Odoo nos ha frenado por demasiadas peticiones (429). El panel no le pregunta nada hasta las "
+                            f"{dt.datetime.fromtimestamp(self.pausa_hasta).strftime('%H:%M')}.")
+        with self._lk:   # reparte las peticiones en el tiempo para no hacer ráfagas
+            espera = self._ultima + self.MIN_ENTRE - time.time()
+            if espera > 0:
+                time.sleep(espera)
+            self._ultima = time.time()
+        self.hist.append((self._ultima, que))
+
+    def _freno(self, r):
+        if r.status_code == 429:
+            self.n429 += 1
+            self.ultimo_429 = time.time()
+            self.pausa_hasta = time.time() + min(300 * self.n429, 1800)   # 5 min, 10, 15… hasta 30
+            return True
+        if r.status_code == 200:
+            self.n429 = 0
+        return False
+
+    def estado(self):
+        ahora = time.time()
+        ult = [q for t, q in self.hist if ahora - t < 600]
+        return {"pausado": ahora < self.pausa_hasta, "pausa_hasta": self.pausa_hasta, "ultimo_429": self.ultimo_429,
+                "peticiones_1min": sum(1 for t, _ in self.hist if ahora - t < 60), "peticiones_10min": len(ult),
+                "top_10min": Counter(ult).most_common(15)}
 
     def call(self, model, method, company_ids=None, **params):
+        self._antes(f"{model}.{method}")
         if company_ids:
             ctx = params.setdefault("context", {})
             ctx["allowed_company_ids"] = company_ids
@@ -34,6 +75,7 @@ class Odoo:
                 "User-Agent": "PanelFolder/0.1",
             },
         )
+        self._freno(r)
         if r.status_code != 200:
             try:
                 msg = r.json().get("message") or r.text
@@ -49,10 +91,13 @@ class Odoo:
         ctx.setdefault("lang", "es_ES")
         if company_ids:
             ctx["allowed_company_ids"] = company_ids
+        self._antes(f"{model}.{method}")
         r = self.client.post(f"{self.url}/jsonrpc", json={
             "jsonrpc": "2.0", "method": "call", "id": 1,
             "params": {"service": "object", "method": "execute_kw",
                        "args": [self.db, self.uid(), self.key, model, method, args or [], kwargs]}})
+        if self._freno(r):
+            raise OdooError(f"{model}.{method}: 429 demasiadas peticiones")
         j = r.json()
         if j.get("error"):
             d = j["error"].get("data") or {}

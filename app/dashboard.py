@@ -197,6 +197,14 @@ def setup(app, *, odoo, current_user, guard, es_admin, ventas_datos):
         finally:
             lock.release()
 
+    @app.get("/api/odoo_estado")
+    def odoo_estado(request: Request):
+        """Cuántas peticiones le hace el panel a Odoo y si Odoo nos tiene frenados (429)."""
+        u = current_user(request)
+        if not es_admin(u):
+            raise HTTPException(403, "Solo el administrador")
+        return odoo.estado() if hasattr(odoo, "estado") else {}
+
     @app.get("/api/dashboard")
     def dashboard(request: Request, refrescar_ya: int = 0):
         u = current_user(request)
